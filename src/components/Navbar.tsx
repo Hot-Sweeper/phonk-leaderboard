@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, User, LogOut, LogIn } from "lucide-react";
+import { Flame, Trophy, Shield, Upload, User, LogOut, LogIn } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -37,6 +37,11 @@ export default function Navbar() {
           {session && (
             <Link href="/review" className={linkClass("/review")}>
               <Shield className="w-4 h-4" /> {isPrivileged ? "Review" : "My Requests"}
+            </Link>
+          )}
+          {isPrivileged && (
+            <Link href="/import" className={linkClass("/import")}>
+              <Upload className="w-4 h-4" /> Import
             </Link>
           )}
         </div>

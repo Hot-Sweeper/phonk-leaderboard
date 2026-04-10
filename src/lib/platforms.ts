@@ -85,6 +85,165 @@ export async function fetchYouTubeChannel(
   }
 }
 
+export type YouTubeChannelFull = YouTubeChannelData & {
+  name: string;
+  description: string;
+};
+
+/** Fetch full YouTube channel data including description */
+export async function fetchYouTubeChannelFull(
+  url: string
+): Promise<YouTubeChannelFull | null> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return null;
+
+  const { handle, channelId } = parseYouTubeUrl(url);
+  if (!handle && !channelId) return null;
+
+  const params = new URLSearchParams({
+    part: "snippet,statistics",
+    key: apiKey,
+  });
+  if (handle) params.set("forHandle", handle);
+  else if (channelId) params.set("id", channelId);
+
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/channels?${params}`,
+      { next: { revalidate: 0 } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const item = data.items?.[0];
+    if (!item) return null;
+
+    return {
+      name: item.snippet?.title ?? "",
+      description: item.snippet?.description ?? "",
+      imageUrl:
+        item.snippet?.thumbnails?.high?.url ??
+        item.snippet?.thumbnails?.default?.url ??
+        null,
+      subscriberCount: parseInt(item.statistics?.subscriberCount ?? "0", 10),
+      handle: item.snippet?.customUrl?.replace(/^@/, "") ?? handle ?? null,
+      platformId: item.id ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Extract Spotify URL from text (e.g. YouTube description) */
+export function extractSpotifyUrl(text: string): string | null {
+  const match = text.match(
+    /https?:\/\/open\.spotify\.com\/(?:intl-\w+\/)?artist\/[a-zA-Z0-9]+/
+  );
+  return match?.[0] ?? null;
+}
+
+/** Search Spotify artists by name */
+export async function searchSpotifyArtists(
+  query: string,
+  limit = 5
+): Promise<SpotifyArtistData[]> {
+  const token = await getSpotifyToken();
+  if (!token) return [];
+
+  try {
+    const params = new URLSearchParams({
+      q: query,
+      type: "artist",
+      limit: String(limit),
+    });
+    const res = await fetch(
+      `https://api.spotify.com/v1/search?${params}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.artists?.items ?? []).map(
+      (a: { id: string; name: string; images?: { url: string }[]; followers?: { total: number } }) => ({
+        imageUrl: a.images?.[0]?.url ?? null,
+        followerCount: a.followers?.total ?? 0,
+        name: a.name ?? null,
+        platformId: a.id ?? null,
+      })
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Search YouTube channels by query */
+export async function searchYouTubeChannels(
+  query: string,
+  limit = 5
+): Promise<YouTubeChannelFull[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return [];
+
+  try {
+    // Step 1: search for channels
+    const searchParams = new URLSearchParams({
+      part: "snippet",
+      type: "channel",
+      q: query,
+      maxResults: String(limit),
+      key: apiKey,
+    });
+    const searchRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?${searchParams}`
+    );
+    if (!searchRes.ok) return [];
+    const searchData = await searchRes.json();
+    const channelIds = (searchData.items ?? [])
+      .map((i: { id?: { channelId?: string } }) => i.id?.channelId)
+      .filter(Boolean)
+      .join(",");
+    if (!channelIds) return [];
+
+    // Step 2: get full channel details
+    const detailParams = new URLSearchParams({
+      part: "snippet,statistics",
+      id: channelIds,
+      key: apiKey,
+    });
+    const detailRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/channels?${detailParams}`
+    );
+    if (!detailRes.ok) return [];
+    const detailData = await detailRes.json();
+
+    return (detailData.items ?? []).map(
+      (item: {
+        id: string;
+        snippet?: {
+          title?: string;
+          description?: string;
+          customUrl?: string;
+          thumbnails?: { high?: { url?: string }; default?: { url?: string } };
+        };
+        statistics?: { subscriberCount?: string };
+      }) => ({
+        name: item.snippet?.title ?? "",
+        description: item.snippet?.description ?? "",
+        imageUrl:
+          item.snippet?.thumbnails?.high?.url ??
+          item.snippet?.thumbnails?.default?.url ??
+          null,
+        subscriberCount: parseInt(
+          item.statistics?.subscriberCount ?? "0",
+          10
+        ),
+        handle: item.snippet?.customUrl?.replace(/^@/, "") ?? null,
+        platformId: item.id ?? null,
+      })
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ─── Spotify ───
 
 let spotifyToken: string | null = null;
