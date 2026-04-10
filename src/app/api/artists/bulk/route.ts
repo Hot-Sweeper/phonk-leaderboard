@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
+import { fetchPlatformStats } from "@/lib/platforms";
 
 type BulkArtistInput = {
   name: string;
@@ -56,19 +57,43 @@ export async function POST(req: Request) {
     }
 
     try {
+      const linkEntries: {
+        platform: Platform;
+        url: string;
+        handle: string | null;
+        followerCount: number;
+        platformId: string | null;
+      }[] = [];
+
+      let artistImageUrl = input.imageUrl || null;
+
+      await Promise.all(
+        input.links.map(async (link) => {
+          const stats = await fetchPlatformStats(link.platform, link.url);
+          linkEntries.push({
+            platform: link.platform as Platform,
+            url: link.url.trim(),
+            handle: stats?.handle ?? link.handle ?? null,
+            followerCount: stats?.followerCount ?? link.followerCount ?? 0,
+            platformId: stats?.platformId ?? link.platformId ?? null,
+          });
+
+          if (!artistImageUrl && stats?.imageUrl && link.platform === "YOUTUBE") {
+            artistImageUrl = stats.imageUrl;
+          }
+          if (!artistImageUrl && stats?.imageUrl && link.platform === "SPOTIFY") {
+            artistImageUrl = stats.imageUrl;
+          }
+        })
+      );
+
       const artist = await prisma.artist.create({
         data: {
           name: input.name.trim(),
-          imageUrl: input.imageUrl || null,
+          imageUrl: artistImageUrl,
           addedById: session.user.id,
           links: {
-            create: input.links.map((l) => ({
-              platform: l.platform as Platform,
-              url: l.url,
-              handle: l.handle || null,
-              followerCount: l.followerCount ?? 0,
-              platformId: l.platformId || null,
-            })),
+            create: linkEntries,
           },
         },
         include: { links: true },

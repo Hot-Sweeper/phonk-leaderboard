@@ -45,12 +45,10 @@ type ImportEntry = {
   error?: string;
   youtube: YouTubeInfo | null;
   spotifyMatch: SpotifyResult | null;
-  spotifySuggestions: SpotifyResult[];
   selectedSpotify: SpotifyResult | null;
   spotifyConfirmed: boolean;
   showSpotifySearch: boolean;
   spotifySearchQuery: string;
-  spotifySearchResults: SpotifyResult[];
   spotifySearching: boolean;
   spotifyError?: string;
 };
@@ -115,12 +113,10 @@ export default function ImportPage() {
       status: "loading",
       youtube: null,
       spotifyMatch: null,
-      spotifySuggestions: [],
       selectedSpotify: null,
       spotifyConfirmed: false,
       showSpotifySearch: false,
       spotifySearchQuery: "",
-      spotifySearchResults: [],
       spotifySearching: false,
     }));
 
@@ -144,19 +140,14 @@ export default function ImportPage() {
           continue;
         }
         const data = await res.json();
-        const noSpotifyFound =
-          !data.spotifyMatch &&
-          (!data.spotifySuggestions || data.spotifySuggestions.length === 0);
         updateEntry(entry.id, {
           status: "ready",
           youtube: data.youtube,
           spotifyMatch: data.spotifyMatch,
-          spotifySuggestions: data.spotifySuggestions ?? [],
           selectedSpotify: data.spotifyMatch ?? null,
           spotifyConfirmed: !!data.spotifyMatch,
           spotifySearchQuery: data.youtube?.name ?? "",
-          showSpotifySearch: noSpotifyFound,
-          spotifyError: data.spotifyError ?? undefined,
+          showSpotifySearch: !data.spotifyMatch,
         });
       } catch {
         updateEntry(entry.id, { status: "error", error: "Network error" });
@@ -170,12 +161,10 @@ export default function ImportPage() {
       status: "loading",
       youtube: channel,
       spotifyMatch: null,
-      spotifySuggestions: [],
       selectedSpotify: null,
       spotifyConfirmed: false,
       showSpotifySearch: false,
       spotifySearchQuery: channel.name,
-      spotifySearchResults: [],
       spotifySearching: false,
     };
     setEntries((prev) => [...prev, entry]);
@@ -201,9 +190,9 @@ export default function ImportPage() {
         updateEntry(entry.id, {
           status: "ready",
           spotifyMatch: data.spotifyMatch,
-          spotifySuggestions: data.spotifySuggestions ?? [],
           selectedSpotify: data.spotifyMatch ?? null,
           spotifyConfirmed: !!data.spotifyMatch,
+          showSpotifySearch: !data.spotifyMatch,
         });
       } catch {
         updateEntry(entry.id, { status: "ready" });
@@ -254,54 +243,30 @@ export default function ImportPage() {
   }
 
   async function searchSpotify(entryId: string, query: string) {
-    updateEntry(entryId, { spotifySearching: true, spotifyError: undefined });
-
-    // Detect if it's a Spotify URL
-    const isUrl = query.includes("open.spotify.com/");
-    const body = isUrl ? { url: query.trim() } : { q: query.trim() };
-
-    try {
-      const res = await fetch("/api/artists/search-spotify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        const results = await res.json();
-        if (isUrl && results.length > 0) {
-          // Auto-select when pasting a URL
-          updateEntry(entryId, {
-            selectedSpotify: results[0],
-            spotifyConfirmed: true,
-            showSpotifySearch: false,
-            spotifySearching: false,
-          });
-        } else {
-          updateEntry(entryId, {
-            spotifySearchResults: results,
-            spotifySearching: false,
-          });
-        }
-      } else {
-        const err = await res.json().catch(() => ({}));
-        updateEntry(entryId, {
-          spotifySearching: false,
-          spotifyError: err.error || `Failed (${res.status})`,
-        });
-      }
-    } catch {
-      updateEntry(entryId, {
-        spotifySearching: false,
-        spotifyError: "Network error",
-      });
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) {
+      updateEntry(entryId, { spotifyError: "Paste a Spotify artist URL." });
+      return;
     }
-  }
 
-  function selectSpotify(entryId: string, spotify: SpotifyResult) {
+    if (!trimmedQuery.includes("open.spotify.com/artist/")) {
+      updateEntry(entryId, {
+        spotifyError: "Paste a valid Spotify artist URL.",
+      });
+      return;
+    }
+
     updateEntry(entryId, {
-      selectedSpotify: spotify,
+      selectedSpotify: {
+        name: null,
+        imageUrl: null,
+        followerCount: 0,
+        platformId: null,
+        url: trimmedQuery,
+      },
       spotifyConfirmed: true,
       showSpotifySearch: false,
+      spotifyError: undefined,
     });
   }
 
@@ -659,10 +624,12 @@ function EntryCard({
               <div className="min-w-0">
                 <div className="font-bold text-sm truncate flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  {entry.selectedSpotify.name}
+                  {entry.selectedSpotify.name ?? "Spotify URL added"}
                 </div>
                 <div className="text-xs text-[var(--muted-foreground)] tabular-nums">
-                  {formatCount(entry.selectedSpotify.followerCount)} followers
+                  {entry.selectedSpotify.name
+                    ? `${formatCount(entry.selectedSpotify.followerCount)} followers`
+                    : "Stats will be fetched when you import"}
                 </div>
               </div>
             </div>

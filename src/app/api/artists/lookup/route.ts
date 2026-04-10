@@ -4,7 +4,6 @@ import {
   fetchYouTubeChannelFull,
   extractSpotifyUrl,
   fetchSpotifyArtist,
-  searchSpotifyArtists,
   searchYouTubeChannels,
 } from "@/lib/platforms";
 
@@ -57,24 +56,6 @@ export async function POST(req: Request) {
     }
   }
 
-  // If no Spotify in description, try searching by channel name
-  let spotifySuggestions: Array<Record<string, unknown>> = [];
-  let spotifyError: string | null = null;
-  if (!spotifyMatch) {
-    try {
-      const results = await searchSpotifyArtists(yt.name, 5);
-      spotifySuggestions = results.map((r) => ({
-        ...r,
-        url: `https://open.spotify.com/artist/${r.platformId}`,
-      }));
-    } catch {
-      // Search API likely restricted (403). Not a fatal error —
-      // user can still paste a Spotify URL manually.
-      spotifyError =
-        "Spotify search is restricted for this app. Paste a Spotify artist URL instead.";
-    }
-  }
-
   return NextResponse.json({
     youtube: {
       name: yt.name,
@@ -90,7 +71,5 @@ export async function POST(req: Request) {
           url: spotifyUrl,
         }
       : null,
-    spotifySuggestions,
-    spotifyError,
   });
 }
