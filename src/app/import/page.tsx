@@ -22,6 +22,16 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+function isValidSpotifyArtistUrl(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname !== "open.spotify.com") return false;
+    return /\/(?:intl-[\w-]+\/)?artist\/[a-zA-Z0-9]+/.test(parsedUrl.pathname);
+  } catch {
+    return false;
+  }
+}
+
 type SpotifyResult = {
   name: string | null;
   imageUrl: string | null;
@@ -249,7 +259,7 @@ export default function ImportPage() {
       return;
     }
 
-    if (!trimmedQuery.includes("open.spotify.com/artist/")) {
+    if (!isValidSpotifyArtistUrl(trimmedQuery)) {
       updateEntry(entryId, {
         spotifyError: "Paste a valid Spotify artist URL.",
       });
