@@ -35,9 +35,27 @@ const PLATFORMS = [
   { key: "", label: "All" },
   { key: "YOUTUBE", label: "YouTube", color: "text-red-400" },
   { key: "SPOTIFY", label: "Spotify", color: "text-green-400" },
-  { key: "TIKTOK", label: "TikTok", color: "text-cyan-400" },
-  { key: "INSTAGRAM", label: "Instagram", color: "text-fuchsia-400" },
 ];
+
+const ALL_PLATFORMS = [
+  { key: "YOUTUBE", label: "YouTube" },
+  { key: "SPOTIFY", label: "Spotify" },
+  { key: "TIKTOK", label: "TikTok" },
+  { key: "INSTAGRAM", label: "Instagram" },
+];
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+const PLATFORM_STAT_LABEL: Record<string, string> = {
+  YOUTUBE: "subs",
+  SPOTIFY: "followers",
+  TIKTOK: "followers",
+  INSTAGRAM: "followers",
+};
 
 const PLATFORM_DOT: Record<string, string> = {
   YOUTUBE: "bg-red-400",
@@ -362,7 +380,7 @@ export default function LeaderboardPage() {
         </div>
 
         {/* ── Podium (top 3) ── */}
-        {!loading && top3.length >= 3 && !search && !platform && (
+        {!loading && artists.length >= 3 && !search && !platform && (
           <div className="grid grid-cols-3 gap-4 md:gap-6 mb-12 items-end max-w-2xl mx-auto">
             {top3.map((artist, i) => (
               <PodiumCard
@@ -405,12 +423,12 @@ export default function LeaderboardPage() {
           </div>
         </div>
 
-        {/* ── Leaderboard List (rank 4+) ── */}
+        {/* ── Leaderboard List ── */}
         {loading ? (
           <div className="text-center text-[var(--muted-foreground)] py-20">
             Loading...
           </div>
-        ) : rest.length === 0 && top3.length <= 3 && artists.length === 0 ? (
+        ) : artists.length === 0 ? (
           <div className="text-center text-[var(--muted-foreground)] py-20">
             {search || platform
               ? "No artists match your filters."
@@ -418,8 +436,11 @@ export default function LeaderboardPage() {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {(search || platform ? artists : rest).map((artist, idx) => {
-              const rank = search || platform ? idx : idx + 3;
+            {(() => {
+              const showPodium = !search && !platform && artists.length >= 3;
+              const listArtists = showPodium ? rest : artists;
+              return listArtists.map((artist, idx) => {
+              const rank = showPodium ? idx + 3 : idx;
               const isWatched = watchlistedIds.has(artist.id);
               return (
                 <div
@@ -448,7 +469,7 @@ export default function LeaderboardPage() {
                     )}
                   </Link>
 
-                  {/* Name + platform dots */}
+                  {/* Name + platform stats */}
                   <div className="flex-1 min-w-0">
                     <Link
                       href={`/artist/${artist.id}`}
@@ -456,19 +477,23 @@ export default function LeaderboardPage() {
                     >
                       {artist.name}
                     </Link>
-                    <div className="flex gap-1.5 mt-1">
+                    <div className="flex gap-3 mt-1 flex-wrap">
                       {artist.links.map((l) => (
                         <a
                           key={l.id}
                           href={l.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="group/link flex items-center"
-                          title={l.platform}
+                          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-white transition-colors"
                         >
                           <span
-                            className={`w-2 h-2 rounded-full ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"} group-hover/link:scale-150 transition-transform`}
+                            className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
                           />
+                          {l.followerCount > 0 && (
+                            <span className="tabular-nums">
+                              {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
+                            </span>
+                          )}
                         </a>
                       ))}
                     </div>
@@ -492,7 +517,8 @@ export default function LeaderboardPage() {
                   </button>
                 </div>
               );
-            })}
+            });
+            })()}
           </div>
         )}
       </div>
@@ -588,7 +614,7 @@ export default function LeaderboardPage() {
                     }
                     className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
                   >
-                    {PLATFORMS.filter((p) => p.key).map((p) => (
+                    {ALL_PLATFORMS.map((p) => (
                       <option key={p.key} value={p.key}>
                         {p.label}
                       </option>

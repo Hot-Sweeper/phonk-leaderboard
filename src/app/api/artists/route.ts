@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
+import { fetchPlatformStats } from "@/lib/platforms";
 
 // GET artists with optional search + platform filter
 export async function GET(req: Request) {
@@ -59,20 +60,50 @@ export async function POST(req: Request) {
     );
   }
 
+  // Fetch stats from YouTube + Spotify APIs in parallel
+  const linkEntries: {
+    platform: Platform;
+    url: string;
+    handle: string | null;
+    followerCount: number;
+    platformId: string | null;
+  }[] = [];
+
+  let artistImageUrl = imageUrl?.trim() || null;
+
+  await Promise.all(
+    links.map(
+      async (l: { platform: string; url: string; handle?: string }) => {
+        const stats = await fetchPlatformStats(l.platform, l.url);
+        const entry = {
+          platform: l.platform as Platform,
+          url: l.url.trim(),
+          handle: stats?.handle ?? l.handle?.trim() ?? null,
+          followerCount: stats?.followerCount ?? 0,
+          platformId: stats?.platformId ?? null,
+        };
+        linkEntries.push(entry);
+
+        // Use YouTube profile pic as artist image if none provided
+        if (!artistImageUrl && stats?.imageUrl && l.platform === "YOUTUBE") {
+          artistImageUrl = stats.imageUrl;
+        }
+        // Fallback to Spotify image
+        if (!artistImageUrl && stats?.imageUrl && l.platform === "SPOTIFY") {
+          artistImageUrl = stats.imageUrl;
+        }
+      }
+    )
+  );
+
   const artist = await prisma.artist.create({
     data: {
       name: name.trim(),
-      imageUrl: imageUrl?.trim() || null,
+      imageUrl: artistImageUrl,
       bio: bio?.trim() || null,
       addedById: session.user.id,
       links: {
-        create: links.map(
-          (l: { platform: string; url: string; handle?: string }) => ({
-            platform: l.platform as Platform,
-            url: l.url.trim(),
-            handle: l.handle?.trim() || null,
-          })
-        ),
+        create: linkEntries,
       },
     },
     include: { links: true },

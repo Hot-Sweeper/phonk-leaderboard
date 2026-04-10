@@ -11,7 +11,21 @@ import {
   X,
   Send,
   User,
+  RefreshCw,
 } from "lucide-react";
+
+function formatCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+const STAT_LABELS: Record<string, string> = {
+  YOUTUBE: "subscribers",
+  SPOTIFY: "followers",
+  TIKTOK: "followers",
+  INSTAGRAM: "followers",
+};
 
 const PLATFORM_META: Record<
   string,
@@ -76,6 +90,7 @@ export default function ArtistPage() {
   const [loading, setLoading] = useState(true);
   const [isWatched, setIsWatched] = useState(false);
   const [showSuggest, setShowSuggest] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [suggestPlatform, setSuggestPlatform] = useState("YOUTUBE");
   const [suggestUrl, setSuggestUrl] = useState("");
   const [suggestNote, setSuggestNote] = useState("");
@@ -99,6 +114,13 @@ export default function ArtistPage() {
     loadArtist();
     checkWatchlist();
   }, [loadArtist, checkWatchlist]);
+
+  async function refreshStats() {
+    setRefreshing(true);
+    const res = await fetch(`/api/artists/${id}/refresh`, { method: "POST" });
+    if (res.ok) setArtist(await res.json());
+    setRefreshing(false);
+  }
 
   async function toggleWatchlist() {
     if (!session) return signIn("google");
@@ -210,7 +232,7 @@ export default function ArtistPage() {
                 </p>
               )}
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <button
                   onClick={toggleWatchlist}
                   className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold transition-all ${
@@ -230,6 +252,16 @@ export default function ArtistPage() {
                   </strong>{" "}
                   watchlists
                 </span>
+                {(session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR") && (
+                  <button
+                    onClick={refreshStats}
+                    disabled={refreshing}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
+                    Refresh Stats
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -262,7 +294,7 @@ export default function ArtistPage() {
                     </div>
                     {link.followerCount > 0 && (
                       <div className="text-[var(--muted-foreground)] text-sm mt-1 tabular-nums">
-                        {link.followerCount.toLocaleString()} followers
+                        {formatCount(link.followerCount)} {STAT_LABELS[link.platform] ?? "followers"}
                       </div>
                     )}
                   </div>
