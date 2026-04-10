@@ -267,17 +267,41 @@ export default function ImportPage() {
     }
 
     updateEntry(entryId, {
-      selectedSpotify: {
-        name: null,
-        imageUrl: null,
-        followerCount: 0,
-        platformId: null,
-        url: trimmedQuery,
-      },
-      spotifyConfirmed: true,
-      showSpotifySearch: false,
+      spotifySearching: true,
       spotifyError: undefined,
     });
+
+    try {
+      const res = await fetch("/api/artists/search-spotify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmedQuery }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !Array.isArray(data) || !data[0]) {
+        updateEntry(entryId, {
+          spotifySearching: false,
+          spotifyError:
+            (data as { error?: string } | null)?.error ??
+            "Could not fetch Spotify preview.",
+        });
+        return;
+      }
+
+      updateEntry(entryId, {
+        selectedSpotify: data[0],
+        spotifyConfirmed: true,
+        showSpotifySearch: false,
+        spotifySearching: false,
+        spotifyError: undefined,
+      });
+    } catch {
+      updateEntry(entryId, {
+        spotifySearching: false,
+        spotifyError: "Could not fetch Spotify preview.",
+      });
+    }
   }
 
   function rejectSpotify(entryId: string) {

@@ -20,6 +20,41 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+function extractHandleFromUrl(platform: string, url: string): string | null {
+  try {
+    const parsedUrl = new URL(url);
+
+    if (platform === "TIKTOK") {
+      const match = parsedUrl.pathname.match(/\/@([^/?#]+)/);
+      return match?.[1] ?? null;
+    }
+
+    if (platform === "INSTAGRAM") {
+      const path = parsedUrl.pathname.replace(/\/+$/, "");
+      const match = path.match(/^\/([^/?#]+)/);
+      const handle = match?.[1]?.replace(/^@/, "") ?? null;
+      if (!handle) return null;
+
+      const reservedPaths = new Set([
+        "p",
+        "reel",
+        "reels",
+        "tv",
+        "stories",
+        "explore",
+        "accounts",
+        "direct",
+      ]);
+
+      return reservedPaths.has(handle.toLowerCase()) ? null : handle;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 const STAT_LABELS: Record<string, string> = {
   YOUTUBE: "subscribers",
   SPOTIFY: "followers",
@@ -302,7 +337,9 @@ export default function ArtistPage() {
                       {meta.label}
                     </div>
                     <div className="font-bold text-lg">
-                      {link.handle ? `@${link.handle}` : artist.name}
+                      {link.handle || extractHandleFromUrl(link.platform, link.url)
+                        ? `@${link.handle ?? extractHandleFromUrl(link.platform, link.url)}`
+                        : artist.name}
                     </div>
                     {link.followerCount > 0 && (
                       <div className="text-[var(--muted-foreground)] text-sm mt-1 tabular-nums">

@@ -13,6 +13,7 @@ import {
   X,
   Send,
   ExternalLink,
+  Loader2,
 } from "lucide-react";
 
 type ArtistLink = {
@@ -21,6 +22,18 @@ type ArtistLink = {
   url: string;
   handle: string | null;
   followerCount: number;
+};
+
+type AddLinkInput = {
+  platform: string;
+  url: string;
+  handle: string;
+  spotifyPreviewUrl?: string;
+  spotifyPreviewName?: string | null;
+  spotifyPreviewImageUrl?: string | null;
+  spotifyPreviewFollowerCount?: number;
+  spotifyPreviewLoading?: boolean;
+  spotifyPreviewError?: string | null;
 };
 
 type Artist = {
@@ -48,6 +61,55 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
+}
+
+function isValidSpotifyArtistUrl(url: string): boolean {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname !== "open.spotify.com") return false;
+    return /\/(?:intl-[\w-]+\/)?artist\/[a-zA-Z0-9]+/.test(parsedUrl.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function extractHandleFromUrl(platform: string, url: string): string | null {
+  try {
+    const parsedUrl = new URL(url);
+
+    if (platform === "TIKTOK") {
+      const match = parsedUrl.pathname.match(/\/@([^/?#]+)/);
+      return match?.[1] ?? null;
+    }
+
+    if (platform === "INSTAGRAM") {
+      const path = parsedUrl.pathname.replace(/\/+$/, "");
+      const match = path.match(/^\/([^/?#]+)/);
+      const handle = match?.[1]?.replace(/^@/, "") ?? null;
+      if (!handle) return null;
+
+      const reservedPaths = new Set([
+        "p",
+        "reel",
+        "reels",
+        "tv",
+        "stories",
+        "explore",
+        "accounts",
+        "direct",
+      ]);
+
+      return reservedPaths.has(handle.toLowerCase()) ? null : handle;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getDisplayHandle(link: ArtistLink): string | null {
+  return link.handle ?? extractHandleFromUrl(link.platform, link.url);
 }
 
 const PLATFORM_STAT_LABEL: Record<string, string> = {
@@ -192,7 +254,7 @@ export default function LeaderboardPage() {
   const [requestSent, setRequestSent] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState("");
-  const [addLinks, setAddLinks] = useState([
+  const [addLinks, setAddLinks] = useState<AddLinkInput[]>([
     { platform: "YOUTUBE", url: "", handle: "" },
   ]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -225,6 +287,31 @@ export default function LeaderboardPage() {
     loadArtists();
     loadWatchlist();
   }, [loadArtists, loadWatchlist]);
+
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    addLinks.forEach((link, index) => {
+      const trimmedUrl = link.url.trim();
+      if (link.platform !== "SPOTIFY" || !isValidSpotifyArtistUrl(trimmedUrl)) {
+        return;
+      }
+
+      if (link.spotifyPreviewUrl === trimmedUrl || link.spotifyPreviewLoading) {
+        return;
+      }
+
+      timers.push(
+        setTimeout(() => {
+          void previewSpotifyLink(index, trimmedUrl);
+        }, 350)
+      );
+    });
+
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+    };
+  }, [addLinks]);
 
   function handleSearch(value: string) {
     setSearch(value);
@@ -306,7 +393,7 @@ export default function LeaderboardPage() {
         links: validLinks.map((l) => ({
           platform: l.platform,
           url: l.url,
-          handle: l.handle || undefined,
+          handle: l.handle || extractHandleFromUrl(l.platform, l.url) || undefined,
         })),
       }),
     });
@@ -315,6 +402,74 @@ export default function LeaderboardPage() {
       setAddName("");
       setAddLinks([{ platform: "YOUTUBE", url: "", handle: "" }]);
       loadArtists(search, platform);
+    }
+  }
+
+  async function previewSpotifyLink(index: number, url: string) {
+    setAddLinks((prev) =>
+      prev.map((link, currentIndex) =>
+        currentIndex === index
+          ? {
+              ...link,
+              spotifyPreviewLoading: true,
+              spotifyPreviewError: null,
+            }
+          : link
+      )
+    );
+
+    try {
+      const res = await fetch("/api/artists/search-spotify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => null);
+
+      setAddLinks((prev) =>
+        prev.map((link, currentIndex) => {
+          if (currentIndex !== index || link.url.trim() !== url) return link;
+
+          if (!res.ok || !Array.isArray(data) || !data[0]) {
+            return {
+              ...link,
+              spotifyPreviewUrl: undefined,
+              spotifyPreviewLoading: false,
+              spotifyPreviewName: null,
+              spotifyPreviewImageUrl: null,
+              spotifyPreviewFollowerCount: 0,
+              spotifyPreviewError:
+                (data as { error?: string } | null)?.error ?? "Could not fetch Spotify preview.",
+            };
+          }
+
+          return {
+            ...link,
+            spotifyPreviewUrl: url,
+            spotifyPreviewLoading: false,
+            spotifyPreviewError: null,
+            spotifyPreviewName: data[0].name ?? null,
+            spotifyPreviewImageUrl: data[0].imageUrl ?? null,
+            spotifyPreviewFollowerCount: data[0].followerCount ?? 0,
+          };
+        })
+      );
+    } catch {
+      setAddLinks((prev) =>
+        prev.map((link, currentIndex) =>
+          currentIndex === index && link.url.trim() === url
+            ? {
+                ...link,
+                spotifyPreviewUrl: undefined,
+                spotifyPreviewLoading: false,
+                spotifyPreviewName: null,
+                spotifyPreviewImageUrl: null,
+                spotifyPreviewFollowerCount: 0,
+                spotifyPreviewError: "Could not fetch Spotify preview.",
+              }
+            : link
+        )
+      );
     }
   }
 
@@ -512,8 +667,8 @@ export default function LeaderboardPage() {
                             <span className="tabular-nums">
                               {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
                             </span>
-                          ) : l.handle ? (
-                            <span>@{l.handle}</span>
+                          ) : getDisplayHandle(l) ? (
+                            <span>@{getDisplayHandle(l)}</span>
                           ) : null}
                         </a>
                       ))}
@@ -628,47 +783,105 @@ export default function LeaderboardPage() {
                 Platform Links
               </div>
               {addLinks.map((link, i) => (
-                <div key={i} className="flex gap-2">
-                  <select
-                    value={link.platform}
-                    onChange={(e) =>
-                      setAddLinks((prev) =>
-                        prev.map((l, j) =>
-                          j === i ? { ...l, platform: e.target.value } : l
+                <div key={i} className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <select
+                      value={link.platform}
+                      onChange={(e) =>
+                        setAddLinks((prev) =>
+                          prev.map((l, j) =>
+                            j === i
+                              ? {
+                                  ...l,
+                                  platform: e.target.value,
+                                  spotifyPreviewUrl: undefined,
+                                  spotifyPreviewName: null,
+                                  spotifyPreviewImageUrl: null,
+                                  spotifyPreviewFollowerCount: 0,
+                                  spotifyPreviewLoading: false,
+                                  spotifyPreviewError: null,
+                                }
+                              : l
+                          )
                         )
-                      )
-                    }
-                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
-                  >
-                    {ALL_PLATFORMS.map((p) => (
-                      <option key={p.key} value={p.key}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    required
-                    placeholder="URL"
-                    value={link.url}
-                    onChange={(e) =>
-                      setAddLinks((prev) =>
-                        prev.map((l, j) =>
-                          j === i ? { ...l, url: e.target.value } : l
-                        )
-                      )
-                    }
-                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
-                  />
-                  {addLinks.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setAddLinks((prev) => prev.filter((_, j) => j !== i))
                       }
-                      className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
+                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
                     >
-                      <X className="w-4 h-4" />
-                    </button>
+                      {ALL_PLATFORMS.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      required
+                      placeholder="URL"
+                      value={link.url}
+                      onChange={(e) =>
+                        setAddLinks((prev) =>
+                          prev.map((l, j) =>
+                            j === i
+                              ? {
+                                  ...l,
+                                  url: e.target.value,
+                                  spotifyPreviewUrl: undefined,
+                                  spotifyPreviewName: null,
+                                  spotifyPreviewImageUrl: null,
+                                  spotifyPreviewFollowerCount: 0,
+                                  spotifyPreviewLoading: false,
+                                  spotifyPreviewError: null,
+                                }
+                              : l
+                          )
+                        )
+                      }
+                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+                    />
+                    {addLinks.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAddLinks((prev) => prev.filter((_, j) => j !== i))
+                        }
+                        className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {link.platform === "SPOTIFY" && link.url.trim() && (
+                    <div className="rounded-xl border border-[var(--muted)] bg-[var(--muted)]/50 px-3 py-2.5 text-sm">
+                      {link.spotifyPreviewLoading ? (
+                        <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Looking up Spotify artist...
+                        </div>
+                      ) : link.spotifyPreviewName ? (
+                        <div className="flex items-center gap-3">
+                          {link.spotifyPreviewImageUrl ? (
+                            <img
+                              src={link.spotifyPreviewImageUrl}
+                              alt={link.spotifyPreviewName}
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-green-950/60" />
+                          )}
+                          <div>
+                            <div className="font-bold text-white">{link.spotifyPreviewName}</div>
+                            <div className="text-[var(--muted-foreground)] tabular-nums">
+                              {formatCount(link.spotifyPreviewFollowerCount ?? 0)} followers
+                            </div>
+                          </div>
+                        </div>
+                      ) : link.spotifyPreviewError ? (
+                        <div className="text-red-400">{link.spotifyPreviewError}</div>
+                      ) : isValidSpotifyArtistUrl(link.url) ? (
+                        <div className="text-[var(--muted-foreground)]">Fetching Spotify preview...</div>
+                      ) : (
+                        <div className="text-[var(--muted-foreground)]">Paste a Spotify artist URL to preview name and followers.</div>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}
