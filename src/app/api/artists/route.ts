@@ -15,12 +15,12 @@ async function enrichLink<T extends {
 }>(link: T): Promise<T> {
   const needsSpotifyRefresh =
     link.platform === "SPOTIFY" &&
-    (link.followerCount === 0 || link.platformId === null);
-  const needsHandleRefresh =
+    (link.followerCount === 0 || link.platformId === null || link.monthlyListeners === 0);
+  const needsSocialRefresh =
     (link.platform === "TIKTOK" || link.platform === "INSTAGRAM") &&
-    !link.handle;
+    (!link.handle || link.followerCount === 0);
 
-  if (!needsSpotifyRefresh && !needsHandleRefresh) {
+  if (!needsSpotifyRefresh && !needsSocialRefresh) {
     return link;
   }
 

@@ -214,14 +214,27 @@ function PodiumCard({
         </Link>
 
         {/* Platform dots */}
-        <div className="flex gap-1.5 mt-2">
-          {artist.links.map((l) => (
-            <span
-              key={l.id}
-              className={`w-2 h-2 rounded-full ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
-              title={l.platform}
-            />
-          ))}
+        <div className="flex flex-col items-center gap-1 mt-2">
+          {(() => {
+            const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
+            if (spotifyLink && spotifyLink.monthlyListeners > 0) {
+              return (
+                <span className="text-xs text-green-400 font-bold tabular-nums">
+                  {formatCount(spotifyLink.monthlyListeners)} listeners
+                </span>
+              );
+            }
+            return null;
+          })()}
+          <div className="flex gap-1.5">
+            {artist.links.map((l) => (
+              <span
+                key={l.id}
+                className={`w-2 h-2 rounded-full ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
+                title={`${l.platform}: ${formatCount(l.followerCount)}`}
+              />
+            ))}
+          </div>
         </div>
 
         {/* Watchlist */}
