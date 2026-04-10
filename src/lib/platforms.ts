@@ -17,6 +17,12 @@ type SpotifyArtistData = {
   platformId: string | null;
 };
 
+function parseLooseCount(value: string | null | undefined): number {
+  if (!value) return 0;
+  const digits = value.replace(/[^\d]/g, "");
+  return digits ? parseInt(digits, 10) : 0;
+}
+
 // ─── YouTube ───
 
 /** Extract a YouTube handle or channel ID from a URL */
@@ -299,6 +305,49 @@ export function parseSpotifyUrl(url: string): string | null {
   }
 }
 
+async function fetchSpotifyArtistPageFallback(
+  url: string,
+  artistId: string
+): Promise<SpotifyArtistData | null> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+      },
+      next: { revalidate: 0 },
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const normalizedHtml = html.replace(/\s+/g, " ");
+
+    const titleMatch =
+      normalizedHtml.match(/<meta property="og:title" content="([^"]+)"/i) ??
+      normalizedHtml.match(/<title>([^<]+)<\/title>/i);
+    const imageMatch = normalizedHtml.match(
+      /<meta property="og:image" content="([^"]+)"/i
+    );
+    const followerMatch =
+      normalizedHtml.match(/([0-9][0-9.,]*)\s*Followers/i) ??
+      normalizedHtml.match(/Followers[^0-9]{0,40}([0-9][0-9.,]*)/i);
+
+    const name = titleMatch?.[1]
+      ?.replace(/\s*\|\s*Spotify.*$/i, "")
+      .trim() ?? null;
+
+    return {
+      imageUrl: imageMatch?.[1] ?? null,
+      followerCount: parseLooseCount(followerMatch?.[1]),
+      name,
+      platformId: artistId,
+    };
+  } catch (err) {
+    console.error("[Spotify] Page fallback failed:", err);
+    return null;
+  }
+}
+
 export function extractSocialHandle(
   platform: string,
   url: string
@@ -345,27 +394,33 @@ export async function fetchSpotifyArtist(
   if (!artistId) return null;
 
   const token = await getSpotifyToken();
-  if (!token) return null;
+  if (token) {
+    try {
+      const res = await fetch(
+        `https://api.spotify.com/v1/artists/${artistId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
 
-  try {
-    const res = await fetch(
-      `https://api.spotify.com/v1/artists/${artistId}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
+        return {
+          imageUrl: data.images?.[0]?.url ?? null,
+          followerCount: data.followers?.total ?? 0,
+          name: data.name ?? null,
+          platformId: data.id ?? null,
+        };
       }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
 
-    return {
-      imageUrl: data.images?.[0]?.url ?? null,
-      followerCount: data.followers?.total ?? 0,
-      name: data.name ?? null,
-      platformId: data.id ?? null,
-    };
-  } catch {
-    return null;
+      const text = await res.text().catch(() => "");
+      console.error(`[Spotify] Artist lookup failed: ${res.status} ${text}`);
+    } catch (err) {
+      console.error("[Spotify] Artist lookup error:", err);
+    }
   }
+
+  return fetchSpotifyArtistPageFallback(url, artistId);
 }
 
 // ─── Combined ───
