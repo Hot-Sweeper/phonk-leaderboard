@@ -2,11 +2,14 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Music, User, LogOut, LogIn } from "lucide-react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
   const path = usePathname();
+
+  const isPrivileged =
+    session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
 
   const linkClass = (href: string) =>
     `flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
@@ -29,18 +32,20 @@ export default function Navbar() {
         {/* Nav links */}
         <div className="hidden sm:flex items-center gap-1">
           <Link href="/" className={linkClass("/")}>
-            <Trophy className="w-4 h-4" /> Channels
+            <Trophy className="w-4 h-4" /> Leaderboard
           </Link>
-          <Link href="/songs" className={linkClass("/songs")}>
-            <Music className="w-4 h-4" /> Songs
-          </Link>
+          {session && (
+            <Link href="/review" className={linkClass("/review")}>
+              <Shield className="w-4 h-4" /> {isPrivileged ? "Review" : "My Requests"}
+            </Link>
+          )}
         </div>
 
         {/* Auth */}
         <div className="flex items-center gap-3">
           {session ? (
             <>
-              <Link href="/profile" className="flex items-center gap-2">
+              <Link href="/review" className="flex items-center gap-2">
                 {session.user.image ? (
                   <img
                     src={session.user.image}
@@ -69,7 +74,7 @@ export default function Navbar() {
               onClick={() => signIn("google")}
               className="flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--accent)] hover:bg-[#a21caf] text-white text-sm font-bold transition-all shadow-[0_0_15px_var(--accent-glow)]"
             >
-              <LogIn className="w-4 h-4" /> Sign in with YouTube
+              <LogIn className="w-4 h-4" /> Sign In
             </button>
           )}
         </div>

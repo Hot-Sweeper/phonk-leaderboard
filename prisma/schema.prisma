@@ -41,24 +41,17 @@ model VerificationToken {
 }
 
 model User {
-  id                String    @id @default(cuid())
-  name              String?
-  email             String?   @unique
-  emailVerified     DateTime?
-  image             String?
-  role              Role      @default(USER)
-  bio               String?
-  youtubeChannelId  String?   @unique
-  youtubeChannelUrl String?
-  spotifyUrl        String?
-  appleMusicUrl     String?
-  instagramUrl      String?
-  tiktokUrl         String?
-  accounts          Account[]
-  sessions          Session[]
-  channel           Channel?
-  votes             Vote[]
-  createdAt         DateTime  @default(now())
+  id              String           @id @default(cuid())
+  name            String?
+  email           String?          @unique
+  emailVerified   DateTime?
+  image           String?
+  role            Role             @default(USER)
+  accounts        Account[]
+  sessions        Session[]
+  watchlist       Watchlist[]
+  channelRequests ChannelRequest[]
+  createdAt       DateTime         @default(now())
 }
 
 enum Role {
@@ -68,50 +61,47 @@ enum Role {
 }
 
 model Channel {
-  id              String   @id @default(cuid())
-  youtubeId       String   @unique
-  url             String   @unique
+  id              String      @id @default(cuid())
+  youtubeId       String      @unique
+  url             String      @unique
   name            String
+  handle          String?
   thumbnailUrl    String?
-  subscriberCount Int      @default(0)
-  totalViews      BigInt   @default(0)
-  addedById       String   @unique
-  addedBy         User     @relation(fields: [addedById], references: [id], onDelete: Cascade)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  subscriberCount Int         @default(0)
+  totalViews      BigInt      @default(0)
+  watchlistCount  Int         @default(0)
+  addedById       String
+  watchlistedBy   Watchlist[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 }
 
-model Song {
-  id            String   @id @default(cuid())
-  title         String
-  artist        String
-  genre         Genre    @default(PHONK)
-  youtubeUrl    String?
-  spotifyUrl    String?
-  coverUrl      String?
-  voteCount     Int      @default(0)
-  votes         Vote[]
-  submittedById String
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-}
-
-enum Genre {
-  PHONK
-  FUNK
-  DRIFT_PHONK
-  BRAZILIAN_PHONK
-  MEMPHIS
-  OTHER
-}
-
-model Vote {
+model Watchlist {
   id        String   @id @default(cuid())
   userId    String
-  songId    String
+  channelId String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  song      Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@unique([userId, songId])
+  @@unique([userId, channelId])
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ChannelRequest {
+  id          String        @id @default(cuid())
+  url         String
+  reason      String?
+  status      RequestStatus @default(PENDING)
+  reviewedBy  String?
+  reviewNote  String?
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 }
