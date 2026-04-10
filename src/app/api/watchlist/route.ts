@@ -2,25 +2,24 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-// Add a channel to your watchlist
 export async function POST(req: Request) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { channelId } = await req.json();
-  if (!channelId) {
-    return NextResponse.json({ error: "channelId required" }, { status: 400 });
+  const { artistId } = await req.json();
+  if (!artistId) {
+    return NextResponse.json({ error: "artistId required" }, { status: 400 });
   }
 
   try {
     await prisma.$transaction([
       prisma.watchlist.create({
-        data: { userId: session.user.id, channelId },
+        data: { userId: session.user.id, artistId },
       }),
-      prisma.channel.update({
-        where: { id: channelId },
+      prisma.artist.update({
+        where: { id: artistId },
         data: { watchlistCount: { increment: 1 } },
       }),
     ]);
@@ -33,27 +32,26 @@ export async function POST(req: Request) {
   }
 }
 
-// Remove a channel from your watchlist
 export async function DELETE(req: Request) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { channelId } = await req.json();
-  if (!channelId) {
-    return NextResponse.json({ error: "channelId required" }, { status: 400 });
+  const { artistId } = await req.json();
+  if (!artistId) {
+    return NextResponse.json({ error: "artistId required" }, { status: 400 });
   }
 
   try {
     await prisma.$transaction([
       prisma.watchlist.delete({
         where: {
-          userId_channelId: { userId: session.user.id, channelId },
+          userId_artistId: { userId: session.user.id, artistId },
         },
       }),
-      prisma.channel.update({
-        where: { id: channelId },
+      prisma.artist.update({
+        where: { id: artistId },
         data: { watchlistCount: { decrement: 1 } },
       }),
     ]);
@@ -66,7 +64,6 @@ export async function DELETE(req: Request) {
   }
 }
 
-// Get user's watchlisted channel IDs
 export async function GET() {
   const session = await auth();
   if (!session) {
@@ -75,8 +72,8 @@ export async function GET() {
 
   const items = await prisma.watchlist.findMany({
     where: { userId: session.user.id },
-    select: { channelId: true },
+    select: { artistId: true },
   });
 
-  return NextResponse.json(items.map((w) => w.channelId));
+  return NextResponse.json(items.map((w) => w.artistId));
 }

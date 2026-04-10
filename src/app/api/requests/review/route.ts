@@ -2,30 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-
-async function fetchYouTubeChannel(handle: string) {
-  if (!YOUTUBE_API_KEY) return null;
-  const url = new URL("https://www.googleapis.com/youtube/v3/channels");
-  url.searchParams.set("part", "snippet,statistics");
-  url.searchParams.set("forHandle", handle);
-  url.searchParams.set("key", YOUTUBE_API_KEY);
-  const res = await fetch(url.toString());
-  if (!res.ok) return null;
-  const data = await res.json();
-  const item = data.items?.[0];
-  if (!item) return null;
-  return {
-    youtubeId: item.id as string,
-    name: item.snippet.title as string,
-    handle,
-    thumbnailUrl: item.snippet.thumbnails?.default?.url as string | undefined,
-    subscriberCount: parseInt(item.statistics?.subscriberCount ?? "0", 10),
-    totalViews: BigInt(item.statistics?.viewCount ?? "0"),
-  };
-}
-
-// PATCH — approve or reject a request
+// PATCH — approve or reject an artist request or link suggestion
 export async function PATCH(req: Request) {
   const session = await auth();
   if (!session) {
@@ -38,15 +15,64 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { requestId, action, reviewNote } = await req.json();
-  if (!requestId || !["approve", "reject"].includes(action)) {
-    return NextResponse.json({ error: "Invalid input." }, { status: 400 });
+  const { requestId, suggestionId, action, reviewNote } = await req.json();
+  if (!["approve", "reject"].includes(action)) {
+    return NextResponse.json({ error: "Invalid action." }, { status: 400 });
   }
 
-  const channelRequest = await prisma.channelRequest.findUnique({
+  // Handle link suggestion review
+  if (suggestionId) {
+    const suggestion = await prisma.linkSuggestion.findUnique({
+      where: { id: suggestionId },
+    });
+    if (!suggestion || suggestion.status !== "PENDING") {
+      return NextResponse.json(
+        { error: "Suggestion not found or already reviewed." },
+        { status: 404 }
+      );
+    }
+
+    if (action === "reject") {
+      await prisma.linkSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: "REJECTED", reviewedBy: session.user.id },
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    // Approve: upsert the artist link
+    await prisma.$transaction([
+      prisma.artistLink.upsert({
+        where: {
+          artistId_platform: {
+            artistId: suggestion.artistId,
+            platform: suggestion.platform,
+          },
+        },
+        update: { url: suggestion.url },
+        create: {
+          artistId: suggestion.artistId,
+          platform: suggestion.platform,
+          url: suggestion.url,
+        },
+      }),
+      prisma.linkSuggestion.update({
+        where: { id: suggestionId },
+        data: { status: "APPROVED", reviewedBy: session.user.id },
+      }),
+    ]);
+    return NextResponse.json({ success: true });
+  }
+
+  // Handle artist request review
+  if (!requestId) {
+    return NextResponse.json({ error: "requestId or suggestionId required." }, { status: 400 });
+  }
+
+  const artistRequest = await prisma.artistRequest.findUnique({
     where: { id: requestId },
   });
-  if (!channelRequest || channelRequest.status !== "PENDING") {
+  if (!artistRequest || artistRequest.status !== "PENDING") {
     return NextResponse.json(
       { error: "Request not found or already reviewed." },
       { status: 404 }
@@ -54,7 +80,7 @@ export async function PATCH(req: Request) {
   }
 
   if (action === "reject") {
-    const updated = await prisma.channelRequest.update({
+    await prisma.artistRequest.update({
       where: { id: requestId },
       data: {
         status: "REJECTED",
@@ -62,66 +88,54 @@ export async function PATCH(req: Request) {
         reviewNote: reviewNote?.trim() || null,
       },
     });
-    return NextResponse.json(updated);
+    return NextResponse.json({ success: true });
   }
 
-  // Approve: create the channel
-  const match = channelRequest.url.match(/@([\w.-]+)/);
-  const handle = match?.[1];
+  // Approve: parse links and create artist
+  const linkLines = artistRequest.links
+    .split(/[\n,]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
 
-  if (!handle) {
-    return NextResponse.json(
-      { error: "Could not find a YouTube handle in the URL." },
-      { status: 400 }
-    );
+  const parsedLinks: { platform: string; url: string; handle?: string }[] = [];
+  for (const link of linkLines) {
+    if (link.includes("youtube.com") || link.includes("youtu.be")) {
+      const m = link.match(/@([\w.-]+)/);
+      parsedLinks.push({ platform: "YOUTUBE", url: link, handle: m?.[1] });
+    } else if (link.includes("spotify.com")) {
+      parsedLinks.push({ platform: "SPOTIFY", url: link });
+    } else if (link.includes("tiktok.com")) {
+      const m = link.match(/@([\w.-]+)/);
+      parsedLinks.push({ platform: "TIKTOK", url: link, handle: m?.[1] });
+    } else if (link.includes("instagram.com")) {
+      const m = link.match(/instagram\.com\/([\w.-]+)/);
+      parsedLinks.push({ platform: "INSTAGRAM", url: link, handle: m?.[1] });
+    }
   }
 
-  // Check duplicate
-  const existing = await prisma.channel.findFirst({
-    where: { OR: [{ url: channelRequest.url }, { handle }] },
+  const artist = await prisma.artist.create({
+    data: {
+      name: artistRequest.name,
+      addedById: session.user.id,
+      links: {
+        create: parsedLinks.map((l) => ({
+          platform: l.platform as "YOUTUBE" | "SPOTIFY" | "TIKTOK" | "INSTAGRAM",
+          url: l.url,
+          handle: l.handle || null,
+        })),
+      },
+    },
+    include: { links: true },
   });
-  if (existing) {
-    await prisma.channelRequest.update({
-      where: { id: requestId },
-      data: {
-        status: "REJECTED",
-        reviewedBy: session.user.id,
-        reviewNote: "Channel already exists on the leaderboard.",
-      },
-    });
-    return NextResponse.json(
-      { error: "Channel already on the leaderboard." },
-      { status: 409 }
-    );
-  }
 
-  const ytData = await fetchYouTubeChannel(handle);
-
-  const [channel] = await prisma.$transaction([
-    prisma.channel.create({
-      data: {
-        youtubeId: ytData?.youtubeId ?? handle,
-        url: channelRequest.url,
-        name: ytData?.name ?? handle,
-        handle: ytData?.handle ?? handle,
-        thumbnailUrl: ytData?.thumbnailUrl,
-        subscriberCount: ytData?.subscriberCount ?? 0,
-        totalViews: ytData?.totalViews ?? BigInt(0),
-        addedById: session.user.id,
-      },
-    }),
-    prisma.channelRequest.update({
-      where: { id: requestId },
-      data: {
-        status: "APPROVED",
-        reviewedBy: session.user.id,
-        reviewNote: reviewNote?.trim() || null,
-      },
-    }),
-  ]);
-
-  return NextResponse.json({
-    ...channel,
-    totalViews: channel.totalViews.toString(),
+  await prisma.artistRequest.update({
+    where: { id: requestId },
+    data: {
+      status: "APPROVED",
+      reviewedBy: session.user.id,
+      reviewNote: reviewNote?.trim() || null,
+    },
   });
+
+  return NextResponse.json(artist);
 }

@@ -50,7 +50,8 @@ model User {
   accounts        Account[]
   sessions        Session[]
   watchlist       Watchlist[]
-  channelRequests ChannelRequest[]
+  artistRequests  ArtistRequest[]
+  linkSuggestions LinkSuggestion[]
   createdAt       DateTime         @default(now())
 }
 
@@ -60,31 +61,51 @@ enum Role {
   ADMIN
 }
 
-model Channel {
-  id              String      @id @default(cuid())
-  youtubeId       String      @unique
-  url             String      @unique
-  name            String
-  handle          String?
-  thumbnailUrl    String?
-  subscriberCount Int         @default(0)
-  totalViews      BigInt      @default(0)
-  watchlistCount  Int         @default(0)
-  addedById       String
-  watchlistedBy   Watchlist[]
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+enum Platform {
+  YOUTUBE
+  SPOTIFY
+  TIKTOK
+  INSTAGRAM
+}
+
+model Artist {
+  id             String           @id @default(cuid())
+  name           String
+  imageUrl       String?
+  bio            String?
+  watchlistCount Int              @default(0)
+  addedById      String
+  links          ArtistLink[]
+  watchlistedBy  Watchlist[]
+  suggestions    LinkSuggestion[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+}
+
+model ArtistLink {
+  id             String   @id @default(cuid())
+  artistId       String
+  platform       Platform
+  url            String
+  handle         String?
+  followerCount  Int      @default(0)
+  platformId     String?
+  artist         Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([artistId, platform])
 }
 
 model Watchlist {
   id        String   @id @default(cuid())
   userId    String
-  channelId String
+  artistId  String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
-  @@unique([userId, channelId])
+  @@unique([userId, artistId])
 }
 
 enum RequestStatus {
@@ -93,15 +114,31 @@ enum RequestStatus {
   REJECTED
 }
 
-model ChannelRequest {
-  id          String        @id @default(cuid())
-  url         String
-  reason      String?
-  status      RequestStatus @default(PENDING)
-  reviewedBy  String?
-  reviewNote  String?
-  userId      String
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+model ArtistRequest {
+  id         String        @id @default(cuid())
+  name       String
+  links      String
+  reason     String?
+  status     RequestStatus @default(PENDING)
+  reviewedBy String?
+  reviewNote String?
+  userId     String
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+}
+
+model LinkSuggestion {
+  id         String        @id @default(cuid())
+  artistId   String
+  platform   Platform
+  url        String
+  note       String?
+  status     RequestStatus @default(PENDING)
+  reviewedBy String?
+  userId     String
+  artist     Artist        @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
 }
