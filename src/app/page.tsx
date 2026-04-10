@@ -70,11 +70,13 @@ function PodiumCard({
   rank,
   isWatched,
   onToggle,
+  toggling,
 }: {
   artist: Artist;
   rank: number;
   isWatched: boolean;
   onToggle: () => void;
+  toggling: boolean;
 }) {
   const heights = ["h-52", "h-44", "h-40"];
   const rings = [
@@ -155,13 +157,18 @@ function PodiumCard({
         {/* Watchlist */}
         <button
           onClick={onToggle}
-          className={`mt-auto mb-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+          disabled={toggling}
+          className={`mt-auto mb-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-60 ${
             isWatched
               ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]"
               : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"
           }`}
         >
-          <Star className={`w-3.5 h-3.5 ${isWatched ? "fill-current" : ""}`} />
+          {toggling ? (
+            <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <Star className={`w-3.5 h-3.5 ${isWatched ? "fill-current" : ""}`} />
+          )}
           {artist.watchlistCount}
         </button>
       </div>
@@ -177,6 +184,7 @@ export default function LeaderboardPage() {
   const [search, setSearch] = useState("");
   const [platform, setPlatform] = useState("");
   const [loading, setLoading] = useState(true);
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [showRequest, setShowRequest] = useState(false);
   const [reqName, setReqName] = useState("");
   const [reqLinks, setReqLinks] = useState("");
@@ -235,25 +243,35 @@ export default function LeaderboardPage() {
 
   async function toggleWatchlist(artistId: string) {
     if (!session) return signIn("google");
+    if (togglingIds.has(artistId)) return;
+    setTogglingIds((prev) => new Set(prev).add(artistId));
     const isWatched = watchlistedIds.has(artistId);
-    const res = await fetch("/api/watchlist", {
-      method: isWatched ? "DELETE" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artistId }),
-    });
-    if (res.ok) {
-      setWatchlistedIds((prev) => {
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: isWatched ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artistId }),
+      });
+      if (res.ok) {
+        setWatchlistedIds((prev) => {
+          const next = new Set(prev);
+          isWatched ? next.delete(artistId) : next.add(artistId);
+          return next;
+        });
+        setArtists((prev) =>
+          prev.map((a) =>
+            a.id === artistId
+              ? { ...a, watchlistCount: a.watchlistCount + (isWatched ? -1 : 1) }
+              : a
+          )
+        );
+      }
+    } finally {
+      setTogglingIds((prev) => {
         const next = new Set(prev);
-        isWatched ? next.delete(artistId) : next.add(artistId);
+        next.delete(artistId);
         return next;
       });
-      setArtists((prev) =>
-        prev.map((a) =>
-          a.id === artistId
-            ? { ...a, watchlistCount: a.watchlistCount + (isWatched ? -1 : 1) }
-            : a
-        )
-      );
     }
   }
 
@@ -389,6 +407,7 @@ export default function LeaderboardPage() {
                 rank={i}
                 isWatched={watchlistedIds.has(artist.id)}
                 onToggle={() => toggleWatchlist(artist.id)}
+                toggling={togglingIds.has(artist.id)}
               />
             ))}
           </div>
@@ -489,11 +508,13 @@ export default function LeaderboardPage() {
                           <span
                             className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
                           />
-                          {l.followerCount > 0 && (
+                          {l.followerCount > 0 ? (
                             <span className="tabular-nums">
                               {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
                             </span>
-                          )}
+                          ) : l.handle ? (
+                            <span>@{l.handle}</span>
+                          ) : null}
                         </a>
                       ))}
                     </div>
@@ -502,15 +523,20 @@ export default function LeaderboardPage() {
                   {/* Watchlist */}
                   <button
                     onClick={() => toggleWatchlist(artist.id)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all shrink-0 ${
+                    disabled={togglingIds.has(artist.id)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all shrink-0 disabled:opacity-60 ${
                       isWatched
                         ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]"
                         : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"
                     }`}
                   >
-                    <Star
-                      className={`w-4 h-4 ${isWatched ? "fill-current" : ""}`}
-                    />
+                    {togglingIds.has(artist.id) ? (
+                      <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Star
+                        className={`w-4 h-4 ${isWatched ? "fill-current" : ""}`}
+                      />
+                    )}
                     <span className="tabular-nums">
                       {artist.watchlistCount}
                     </span>

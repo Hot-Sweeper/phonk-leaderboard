@@ -89,6 +89,7 @@ export default function ArtistPage() {
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [isWatched, setIsWatched] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [showSuggest, setShowSuggest] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [suggestPlatform, setSuggestPlatform] = useState("YOUTUBE");
@@ -124,17 +125,23 @@ export default function ArtistPage() {
 
   async function toggleWatchlist() {
     if (!session) return signIn("google");
-    const res = await fetch("/api/watchlist", {
-      method: isWatched ? "DELETE" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ artistId: id }),
-    });
-    if (res.ok && artist) {
-      setIsWatched(!isWatched);
-      setArtist({
-        ...artist,
-        watchlistCount: artist.watchlistCount + (isWatched ? -1 : 1),
+    if (toggling) return;
+    setToggling(true);
+    try {
+      const res = await fetch("/api/watchlist", {
+        method: isWatched ? "DELETE" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ artistId: id }),
       });
+      if (res.ok && artist) {
+        setIsWatched(!isWatched);
+        setArtist({
+          ...artist,
+          watchlistCount: artist.watchlistCount + (isWatched ? -1 : 1),
+        });
+      }
+    } finally {
+      setToggling(false);
     }
   }
 
@@ -235,15 +242,20 @@ export default function ArtistPage() {
               <div className="flex items-center gap-4 flex-wrap">
                 <button
                   onClick={toggleWatchlist}
-                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold transition-all ${
+                  disabled={toggling}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold transition-all disabled:opacity-60 ${
                     isWatched
                       ? "bg-[var(--accent)] text-white shadow-[0_0_20px_var(--accent-glow)]"
                       : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-zinc-700 hover:text-white"
                   }`}
                 >
-                  <Star
-                    className={`w-5 h-5 ${isWatched ? "fill-current" : ""}`}
-                  />
+                  {toggling ? (
+                    <span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Star
+                      className={`w-5 h-5 ${isWatched ? "fill-current" : ""}`}
+                    />
+                  )}
                   {isWatched ? "Watching" : "Add to Watchlist"}
                 </button>
                 <span className="text-[var(--muted-foreground)] text-sm tabular-nums">
