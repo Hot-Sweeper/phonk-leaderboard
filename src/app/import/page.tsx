@@ -254,29 +254,44 @@ export default function ImportPage() {
 
   async function searchSpotify(entryId: string, query: string) {
     updateEntry(entryId, { spotifySearching: true, spotifyError: undefined });
+
+    // Detect if it's a Spotify URL
+    const isUrl = query.includes("open.spotify.com/");
+    const body = isUrl ? { url: query.trim() } : { q: query.trim() };
+
     try {
       const res = await fetch("/api/artists/search-spotify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: query }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
         const results = await res.json();
-        updateEntry(entryId, {
-          spotifySearchResults: results,
-          spotifySearching: false,
-        });
+        if (isUrl && results.length > 0) {
+          // Auto-select when pasting a URL
+          updateEntry(entryId, {
+            selectedSpotify: results[0],
+            spotifyConfirmed: true,
+            showSpotifySearch: false,
+            spotifySearching: false,
+          });
+        } else {
+          updateEntry(entryId, {
+            spotifySearchResults: results,
+            spotifySearching: false,
+          });
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         updateEntry(entryId, {
           spotifySearching: false,
-          spotifyError: err.error || `Search failed (${res.status})`,
+          spotifyError: err.error || `Failed (${res.status})`,
         });
       }
     } catch {
       updateEntry(entryId, {
         spotifySearching: false,
-        spotifyError: "Network error — could not reach Spotify search",
+        spotifyError: "Network error",
       });
     }
   }
@@ -769,7 +784,7 @@ function EntryCard({
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-[var(--muted-foreground)] font-bold">
                 {entry.showSpotifySearch
-                  ? "Search Spotify"
+                  ? "Link Spotify"
                   : "No Spotify linked"}
               </p>
               {!entry.showSpotifySearch && (
@@ -777,7 +792,7 @@ function EntryCard({
                   onClick={onToggleSearch}
                   className="text-xs text-[var(--accent)] hover:underline flex items-center gap-1"
                 >
-                  <Search className="w-3 h-3" /> Search Spotify
+                  <Search className="w-3 h-3" /> Link Spotify
                 </button>
               )}
             </div>
@@ -792,7 +807,7 @@ function EntryCard({
                       if (e.key === "Enter")
                         onSearchSpotify(entry.spotifySearchQuery);
                     }}
-                    placeholder="Artist name..."
+                    placeholder="Paste Spotify URL or search by name..."
                     className="flex-1 bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-green-600 placeholder:text-zinc-500"
                   />
                   <button

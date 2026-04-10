@@ -57,7 +57,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // If no Spotify in description, search by channel name
+  // If no Spotify in description, try searching by channel name
   let spotifySuggestions: Array<Record<string, unknown>> = [];
   let spotifyError: string | null = null;
   if (!spotifyMatch) {
@@ -67,8 +67,11 @@ export async function POST(req: Request) {
         ...r,
         url: `https://open.spotify.com/artist/${r.platformId}`,
       }));
-    } catch (err) {
-      spotifyError = err instanceof Error ? err.message : "Spotify search failed";
+    } catch {
+      // Search API likely restricted (403). Not a fatal error —
+      // user can still paste a Spotify URL manually.
+      spotifyError =
+        "Spotify search is restricted for this app. Paste a Spotify artist URL instead.";
     }
   }
 
