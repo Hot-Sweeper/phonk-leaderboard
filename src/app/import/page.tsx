@@ -529,12 +529,6 @@ export default function ImportPage() {
                     updateEntry(entry.id, { spotifyConfirmed: true })
                   }
                   onRejectSpotify={() => rejectSpotify(entry.id)}
-                  onSelectSpotify={(s) => selectSpotify(entry.id, s)}
-                  onToggleSearch={() =>
-                    updateEntry(entry.id, {
-                      showSpotifySearch: !entry.showSpotifySearch,
-                    })
-                  }
                   onSearchSpotify={(q) => searchSpotify(entry.id, q)}
                   onUpdateSearchQuery={(q) =>
                     updateEntry(entry.id, { spotifySearchQuery: q })
@@ -575,8 +569,6 @@ function EntryCard({
   onRemove,
   onConfirmSpotify,
   onRejectSpotify,
-  onSelectSpotify,
-  onToggleSearch,
   onSearchSpotify,
   onUpdateSearchQuery,
 }: {
@@ -584,8 +576,6 @@ function EntryCard({
   onRemove: () => void;
   onConfirmSpotify: () => void;
   onRejectSpotify: () => void;
-  onSelectSpotify: (s: SpotifyResult) => void;
-  onToggleSearch: () => void;
   onSearchSpotify: (q: string) => void;
   onUpdateSearchQuery: (q: string) => void;
 }) {
@@ -732,148 +722,53 @@ function EntryCard({
               </div>
             </div>
           </div>
-        ) : !entry.spotifyConfirmed &&
-          entry.spotifySuggestions.length > 0 &&
-          !entry.showSpotifySearch ? (
-          /* Spotify search results from name match */
-          <div>
-            <p className="text-xs text-yellow-300 font-bold mb-2">
-              No Spotify link in description. Is one of these correct?
-            </p>
-            <div className="flex flex-col gap-2">
-              {entry.spotifySuggestions.map((s) => (
-                <button
-                  key={s.platformId}
-                  onClick={() => onSelectSpotify(s)}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-[var(--muted)]/50 border border-[var(--muted)] hover:border-green-600 transition-all text-left"
-                >
-                  {s.imageUrl ? (
-                    <img
-                      src={s.imageUrl}
-                      alt=""
-                      className="w-9 h-9 rounded-full object-cover shrink-0"
-                    />
-                  ) : (
-                    <div className="w-9 h-9 rounded-full bg-green-950/60 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-sm truncate">{s.name}</div>
-                    <div className="text-xs text-[var(--muted-foreground)] tabular-nums">
-                      {formatCount(s.followerCount)} followers
-                    </div>
-                  </div>
-                  <Check className="w-4 h-4 text-[var(--muted-foreground)] shrink-0" />
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={onToggleSearch}
-              className="mt-2 text-xs text-[var(--accent)] hover:underline flex items-center gap-1"
-            >
-              <Search className="w-3 h-3" /> None of these — search manually
-            </button>
-          </div>
         ) : (
-          /* Manual Spotify search or no results */
+          /* Paste Spotify URL */
           <div>
-            {entry.spotifyError && !entry.spotifySearchResults.length && (
-              <p className="text-xs text-red-400 mb-2 flex items-center gap-1">
+            <a
+              href={`https://open.spotify.com/search/${encodeURIComponent(entry.youtube?.name || "")}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 mb-3 px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white text-xs font-bold transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" /> Search on Spotify
+            </a>
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={entry.spotifySearchQuery}
+                onChange={(e) => onUpdateSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter")
+                    onSearchSpotify(entry.spotifySearchQuery);
+                }}
+                placeholder="Paste Spotify artist URL here..."
+                className="flex-1 bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-green-600 placeholder:text-zinc-500"
+              />
+              <button
+                onClick={() => onSearchSpotify(entry.spotifySearchQuery)}
+                disabled={entry.spotifySearching}
+                className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-1"
+              >
+                {entry.spotifySearching ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+            {entry.spotifyError && (
+              <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
                 <AlertCircle className="w-3 h-3 shrink-0" />
                 {entry.spotifyError}
               </p>
             )}
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-[var(--muted-foreground)] font-bold">
-                {entry.showSpotifySearch
-                  ? "Link Spotify"
-                  : "No Spotify linked"}
-              </p>
-              {!entry.showSpotifySearch && (
-                <button
-                  onClick={onToggleSearch}
-                  className="text-xs text-[var(--accent)] hover:underline flex items-center gap-1"
-                >
-                  <Search className="w-3 h-3" /> Link Spotify
-                </button>
-              )}
-            </div>
-            {entry.showSpotifySearch && (
-              <div>
-                <a
-                  href={`https://open.spotify.com/search/${encodeURIComponent(entry.spotifySearchQuery || entry.youtube?.name || "")}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 mb-3 px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white text-xs font-bold transition-colors"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" /> Search on Spotify
-                </a>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={entry.spotifySearchQuery}
-                    onChange={(e) => onUpdateSearchQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter")
-                        onSearchSpotify(entry.spotifySearchQuery);
-                    }}
-                    placeholder="Paste Spotify artist URL here..."
-                    className="flex-1 bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-green-600 placeholder:text-zinc-500"
-                  />
-                  <button
-                    onClick={() => onSearchSpotify(entry.spotifySearchQuery)}
-                    disabled={entry.spotifySearching}
-                    className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-1"
-                  >
-                    {entry.spotifySearching ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
-                {entry.spotifyError && (
-                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    {entry.spotifyError}
-                  </p>
-                )}
-                {entry.spotifySearchResults.length > 0 && (
-                  <div className="flex flex-col gap-1.5">
-                    {entry.spotifySearchResults.map((s) => (
-                      <button
-                        key={s.platformId}
-                        onClick={() => onSelectSpotify(s)}
-                        className="flex items-center gap-3 p-2.5 rounded-lg bg-[var(--muted)]/30 hover:bg-[var(--muted)] border border-transparent hover:border-green-600 transition-all text-left"
-                      >
-                        {s.imageUrl ? (
-                          <img
-                            src={s.imageUrl}
-                            alt=""
-                            className="w-8 h-8 rounded-full object-cover shrink-0"
-                          />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-green-950/60 shrink-0" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-bold truncate">
-                            {s.name}
-                          </div>
-                          <div className="text-[10px] text-[var(--muted-foreground)] tabular-nums">
-                            {formatCount(s.followerCount)} followers
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <button
-                  onClick={onToggleSearch}
-                  className="mt-2 text-xs text-[var(--muted-foreground)] hover:text-white"
-                >
-                  Skip Spotify for this artist
-                </button>
-              </div>
-            )}
+            <button
+              onClick={onRejectSpotify}
+              className="mt-1 text-xs text-[var(--muted-foreground)] hover:text-white"
+            >
+              Skip Spotify for this artist
+            </button>
           </div>
         )}
       </div>
