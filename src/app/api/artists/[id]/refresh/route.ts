@@ -40,6 +40,7 @@ export async function POST(
         where: { id: link.id },
         data: {
           followerCount: stats.followerCount,
+          monthlyListeners: stats.monthlyListeners,
           handle: stats.handle ?? link.handle,
           platformId: stats.platformId ?? link.platformId,
         },
@@ -66,7 +67,13 @@ export async function POST(
 
   const updated = await prisma.artist.findUnique({
     where: { id },
-    include: { links: { orderBy: { platform: "asc" } } },
+    include: {
+      links: { orderBy: { platform: "asc" } },
+      suggestions: {
+        where: { status: "PENDING" },
+        select: { id: true, platform: true, url: true, note: true, createdAt: true },
+      },
+    },
   });
 
   return NextResponse.json(updated);

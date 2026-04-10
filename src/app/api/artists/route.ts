@@ -10,6 +10,7 @@ async function enrichLink<T extends {
   url: string;
   handle: string | null;
   followerCount: number;
+  monthlyListeners: number;
   platformId: string | null;
 }>(link: T): Promise<T> {
   const needsSpotifyRefresh =
@@ -32,6 +33,7 @@ async function enrichLink<T extends {
     ...link,
     handle: stats.handle ?? link.handle,
     followerCount: stats.followerCount || link.followerCount,
+    monthlyListeners: stats.monthlyListeners || link.monthlyListeners,
     platformId: stats.platformId ?? link.platformId,
   };
 
@@ -40,6 +42,7 @@ async function enrichLink<T extends {
     data: {
       handle: nextLink.handle,
       followerCount: nextLink.followerCount,
+      monthlyListeners: nextLink.monthlyListeners,
       platformId: nextLink.platformId,
     },
   });
@@ -68,8 +71,6 @@ export async function GET(req: Request) {
 
   const artists = await prisma.artist.findMany({
     where,
-    orderBy: { watchlistCount: "desc" },
-    take: 50,
     include: {
       links: { orderBy: { platform: "asc" } },
     },
@@ -82,7 +83,38 @@ export async function GET(req: Request) {
     }))
   );
 
-  return NextResponse.json(enrichedArtists);
+  const metricForArtist = (artist: (typeof enrichedArtists)[number]) => {
+    if (platform === "YOUTUBE") {
+      return artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
+    }
+
+    if (platform === "SPOTIFY") {
+      return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+    }
+
+    if (platform === "TIKTOK") {
+      return artist.links.find((link) => link.platform === "TIKTOK")?.followerCount ?? 0;
+    }
+
+    if (platform === "INSTAGRAM") {
+      return artist.links.find((link) => link.platform === "INSTAGRAM")?.followerCount ?? 0;
+    }
+
+    // Default: sort by Spotify monthly listeners
+    return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+  };
+
+  enrichedArtists.sort((a, b) => {
+    const metricDelta = metricForArtist(b) - metricForArtist(a);
+    if (metricDelta !== 0) return metricDelta;
+
+    const watchlistDelta = b.watchlistCount - a.watchlistCount;
+    if (watchlistDelta !== 0) return watchlistDelta;
+
+    return a.name.localeCompare(b.name);
+  });
+
+  return NextResponse.json(enrichedArtists.slice(0, 50));
 }
 
 // POST — admins/mods add an artist with links
@@ -110,6 +142,16 @@ export async function POST(req: Request) {
     );
   }
 
+  const uniquePlatforms = new Set(
+    links.map((link: { platform: string }) => link.platform)
+  );
+  if (uniquePlatforms.size !== links.length) {
+    return NextResponse.json(
+      { error: "Each platform can only be added once per artist." },
+      { status: 400 }
+    );
+  }
+
   // Fetch stats from YouTube + Spotify APIs in parallel
   const linkEntries: {
     platform: Platform;
@@ -123,14 +165,29 @@ export async function POST(req: Request) {
 
   await Promise.all(
     links.map(
-      async (l: { platform: string; url: string; handle?: string }) => {
+      async (l: {
+        platform: string;
+        url: string;
+        handle?: string;
+        followerCount?: number;
+        platformId?: string | null;
+        imageUrl?: string | null;
+      }) => {
         const stats = await fetchPlatformStats(l.platform, l.url);
+        const shouldUseProvidedSpotifyStats =
+          l.platform === "SPOTIFY" &&
+          typeof l.followerCount === "number" &&
+          Boolean(l.platformId) &&
+          (!stats || stats.followerCount === 0);
+
         const entry = {
           platform: l.platform as Platform,
           url: l.url.trim(),
           handle: stats?.handle ?? l.handle?.trim() ?? null,
-          followerCount: stats?.followerCount ?? 0,
-          platformId: stats?.platformId ?? null,
+          followerCount: shouldUseProvidedSpotifyStats
+            ? l.followerCount ?? 0
+            : (stats?.followerCount ?? 0),
+          platformId: stats?.platformId ?? l.platformId ?? null,
         };
         linkEntries.push(entry);
 
@@ -139,8 +196,8 @@ export async function POST(req: Request) {
           artistImageUrl = stats.imageUrl;
         }
         // Fallback to Spotify image
-        if (!artistImageUrl && stats?.imageUrl && l.platform === "SPOTIFY") {
-          artistImageUrl = stats.imageUrl;
+        if (!artistImageUrl && l.platform === "SPOTIFY") {
+          artistImageUrl = stats?.imageUrl ?? l.imageUrl ?? artistImageUrl;
         }
       }
     )

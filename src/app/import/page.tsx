@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import {
@@ -15,6 +15,11 @@ import {
   AlertCircle,
   ExternalLink,
 } from "lucide-react";
+import {
+  connectSpotify,
+  fetchSpotifyArtistInBrowser,
+  hasSpotifyConnection,
+} from "@/lib/spotify-browser";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -76,7 +81,12 @@ export default function ImportPage() {
   const [ytSearchQuery, setYtSearchQuery] = useState("");
   const [ytSearching, setYtSearching] = useState(false);
   const [ytSearchResults, setYtSearchResults] = useState<YouTubeInfo[]>([]);
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    setSpotifyConnected(hasSpotifyConnection());
+  }, []);
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
@@ -156,9 +166,12 @@ export default function ImportPage() {
           spotifyMatch: data.spotifyMatch,
           selectedSpotify: data.spotifyMatch ?? null,
           spotifyConfirmed: !!data.spotifyMatch,
-          spotifySearchQuery: data.youtube?.name ?? "",
+          spotifySearchQuery: data.spotifyMatch?.url ?? data.spotifyUrl ?? data.youtube?.name ?? "",
           showSpotifySearch: !data.spotifyMatch,
         });
+        if (!data.spotifyMatch && data.spotifyUrl && hasSpotifyConnection()) {
+          void searchSpotify(entry.id, data.spotifyUrl);
+        }
       } catch {
         updateEntry(entry.id, { status: "error", error: "Network error" });
       }
@@ -202,8 +215,12 @@ export default function ImportPage() {
           spotifyMatch: data.spotifyMatch,
           selectedSpotify: data.spotifyMatch ?? null,
           spotifyConfirmed: !!data.spotifyMatch,
+          spotifySearchQuery: data.spotifyMatch?.url ?? data.spotifyUrl ?? channel.name,
           showSpotifySearch: !data.spotifyMatch,
         });
+        if (!data.spotifyMatch && data.spotifyUrl && hasSpotifyConnection()) {
+          void searchSpotify(entry.id, data.spotifyUrl);
+        }
       } catch {
         updateEntry(entry.id, { status: "ready" });
       }
@@ -266,40 +283,35 @@ export default function ImportPage() {
       return;
     }
 
+    if (!hasSpotifyConnection()) {
+      updateEntry(entryId, {
+        spotifyError: "Connect Spotify first to fetch official follower counts.",
+      });
+      setSpotifyConnected(false);
+      return;
+    }
+
     updateEntry(entryId, {
       spotifySearching: true,
       spotifyError: undefined,
     });
 
     try {
-      const res = await fetch("/api/artists/search-spotify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmedQuery }),
-      });
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok || !Array.isArray(data) || !data[0]) {
-        updateEntry(entryId, {
-          spotifySearching: false,
-          spotifyError:
-            (data as { error?: string } | null)?.error ??
-            "Could not fetch Spotify preview.",
-        });
-        return;
-      }
+      const artist = await fetchSpotifyArtistInBrowser(trimmedQuery);
 
       updateEntry(entryId, {
-        selectedSpotify: data[0],
+        selectedSpotify: artist,
         spotifyConfirmed: true,
         showSpotifySearch: false,
         spotifySearching: false,
         spotifyError: undefined,
       });
-    } catch {
+      setSpotifyConnected(true);
+    } catch (err) {
       updateEntry(entryId, {
         spotifySearching: false,
-        spotifyError: "Could not fetch Spotify preview.",
+        spotifyError:
+          err instanceof Error ? err.message : "Could not fetch Spotify preview.",
       });
     }
   }
@@ -327,6 +339,7 @@ export default function ImportPage() {
         handle?: string | null;
         followerCount?: number;
         platformId?: string | null;
+        imageUrl?: string | null;
       }[] = [
         {
           platform: "YOUTUBE",
@@ -343,11 +356,12 @@ export default function ImportPage() {
           handle: null,
           followerCount: e.selectedSpotify.followerCount,
           platformId: e.selectedSpotify.platformId,
+          imageUrl: e.selectedSpotify.imageUrl,
         });
       }
       return {
         name: e.youtube!.name,
-        imageUrl: e.youtube!.imageUrl,
+        imageUrl: e.youtube!.imageUrl ?? e.selectedSpotify?.imageUrl ?? null,
         links,
       };
     });
@@ -393,6 +407,19 @@ export default function ImportPage() {
         <p className="text-[var(--muted-foreground)] mb-8">
           Paste YouTube links to auto-discover artist info and Spotify profiles.
         </p>
+        <div className="mb-6 flex items-center gap-3">
+          <button
+            onClick={() => void connectSpotify()}
+            className="px-4 py-2 rounded-xl bg-green-700 hover:bg-green-600 text-white text-sm font-bold transition-colors"
+          >
+            {spotifyConnected ? "Reconnect Spotify" : "Connect Spotify"}
+          </button>
+          <span className="text-sm text-[var(--muted-foreground)]">
+            {spotifyConnected
+              ? "Spotify is connected for official follower previews."
+              : "Connect Spotify once to fetch official follower counts in your browser."}
+          </span>
+        </div>
 
         {/* Result toast */}
         {result && (

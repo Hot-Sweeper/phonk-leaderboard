@@ -13,6 +13,7 @@ type BulkArtistInput = {
     handle?: string | null;
     followerCount?: number;
     platformId?: string | null;
+    imageUrl?: string | null;
   }[];
 };
 
@@ -70,19 +71,27 @@ export async function POST(req: Request) {
       await Promise.all(
         input.links.map(async (link) => {
           const stats = await fetchPlatformStats(link.platform, link.url);
+          const shouldUseProvidedSpotifyStats =
+            link.platform === "SPOTIFY" &&
+            typeof link.followerCount === "number" &&
+            Boolean(link.platformId) &&
+            (!stats || stats.followerCount === 0);
+
           linkEntries.push({
             platform: link.platform as Platform,
             url: link.url.trim(),
             handle: stats?.handle ?? link.handle ?? null,
-            followerCount: stats?.followerCount ?? link.followerCount ?? 0,
+            followerCount: shouldUseProvidedSpotifyStats
+              ? link.followerCount ?? 0
+              : (stats?.followerCount ?? link.followerCount ?? 0),
             platformId: stats?.platformId ?? link.platformId ?? null,
           });
 
           if (!artistImageUrl && stats?.imageUrl && link.platform === "YOUTUBE") {
             artistImageUrl = stats.imageUrl;
           }
-          if (!artistImageUrl && stats?.imageUrl && link.platform === "SPOTIFY") {
-            artistImageUrl = stats.imageUrl;
+          if (!artistImageUrl && link.platform === "SPOTIFY") {
+            artistImageUrl = stats?.imageUrl ?? link.imageUrl ?? artistImageUrl;
           }
         })
       );

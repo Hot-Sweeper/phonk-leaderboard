@@ -15,6 +15,11 @@ import {
   ExternalLink,
   Loader2,
 } from "lucide-react";
+import {
+  connectSpotify,
+  fetchSpotifyArtistInBrowser,
+  hasSpotifyConnection,
+} from "@/lib/spotify-browser";
 
 type ArtistLink = {
   id: string;
@@ -22,6 +27,7 @@ type ArtistLink = {
   url: string;
   handle: string | null;
   followerCount: number;
+  monthlyListeners: number;
 };
 
 type AddLinkInput = {
@@ -32,6 +38,7 @@ type AddLinkInput = {
   spotifyPreviewName?: string | null;
   spotifyPreviewImageUrl?: string | null;
   spotifyPreviewFollowerCount?: number;
+  spotifyPreviewPlatformId?: string | null;
   spotifyPreviewLoading?: boolean;
   spotifyPreviewError?: string | null;
 };
@@ -45,9 +52,10 @@ type Artist = {
 };
 
 const PLATFORMS = [
-  { key: "", label: "All" },
-  { key: "YOUTUBE", label: "YouTube", color: "text-red-400" },
-  { key: "SPOTIFY", label: "Spotify", color: "text-green-400" },
+  { key: "", label: "Spotify Listeners", color: "text-green-400" },
+  { key: "YOUTUBE", label: "YouTube Subs", color: "text-red-400" },
+  { key: "INSTAGRAM", label: "Instagram", color: "text-fuchsia-400" },
+  { key: "TIKTOK", label: "TikTok", color: "text-cyan-400" },
 ];
 
 const ALL_PLATFORMS = [
@@ -114,7 +122,7 @@ function getDisplayHandle(link: ArtistLink): string | null {
 
 const PLATFORM_STAT_LABEL: Record<string, string> = {
   YOUTUBE: "subs",
-  SPOTIFY: "followers",
+  SPOTIFY: "listeners",
   TIKTOK: "followers",
   INSTAGRAM: "followers",
 };
@@ -254,6 +262,7 @@ export default function LeaderboardPage() {
   const [requestSent, setRequestSent] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState("");
+  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [addLinks, setAddLinks] = useState<AddLinkInput[]>([
     { platform: "YOUTUBE", url: "", handle: "" },
   ]);
@@ -261,6 +270,10 @@ export default function LeaderboardPage() {
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
+
+  useEffect(() => {
+    setSpotifyConnected(hasSpotifyConnection());
+  }, [showAdd]);
 
   const loadArtists = useCallback(
     async (q = "", plat = "") => {
@@ -294,6 +307,10 @@ export default function LeaderboardPage() {
     addLinks.forEach((link, index) => {
       const trimmedUrl = link.url.trim();
       if (link.platform !== "SPOTIFY" || !isValidSpotifyArtistUrl(trimmedUrl)) {
+        return;
+      }
+
+      if (!hasSpotifyConnection()) {
         return;
       }
 
@@ -394,6 +411,12 @@ export default function LeaderboardPage() {
           platform: l.platform,
           url: l.url,
           handle: l.handle || extractHandleFromUrl(l.platform, l.url) || undefined,
+          followerCount:
+            l.platform === "SPOTIFY" ? l.spotifyPreviewFollowerCount ?? 0 : undefined,
+          platformId:
+            l.platform === "SPOTIFY" ? l.spotifyPreviewPlatformId ?? null : undefined,
+          imageUrl:
+            l.platform === "SPOTIFY" ? l.spotifyPreviewImageUrl ?? null : undefined,
         })),
       }),
     });
@@ -419,42 +442,47 @@ export default function LeaderboardPage() {
     );
 
     try {
-      const res = await fetch("/api/artists/search-spotify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-      });
-      const data = await res.json().catch(() => null);
+      if (!hasSpotifyConnection()) {
+        setAddLinks((prev) =>
+          prev.map((link, currentIndex) =>
+            currentIndex === index && link.url.trim() === url
+              ? {
+                  ...link,
+                  spotifyPreviewUrl: undefined,
+                  spotifyPreviewLoading: false,
+                  spotifyPreviewName: null,
+                  spotifyPreviewImageUrl: null,
+                  spotifyPreviewPlatformId: null,
+                  spotifyPreviewFollowerCount: 0,
+                  spotifyPreviewError: "Connect Spotify first to fetch official follower counts.",
+                }
+              : link
+          )
+        );
+        setSpotifyConnected(false);
+        return;
+      }
+
+      const artist = await fetchSpotifyArtistInBrowser(url);
+      setSpotifyConnected(true);
 
       setAddLinks((prev) =>
         prev.map((link, currentIndex) => {
           if (currentIndex !== index || link.url.trim() !== url) return link;
-
-          if (!res.ok || !Array.isArray(data) || !data[0]) {
-            return {
-              ...link,
-              spotifyPreviewUrl: undefined,
-              spotifyPreviewLoading: false,
-              spotifyPreviewName: null,
-              spotifyPreviewImageUrl: null,
-              spotifyPreviewFollowerCount: 0,
-              spotifyPreviewError:
-                (data as { error?: string } | null)?.error ?? "Could not fetch Spotify preview.",
-            };
-          }
 
           return {
             ...link,
             spotifyPreviewUrl: url,
             spotifyPreviewLoading: false,
             spotifyPreviewError: null,
-            spotifyPreviewName: data[0].name ?? null,
-            spotifyPreviewImageUrl: data[0].imageUrl ?? null,
-            spotifyPreviewFollowerCount: data[0].followerCount ?? 0,
+            spotifyPreviewName: artist.name ?? null,
+            spotifyPreviewImageUrl: artist.imageUrl ?? null,
+            spotifyPreviewPlatformId: artist.platformId ?? null,
+            spotifyPreviewFollowerCount: artist.followerCount ?? 0,
           };
         })
       );
-    } catch {
+    } catch (err) {
       setAddLinks((prev) =>
         prev.map((link, currentIndex) =>
           currentIndex === index && link.url.trim() === url
@@ -464,8 +492,10 @@ export default function LeaderboardPage() {
                 spotifyPreviewLoading: false,
                 spotifyPreviewName: null,
                 spotifyPreviewImageUrl: null,
+                spotifyPreviewPlatformId: null,
                 spotifyPreviewFollowerCount: 0,
-                spotifyPreviewError: "Could not fetch Spotify preview.",
+                spotifyPreviewError:
+                  err instanceof Error ? err.message : "Could not fetch Spotify preview.",
               }
             : link
         )
@@ -652,26 +682,63 @@ export default function LeaderboardPage() {
                       {artist.name}
                     </Link>
                     <div className="flex gap-3 mt-1 flex-wrap">
-                      {artist.links.map((l) => (
-                        <a
-                          key={l.id}
-                          href={l.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-white transition-colors"
-                        >
-                          <span
-                            className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
-                          />
-                          {l.followerCount > 0 ? (
-                            <span className="tabular-nums">
-                              {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
-                            </span>
-                          ) : getDisplayHandle(l) ? (
-                            <span>@{getDisplayHandle(l)}</span>
-                          ) : null}
-                        </a>
-                      ))}
+                      {(() => {
+                        // When filtering by platform, show that platform's metric prominently
+                        if (platform) {
+                          const link = artist.links.find((l) => l.platform === platform);
+                          if (link) {
+                            return (
+                              <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[link.platform] ?? "bg-zinc-500"}`} />
+                                <span className="tabular-nums">
+                                  {formatCount(link.followerCount)} {PLATFORM_STAT_LABEL[link.platform] ?? ""}
+                                </span>
+                              </span>
+                            );
+                          }
+                          return null;
+                        }
+                        // Default tab: show Spotify monthly listeners + followers as secondary
+                        const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
+                        return (
+                          <>
+                            {spotifyLink && spotifyLink.monthlyListeners > 0 && (
+                              <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                                <span className="w-2 h-2 rounded-full shrink-0 bg-green-400" />
+                                <span className="tabular-nums">
+                                  {formatCount(spotifyLink.monthlyListeners)} listeners
+                                </span>
+                              </span>
+                            )}
+                            {spotifyLink && spotifyLink.followerCount > 0 && (
+                              <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                                <span className="w-2 h-2 rounded-full shrink-0 bg-green-700" />
+                                <span className="tabular-nums">
+                                  {formatCount(spotifyLink.followerCount)} followers
+                                </span>
+                              </span>
+                            )}
+                            {artist.links.filter((l) => l.platform !== "SPOTIFY").map((l) => (
+                              <a
+                                key={l.id}
+                                href={l.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-white transition-colors"
+                              >
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`} />
+                                {l.followerCount > 0 ? (
+                                  <span className="tabular-nums">
+                                    {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
+                                  </span>
+                                ) : getDisplayHandle(l) ? (
+                                  <span>@{getDisplayHandle(l)}</span>
+                                ) : null}
+                              </a>
+                            ))}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -771,6 +838,20 @@ export default function LeaderboardPage() {
             </button>
             <h2 className="text-xl font-black mb-4">Add Artist</h2>
             <form onSubmit={addArtist} className="flex flex-col gap-3">
+              <div className="flex items-center gap-3 rounded-xl border border-[var(--muted)] bg-[var(--muted)]/40 px-4 py-3 text-sm">
+                <button
+                  type="button"
+                  onClick={() => void connectSpotify()}
+                  className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white font-bold transition-colors"
+                >
+                  {spotifyConnected ? "Reconnect Spotify" : "Connect Spotify"}
+                </button>
+                <span className="text-[var(--muted-foreground)]">
+                  {spotifyConnected
+                    ? "Official Spotify follower preview is connected."
+                    : "Connect Spotify to fetch official follower counts in this form."}
+                </span>
+              </div>
               <input
                 required
                 placeholder="Artist name"
@@ -797,6 +878,7 @@ export default function LeaderboardPage() {
                                   spotifyPreviewUrl: undefined,
                                   spotifyPreviewName: null,
                                   spotifyPreviewImageUrl: null,
+                                  spotifyPreviewPlatformId: null,
                                   spotifyPreviewFollowerCount: 0,
                                   spotifyPreviewLoading: false,
                                   spotifyPreviewError: null,
@@ -827,6 +909,7 @@ export default function LeaderboardPage() {
                                   spotifyPreviewUrl: undefined,
                                   spotifyPreviewName: null,
                                   spotifyPreviewImageUrl: null,
+                                  spotifyPreviewPlatformId: null,
                                   spotifyPreviewFollowerCount: 0,
                                   spotifyPreviewLoading: false,
                                   spotifyPreviewError: null,
@@ -876,6 +959,17 @@ export default function LeaderboardPage() {
                         </div>
                       ) : link.spotifyPreviewError ? (
                         <div className="text-red-400">{link.spotifyPreviewError}</div>
+                      ) : !spotifyConnected && isValidSpotifyArtistUrl(link.url) ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-[var(--muted-foreground)]">Connect Spotify to fetch official followers.</div>
+                          <button
+                            type="button"
+                            onClick={() => void connectSpotify()}
+                            className="px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white text-xs font-bold transition-colors"
+                          >
+                            Connect Spotify
+                          </button>
+                        </div>
                       ) : isValidSpotifyArtistUrl(link.url) ? (
                         <div className="text-[var(--muted-foreground)]">Fetching Spotify preview...</div>
                       ) : (

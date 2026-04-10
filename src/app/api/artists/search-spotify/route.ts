@@ -19,9 +19,9 @@ export async function POST(req: Request) {
   // Mode 1: Look up a Spotify URL directly
   if (url?.trim()) {
     const artist = await fetchSpotifyArtist(url.trim());
-    if (!artist) {
+    if (!artist || !artist.name) {
       return NextResponse.json(
-        { error: "Could not fetch Spotify artist from that URL" },
+        { error: "Spotify preview is unavailable for that URL right now" },
         { status: 404 }
       );
     }

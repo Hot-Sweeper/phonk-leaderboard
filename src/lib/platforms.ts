@@ -1,6 +1,6 @@
 /**
- * YouTube Data API v3 + Spotify Web API utilities
- * Fetches profile pictures, subscriber counts, and follower counts.
+ * YouTube Data API v3 + Spotify/TikTok/Instagram scraping utilities
+ * Fetches profile pictures, subscriber counts, follower counts, and monthly listeners.
  */
 
 type YouTubeChannelData = {
@@ -13,15 +13,10 @@ type YouTubeChannelData = {
 type SpotifyArtistData = {
   imageUrl: string | null;
   followerCount: number;
+  monthlyListeners: number;
   name: string | null;
   platformId: string | null;
 };
-
-function parseLooseCount(value: string | null | undefined): number {
-  if (!value) return 0;
-  const digits = value.replace(/[^\d]/g, "");
-  return digits ? parseInt(digits, 10) : 0;
-}
 
 // ─── YouTube ───
 
@@ -177,6 +172,7 @@ export async function searchSpotifyArtists(
     (a: { id: string; name: string; images?: { url: string }[]; followers?: { total: number } }) => ({
       imageUrl: a.images?.[0]?.url ?? null,
       followerCount: a.followers?.total ?? 0,
+      monthlyListeners: 0,
       name: a.name ?? null,
       platformId: a.id ?? null,
     })
@@ -257,53 +253,6 @@ export async function searchYouTubeChannels(
 
 let spotifyToken: string | null = null;
 let spotifyTokenExpiry = 0;
-let spotifyWebToken: string | null = null;
-let spotifyWebTokenExpiry = 0;
-
-async function getSpotifyWebToken(): Promise<string | null> {
-  if (spotifyWebToken && Date.now() < spotifyWebTokenExpiry) {
-    return spotifyWebToken;
-  }
-
-  try {
-    const res = await fetch(
-      "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
-      {
-        headers: {
-          Accept: "application/json",
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-        },
-        next: { revalidate: 0 },
-      }
-    );
-
-    const text = await res.text();
-    if (!res.ok) {
-      console.error(`[Spotify] Web token request failed: ${res.status} ${text}`);
-      return null;
-    }
-
-    const data = JSON.parse(text) as {
-      accessToken?: string;
-      accessTokenExpirationTimestampMs?: number;
-    };
-
-    if (!data.accessToken) {
-      console.error("[Spotify] Web token missing accessToken");
-      return null;
-    }
-
-    spotifyWebToken = data.accessToken;
-    spotifyWebTokenExpiry =
-      (data.accessTokenExpirationTimestampMs ?? Date.now() + 30 * 60 * 1000) -
-      60_000;
-    return spotifyWebToken;
-  } catch (err) {
-    console.error("[Spotify] Web token request error:", err);
-    return null;
-  }
-}
 
 /** Get a Spotify access token via Client Credentials flow */
 async function getSpotifyToken(): Promise<string | null> {
@@ -352,49 +301,6 @@ export function parseSpotifyUrl(url: string): string | null {
   }
 }
 
-async function fetchSpotifyArtistPageFallback(
-  url: string,
-  artistId: string
-): Promise<SpotifyArtistData | null> {
-  try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-      },
-      next: { revalidate: 0 },
-    });
-    if (!res.ok) return null;
-
-    const html = await res.text();
-    const normalizedHtml = html.replace(/\s+/g, " ");
-
-    const titleMatch =
-      normalizedHtml.match(/<meta property="og:title" content="([^"]+)"/i) ??
-      normalizedHtml.match(/<title>([^<]+)<\/title>/i);
-    const imageMatch = normalizedHtml.match(
-      /<meta property="og:image" content="([^"]+)"/i
-    );
-    const followerMatch =
-      normalizedHtml.match(/([0-9][0-9.,]*)\s*Followers/i) ??
-      normalizedHtml.match(/Followers[^0-9]{0,40}([0-9][0-9.,]*)/i);
-
-    const name = titleMatch?.[1]
-      ?.replace(/\s*\|\s*Spotify.*$/i, "")
-      .trim() ?? null;
-
-    return {
-      imageUrl: imageMatch?.[1] ?? null,
-      followerCount: parseLooseCount(followerMatch?.[1]),
-      name,
-      platformId: artistId,
-    };
-  } catch (err) {
-    console.error("[Spotify] Page fallback failed:", err);
-    return null;
-  }
-}
-
 export function extractSocialHandle(
   platform: string,
   url: string
@@ -433,69 +339,175 @@ export function extractSocialHandle(
   }
 }
 
-/** Fetch Spotify artist data */
+/** Fetch Spotify artist data (API + scrape monthly listeners) */
 export async function fetchSpotifyArtist(
   url: string
 ): Promise<SpotifyArtistData | null> {
   const artistId = parseSpotifyUrl(url);
   if (!artistId) return null;
 
+  // Fetch API data and scrape monthly listeners in parallel
+  const [apiData, scraped] = await Promise.all([
+    fetchSpotifyArtistApi(artistId),
+    scrapeSpotifyListeners(artistId),
+  ]);
+
+  return {
+    imageUrl: apiData?.imageUrl ?? null,
+    followerCount: scraped?.followers ?? apiData?.followerCount ?? 0,
+    monthlyListeners: scraped?.monthlyListeners ?? 0,
+    name: apiData?.name ?? scraped?.name ?? null,
+    platformId: artistId,
+  };
+}
+
+async function fetchSpotifyArtistApi(
+  artistId: string
+): Promise<{ imageUrl: string | null; followerCount: number; name: string | null } | null> {
   const token = await getSpotifyToken();
-  if (token) {
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/artists/${artistId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
+  if (!token) return null;
 
-        return {
-          imageUrl: data.images?.[0]?.url ?? null,
-          followerCount: data.followers?.total ?? 0,
-          name: data.name ?? null,
-          platformId: data.id ?? null,
-        };
-      }
-
-      const text = await res.text().catch(() => "");
-      console.error(`[Spotify] Artist lookup failed: ${res.status} ${text}`);
-    } catch (err) {
-      console.error("[Spotify] Artist lookup error:", err);
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/artists/${artistId}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        imageUrl: data.images?.[0]?.url ?? null,
+        followerCount: data.followers?.total ?? 0,
+        name: data.name ?? null,
+      };
     }
+    const text = await res.text().catch(() => "");
+    console.error(`[Spotify] Artist lookup failed: ${res.status} ${text}`);
+  } catch (err) {
+    console.error("[Spotify] Artist lookup error:", err);
   }
+  return null;
+}
 
-  const webToken = await getSpotifyWebToken();
-  if (webToken) {
-    try {
-      const res = await fetch(
-        `https://api.spotify.com/v1/artists/${artistId}`,
-        {
-          headers: { Authorization: `Bearer ${webToken}` },
-          next: { revalidate: 0 },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
+const SCRAPE_HEADERS = {
+  "User-Agent": "Mozilla/5.0",
+  "Accept-Language": "en",
+};
 
-        return {
-          imageUrl: data.images?.[0]?.url ?? null,
-          followerCount: data.followers?.total ?? 0,
-          name: data.name ?? null,
-          platformId: data.id ?? null,
-        };
+async function scrapeSpotifyListeners(
+  artistId: string
+): Promise<{ monthlyListeners: number; followers: number | null; name: string | null } | null> {
+  try {
+    const res = await fetch(`https://open.spotify.com/artist/${artistId}`, {
+      headers: SCRAPE_HEADERS,
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Monthly listeners: "62,131 monthly listeners"
+    let monthlyListeners = 0;
+    const exactMatch = html.match(/([\d,]+)\s+monthly\s+listeners/i);
+    if (exactMatch) {
+      monthlyListeners = parseInt(exactMatch[1].replace(/,/g, ""), 10);
+    } else {
+      // Abbreviated form: "62.1K monthly listeners"
+      const abbrevMatch = html.match(/([\d.]+)([KMB])\s+monthly\s+listeners/i);
+      if (abbrevMatch) {
+        const suffixes: Record<string, number> = { K: 1_000, M: 1_000_000, B: 1_000_000_000 };
+        monthlyListeners = Math.round(parseFloat(abbrevMatch[1]) * (suffixes[abbrevMatch[2].toUpperCase()] ?? 1));
       }
-
-      const text = await res.text().catch(() => "");
-      console.error(`[Spotify] Web token artist lookup failed: ${res.status} ${text}`);
-    } catch (err) {
-      console.error("[Spotify] Web token artist lookup error:", err);
     }
-  }
 
-  return fetchSpotifyArtistPageFallback(url, artistId);
+    // Followers from HTML: ">3,587</p>...Followers</p>"
+    let followers: number | null = null;
+    const followersMatch = html.match(/>([\d,]+)<\/[^>]+>\s*<[^>]+>Followers</i);
+    if (followersMatch) {
+      followers = parseInt(followersMatch[1].replace(/,/g, ""), 10);
+    }
+
+    // Artist name from JSON-LD
+    let name: string | null = null;
+    const nameMatch = html.match(/"name"\s*:\s*"([^"]+)"/);
+    if (nameMatch) {
+      name = nameMatch[1];
+    }
+
+    return { monthlyListeners, followers, name };
+  } catch (err) {
+    console.error("[Spotify] Scrape error:", err);
+    return null;
+  }
+}
+
+type ScrapedSocialStats = {
+  followers: number | null;
+  name: string | null;
+};
+
+async function scrapeInstagramStats(url: string): Promise<ScrapedSocialStats | null> {
+  try {
+    const parsedUrl = new URL(url);
+    const path = parsedUrl.pathname.replace(/\/+$/, "");
+    const match = path.match(/^\/([^/?#]+)/);
+    const username = match?.[1]?.replace(/^@/, "");
+    if (!username) return null;
+
+    const res = await fetch(`https://www.instagram.com/${username}/`, {
+      headers: SCRAPE_HEADERS,
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    // Meta description: "96 Followers, 62 Following, 0 Posts - Name (@user)"
+    const metaMatch = html.match(/<meta[^>]*(?:name|property)="(?:og:)?description"[^>]*content="([^"]*)"/i)
+      ?? html.match(/<meta[^>]*content="([^"]*)"[^>]*name="description"/i);
+
+    let followers: number | null = null;
+    let name: string | null = null;
+
+    if (metaMatch) {
+      const desc = metaMatch[1];
+      const followersMatch = desc.match(/([\d,]+)\s+Followers/i);
+      if (followersMatch) followers = parseInt(followersMatch[1].replace(/,/g, ""), 10);
+      const nameMatch = desc.match(/-\s*(.+?)\s*\((?:@|&#064;)/);
+      if (nameMatch) name = nameMatch[1].trim();
+    }
+
+    return { followers, name };
+  } catch (err) {
+    console.error("[Instagram] Scrape error:", err);
+    return null;
+  }
+}
+
+async function scrapeTikTokStats(url: string): Promise<ScrapedSocialStats | null> {
+  try {
+    const parsedUrl = new URL(url);
+    const match = parsedUrl.pathname.match(/\/@([^/?#]+)/);
+    const username = match?.[1];
+    if (!username) return null;
+
+    const res = await fetch(`https://www.tiktok.com/@${username}`, {
+      headers: SCRAPE_HEADERS,
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+
+    let followers: number | null = null;
+    const followersMatch = html.match(/"followerCount"\s*:\s*(\d+)/);
+    if (followersMatch) followers = parseInt(followersMatch[1], 10);
+
+    let name: string | null = null;
+    const nameMatch = html.match(/"nickname"\s*:\s*"([^"]+)"/);
+    if (nameMatch) name = nameMatch[1];
+
+    return { followers, name };
+  } catch (err) {
+    console.error("[TikTok] Scrape error:", err);
+    return null;
+  }
 }
 
 // ─── Combined ───
@@ -503,6 +515,7 @@ export async function fetchSpotifyArtist(
 export type PlatformStats = {
   imageUrl: string | null;
   followerCount: number;
+  monthlyListeners: number;
   handle: string | null;
   platformId: string | null;
 };
@@ -518,6 +531,7 @@ export async function fetchPlatformStats(
     return {
       imageUrl: data.imageUrl,
       followerCount: data.subscriberCount,
+      monthlyListeners: 0,
       handle: data.handle,
       platformId: data.platformId,
     };
@@ -529,15 +543,29 @@ export async function fetchPlatformStats(
     return {
       imageUrl: data.imageUrl,
       followerCount: data.followerCount,
+      monthlyListeners: data.monthlyListeners,
       handle: null,
       platformId: data.platformId,
     };
   }
 
-  if (platform === "TIKTOK" || platform === "INSTAGRAM") {
+  if (platform === "TIKTOK") {
+    const scraped = await scrapeTikTokStats(url);
     return {
       imageUrl: null,
-      followerCount: 0,
+      followerCount: scraped?.followers ?? 0,
+      monthlyListeners: 0,
+      handle: extractSocialHandle(platform, url),
+      platformId: null,
+    };
+  }
+
+  if (platform === "INSTAGRAM") {
+    const scraped = await scrapeInstagramStats(url);
+    return {
+      imageUrl: null,
+      followerCount: scraped?.followers ?? 0,
+      monthlyListeners: 0,
       handle: extractSocialHandle(platform, url),
       platformId: null,
     };

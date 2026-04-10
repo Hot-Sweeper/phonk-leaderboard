@@ -12,6 +12,8 @@ import {
   Send,
   User,
   RefreshCw,
+  Pencil,
+  Save,
 } from "lucide-react";
 
 function formatCount(n: number): string {
@@ -57,7 +59,7 @@ function extractHandleFromUrl(platform: string, url: string): string | null {
 
 const STAT_LABELS: Record<string, string> = {
   YOUTUBE: "subscribers",
-  SPOTIFY: "followers",
+  SPOTIFY: "monthly listeners",
   TIKTOK: "followers",
   INSTAGRAM: "followers",
 };
@@ -98,6 +100,7 @@ type ArtistLink = {
   url: string;
   handle: string | null;
   followerCount: number;
+  monthlyListeners: number;
 };
 
 type Suggestion = {
@@ -118,6 +121,12 @@ type Artist = {
   suggestions: Suggestion[];
 };
 
+type EditableLink = {
+  platform: string;
+  url: string;
+  handle: string;
+};
+
 export default function ArtistPage() {
   const { id } = useParams<{ id: string }>();
   const { data: session } = useSession();
@@ -131,6 +140,11 @@ export default function ArtistPage() {
   const [suggestUrl, setSuggestUrl] = useState("");
   const [suggestNote, setSuggestNote] = useState("");
   const [suggestSent, setSuggestSent] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editBio, setEditBio] = useState("");
+  const [editLinks, setEditLinks] = useState<EditableLink[]>([]);
 
   const loadArtist = useCallback(async () => {
     const res = await fetch(`/api/artists/${id}`);
@@ -200,6 +214,45 @@ export default function ArtistPage() {
         setSuggestUrl("");
         setSuggestNote("");
       }, 2000);
+    }
+  }
+
+  function openEditModal() {
+    if (!artist) return;
+    setEditName(artist.name);
+    setEditBio(artist.bio ?? "");
+    setEditLinks(
+      artist.links.map((link) => ({
+        platform: link.platform,
+        url: link.url,
+        handle: link.handle ?? "",
+      }))
+    );
+    setShowEdit(true);
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault();
+    setSavingEdit(true);
+
+    try {
+      const validLinks = editLinks.filter((link) => link.url.trim());
+      const res = await fetch(`/api/artists/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName,
+          bio: editBio,
+          links: validLinks,
+        }),
+      });
+
+      if (res.ok) {
+        setArtist(await res.json());
+        setShowEdit(false);
+      }
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -301,6 +354,15 @@ export default function ArtistPage() {
                 </span>
                 {(session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR") && (
                   <button
+                    onClick={openEditModal}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Edit Artist
+                  </button>
+                )}
+                {(session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR") && (
+                  <button
                     onClick={refreshStats}
                     disabled={refreshing}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all disabled:opacity-50"
@@ -341,9 +403,14 @@ export default function ArtistPage() {
                         ? `@${link.handle ?? extractHandleFromUrl(link.platform, link.url)}`
                         : artist.name}
                     </div>
+                    {link.platform === "SPOTIFY" && link.monthlyListeners > 0 && (
+                      <div className="text-white text-sm mt-1 tabular-nums font-semibold">
+                        {formatCount(link.monthlyListeners)} monthly listeners
+                      </div>
+                    )}
                     {link.followerCount > 0 && (
                       <div className="text-[var(--muted-foreground)] text-sm mt-1 tabular-nums">
-                        {formatCount(link.followerCount)} {STAT_LABELS[link.platform] ?? "followers"}
+                        {formatCount(link.followerCount)} {link.platform === "SPOTIFY" ? "followers" : (STAT_LABELS[link.platform] ?? "followers")}
                       </div>
                     )}
                   </div>
@@ -473,6 +540,115 @@ export default function ArtistPage() {
                 </button>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {showEdit && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-6 w-full max-w-lg relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowEdit(false)}
+              className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-xl font-black mb-4">Edit Artist</h2>
+            <form onSubmit={saveEdit} className="flex flex-col gap-3">
+              <input
+                required
+                placeholder="Artist name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+              />
+              <textarea
+                placeholder="Bio (optional)"
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                rows={3}
+                className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+              />
+
+              <div className="text-xs font-bold uppercase text-[var(--muted-foreground)] mt-2">
+                Platform Links
+              </div>
+              {editLinks.map((link, index) => (
+                <div key={`${link.platform}-${index}`} className="flex gap-2">
+                  <select
+                    value={link.platform}
+                    onChange={(e) =>
+                      setEditLinks((prev) =>
+                        prev.map((currentLink, currentIndex) =>
+                          currentIndex === index
+                            ? { ...currentLink, platform: e.target.value }
+                            : currentLink
+                        )
+                      )
+                    }
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
+                  >
+                    {Object.entries(PLATFORM_META).map(([platform, meta]) => (
+                      <option key={platform} value={platform}>
+                        {meta.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    placeholder="URL"
+                    value={link.url}
+                    onChange={(e) =>
+                      setEditLinks((prev) =>
+                        prev.map((currentLink, currentIndex) =>
+                          currentIndex === index
+                            ? { ...currentLink, url: e.target.value }
+                            : currentLink
+                        )
+                      )
+                    }
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+                  />
+                  {editLinks.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditLinks((prev) => prev.filter((_, currentIndex) => currentIndex !== index))
+                      }
+                      className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setEditLinks((prev) => [
+                    ...prev,
+                    { platform: "YOUTUBE", url: "", handle: "" },
+                  ])
+                }
+                className="text-[var(--accent)] text-sm font-bold flex items-center gap-1 hover:underline w-max"
+              >
+                <Plus className="w-4 h-4" /> Add another link
+              </button>
+
+              <button
+                type="submit"
+                disabled={savingEdit}
+                className="mt-2 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {savingEdit ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4" />
+                )}
+                Save Changes
+              </button>
+            </form>
           </div>
         </div>
       )}

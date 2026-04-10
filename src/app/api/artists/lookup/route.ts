@@ -51,8 +51,10 @@ export async function POST(req: Request) {
   const spotifyUrl = extractSpotifyUrl(yt.description);
   if (spotifyUrl) {
     spotifyMatch = await fetchSpotifyArtist(spotifyUrl);
-    if (spotifyMatch) {
+    if (spotifyMatch?.name) {
       (spotifyMatch as Record<string, unknown>).url = spotifyUrl;
+    } else {
+      spotifyMatch = null;
     }
   }
 
@@ -71,5 +73,6 @@ export async function POST(req: Request) {
           url: spotifyUrl,
         }
       : null,
+    spotifyUrl,
   });
 }
