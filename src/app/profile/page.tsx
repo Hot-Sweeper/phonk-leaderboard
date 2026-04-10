@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { User, Music2, Youtube, Instagram, Twitter, Save, ExternalLink } from "lucide-react";
+import { User, Music2, Video, Camera, AtSign, Save, ExternalLink } from "lucide-react";
 
 export default function ProfilePage() {
   const { data: session, status } = useSession();
@@ -109,8 +109,8 @@ export default function ProfilePage() {
             {[
               { key: "spotifyUrl", label: "Spotify", icon: <Music2 className="w-4 h-4 text-green-400" />, placeholder: "https://open.spotify.com/artist/..." },
               { key: "soundcloudUrl", label: "SoundCloud", icon: <Music2 className="w-4 h-4 text-orange-400" />, placeholder: "https://soundcloud.com/..." },
-              { key: "instagramUrl", label: "Instagram", icon: <Instagram className="w-4 h-4 text-pink-400" />, placeholder: "https://instagram.com/..." },
-              { key: "twitterUrl", label: "Twitter / X", icon: <Twitter className="w-4 h-4 text-sky-400" />, placeholder: "https://x.com/..." },
+              { key: "instagramUrl", label: "Instagram", icon: <Camera className="w-4 h-4 text-pink-400" />, placeholder: "https://instagram.com/..." },
+              { key: "twitterUrl", label: "Twitter / X", icon: <AtSign className="w-4 h-4 text-sky-400" />, placeholder: "https://x.com/..." },
             ].map(({ key, label, icon, placeholder }) => (
               <div key={key} className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] flex items-center gap-1.5">{icon}{label}</label>
@@ -140,7 +140,7 @@ export default function ProfilePage() {
 
         {/* Linked channels */}
         <div className="mt-6 bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-6">
-          <h2 className="text-lg font-black mb-4 flex items-center gap-2"><Youtube className="w-5 h-5 text-red-400" /> Your YouTube Channel</h2>
+          <h2 className="text-lg font-black mb-4 flex items-center gap-2"><Video className="w-5 h-5 text-red-400" /> Your YouTube Channel</h2>
           <p className="text-[var(--muted-foreground)] text-sm">
             Your channel will appear on the leaderboard once you submit it. Go to the{" "}
             <a href="/" className="text-[var(--accent)] hover:underline inline-flex items-center gap-1">
