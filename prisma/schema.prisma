@@ -51,9 +51,9 @@ model User {
   youtubeChannelId  String?   @unique
   youtubeChannelUrl String?
   spotifyUrl        String?
-  soundcloudUrl     String?
+  appleMusicUrl     String?
   instagramUrl      String?
-  twitterUrl        String?
+  tiktokUrl         String?
   accounts          Account[]
   sessions          Session[]
   channel           Channel?

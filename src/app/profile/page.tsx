@@ -1,17 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { User, Music2, Video, Camera, AtSign, Save, ExternalLink } from "lucide-react";
+import { User, Music2, Video, Camera, Music, Save, ExternalLink } from "lucide-react";
 
 export default function ProfilePage() {
   const { data: session, status } = useSession();
 
   const [form, setForm] = useState({
     bio: "",
+    youtubeChannelUrl: "",
     spotifyUrl: "",
-    soundcloudUrl: "",
+    appleMusicUrl: "",
     instagramUrl: "",
-    twitterUrl: "",
+    tiktokUrl: "",
   });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -24,10 +25,11 @@ export default function ProfilePage() {
         if (u.id) {
           setForm({
             bio: u.bio ?? "",
+            youtubeChannelUrl: u.youtubeChannelUrl ?? "",
             spotifyUrl: u.spotifyUrl ?? "",
-            soundcloudUrl: u.soundcloudUrl ?? "",
+            appleMusicUrl: u.appleMusicUrl ?? "",
             instagramUrl: u.instagramUrl ?? "",
-            twitterUrl: u.twitterUrl ?? "",
+            tiktokUrl: u.tiktokUrl ?? "",
           });
         }
       });
@@ -107,10 +109,11 @@ export default function ProfilePage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[
+                          { key: "youtubeChannelUrl", label: "YouTube", icon: <Video className="w-4 h-4 text-red-400" />, placeholder: "https://youtube.com/@yourhandle" },
               { key: "spotifyUrl", label: "Spotify", icon: <Music2 className="w-4 h-4 text-green-400" />, placeholder: "https://open.spotify.com/artist/..." },
-              { key: "soundcloudUrl", label: "SoundCloud", icon: <Music2 className="w-4 h-4 text-orange-400" />, placeholder: "https://soundcloud.com/..." },
-              { key: "instagramUrl", label: "Instagram", icon: <Camera className="w-4 h-4 text-pink-400" />, placeholder: "https://instagram.com/..." },
-              { key: "twitterUrl", label: "Twitter / X", icon: <AtSign className="w-4 h-4 text-sky-400" />, placeholder: "https://x.com/..." },
+              { key: "appleMusicUrl", label: "Apple Music", icon: <Music className="w-4 h-4 text-pink-400" />, placeholder: "https://music.apple.com/artist/..." },
+              { key: "instagramUrl", label: "Instagram", icon: <Camera className="w-4 h-4 text-fuchsia-400" />, placeholder: "https://instagram.com/..." },
+              { key: "tiktokUrl", label: "TikTok", icon: <Music className="w-4 h-4 text-sky-400" />, placeholder: "https://tiktok.com/@..." },
             ].map(({ key, label, icon, placeholder }) => (
               <div key={key} className="flex flex-col gap-1.5">
                 <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] flex items-center gap-1.5">{icon}{label}</label>

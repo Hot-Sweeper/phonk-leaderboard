@@ -8,7 +8,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { bio, spotifyUrl, soundcloudUrl, instagramUrl, twitterUrl } =
+  const { bio, spotifyUrl, appleMusicUrl, instagramUrl, tiktokUrl } =
     await req.json();
 
   const user = await prisma.user.update({
@@ -16,9 +16,9 @@ export async function PATCH(req: Request) {
     data: {
       bio: bio?.trim() ?? undefined,
       spotifyUrl: spotifyUrl?.trim() || null,
-      soundcloudUrl: soundcloudUrl?.trim() || null,
+      appleMusicUrl: appleMusicUrl?.trim() || null,
       instagramUrl: instagramUrl?.trim() || null,
-      twitterUrl: twitterUrl?.trim() || null,
+      tiktokUrl: tiktokUrl?.trim() || null,
     },
     select: {
       id: true,
@@ -26,9 +26,9 @@ export async function PATCH(req: Request) {
       bio: true,
       image: true,
       spotifyUrl: true,
-      soundcloudUrl: true,
+      appleMusicUrl: true,
       instagramUrl: true,
-      twitterUrl: true,
+      tiktokUrl: true,
       youtubeChannelUrl: true,
       role: true,
     },
@@ -50,9 +50,9 @@ export async function GET(req: Request) {
       bio: true,
       image: true,
       spotifyUrl: true,
-      soundcloudUrl: true,
+      appleMusicUrl: true,
       instagramUrl: true,
-      twitterUrl: true,
+      tiktokUrl: true,
       youtubeChannelUrl: true,
       role: true,
       channel: true,
