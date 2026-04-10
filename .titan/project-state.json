@@ -1,0 +1,28 @@
+{
+  "projectName": "PhonkLeaderboard",
+  "status": "shape-locked",
+  "intent": "A Funk/Phonk YouTube channel leaderboard website based on subscriber count, growing into total views and trending metrics.",
+  "agency": "Agent decides defaults. Strong foundation optimized for long-term growth.",
+  "techStack": {
+    "framework": "Next.js (App Router)",
+    "language": "TypeScript",
+    "css": "Tailwind CSS",
+    "database": "PostgreSQL (externalized for Railway-like environments)",
+    "orm": "Prisma",
+    "icons": "lucide-react",
+    "externalApi": "YouTube Data API v3"
+  },
+  "designTokens": {
+    "theme": "Dark, atmospheric, 'Phonk' aesthetic (dark grays/blacks with deep neon purple/red accents)",
+    "avoid": "Emojis, generic SaaS templates, hardcoded colors",
+    "images": "Royalty-free Phonk/music-themed background visual"
+  },
+  "currentPhase": "implementation-ready",
+  "features": [
+    "Channel link submission input",
+    "Automatic subscriber count fetching via YouTube API",
+    "Ranked leaderboard UI",
+    "Total views tracking (future)",
+    "Trending algorithm (future)"
+  ]
+}
