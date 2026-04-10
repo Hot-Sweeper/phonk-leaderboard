@@ -19,11 +19,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Query required" }, { status: 400 });
   }
 
-  const results = await searchSpotifyArtists(q.trim(), 8);
-  const withUrls = results.map((r) => ({
-    ...r,
-    url: `https://open.spotify.com/artist/${r.platformId}`,
-  }));
-
-  return NextResponse.json(withUrls);
+  try {
+    const results = await searchSpotifyArtists(q.trim(), 8);
+    const withUrls = results.map((r) => ({
+      ...r,
+      url: `https://open.spotify.com/artist/${r.platformId}`,
+    }));
+    return NextResponse.json(withUrls);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Spotify search failed";
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
 }

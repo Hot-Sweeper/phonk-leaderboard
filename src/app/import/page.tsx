@@ -51,6 +51,7 @@ type ImportEntry = {
   spotifySearchQuery: string;
   spotifySearchResults: SpotifyResult[];
   spotifySearching: boolean;
+  spotifyError?: string;
 };
 
 export default function ImportPage() {
@@ -142,6 +143,9 @@ export default function ImportPage() {
           continue;
         }
         const data = await res.json();
+        const noSpotifyFound =
+          !data.spotifyMatch &&
+          (!data.spotifySuggestions || data.spotifySuggestions.length === 0);
         updateEntry(entry.id, {
           status: "ready",
           youtube: data.youtube,
@@ -150,6 +154,8 @@ export default function ImportPage() {
           selectedSpotify: data.spotifyMatch ?? null,
           spotifyConfirmed: !!data.spotifyMatch,
           spotifySearchQuery: data.youtube?.name ?? "",
+          showSpotifySearch: noSpotifyFound,
+          spotifyError: data.spotifyError ?? undefined,
         });
       } catch {
         updateEntry(entry.id, { status: "error", error: "Network error" });
@@ -247,7 +253,7 @@ export default function ImportPage() {
   }
 
   async function searchSpotify(entryId: string, query: string) {
-    updateEntry(entryId, { spotifySearching: true });
+    updateEntry(entryId, { spotifySearching: true, spotifyError: undefined });
     try {
       const res = await fetch("/api/artists/search-spotify", {
         method: "POST",
@@ -261,10 +267,17 @@ export default function ImportPage() {
           spotifySearching: false,
         });
       } else {
-        updateEntry(entryId, { spotifySearching: false });
+        const err = await res.json().catch(() => ({}));
+        updateEntry(entryId, {
+          spotifySearching: false,
+          spotifyError: err.error || `Search failed (${res.status})`,
+        });
       }
     } catch {
-      updateEntry(entryId, { spotifySearching: false });
+      updateEntry(entryId, {
+        spotifySearching: false,
+        spotifyError: "Network error — could not reach Spotify search",
+      });
     }
   }
 
@@ -747,6 +760,12 @@ function EntryCard({
         ) : (
           /* Manual Spotify search or no results */
           <div>
+            {entry.spotifyError && !entry.spotifySearchResults.length && (
+              <p className="text-xs text-red-400 mb-2 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3 shrink-0" />
+                {entry.spotifyError}
+              </p>
+            )}
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-[var(--muted-foreground)] font-bold">
                 {entry.showSpotifySearch
@@ -788,6 +807,12 @@ function EntryCard({
                     )}
                   </button>
                 </div>
+                {entry.spotifyError && (
+                  <p className="text-xs text-red-400 mt-1 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3 shrink-0" />
+                    {entry.spotifyError}
+                  </p>
+                )}
                 {entry.spotifySearchResults.length > 0 && (
                   <div className="flex flex-col gap-1.5">
                     {entry.spotifySearchResults.map((s) => (

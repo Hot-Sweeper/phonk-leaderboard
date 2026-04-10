@@ -147,31 +147,34 @@ export async function searchSpotifyArtists(
   limit = 5
 ): Promise<SpotifyArtistData[]> {
   const token = await getSpotifyToken();
-  if (!token) return [];
-
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      type: "artist",
-      limit: String(limit),
-    });
-    const res = await fetch(
-      `https://api.spotify.com/v1/search?${params}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.artists?.items ?? []).map(
-      (a: { id: string; name: string; images?: { url: string }[]; followers?: { total: number } }) => ({
-        imageUrl: a.images?.[0]?.url ?? null,
-        followerCount: a.followers?.total ?? 0,
-        name: a.name ?? null,
-        platformId: a.id ?? null,
-      })
-    );
-  } catch {
-    return [];
+  if (!token) {
+    console.error("[Spotify] Cannot search — no token available");
+    throw new Error("Spotify credentials not configured");
   }
+
+  const params = new URLSearchParams({
+    q: query,
+    type: "artist",
+    limit: String(limit),
+  });
+  const res = await fetch(
+    `https://api.spotify.com/v1/search?${params}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    console.error(`[Spotify] Search failed: ${res.status} ${text}`);
+    throw new Error(`Spotify search failed (${res.status})`);
+  }
+  const data = await res.json();
+  return (data.artists?.items ?? []).map(
+    (a: { id: string; name: string; images?: { url: string }[]; followers?: { total: number } }) => ({
+      imageUrl: a.images?.[0]?.url ?? null,
+      followerCount: a.followers?.total ?? 0,
+      name: a.name ?? null,
+      platformId: a.id ?? null,
+    })
+  );
 }
 
 /** Search YouTube channels by query */
@@ -255,7 +258,10 @@ async function getSpotifyToken(): Promise<string | null> {
 
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+  if (!clientId || !clientSecret) {
+    console.error("[Spotify] Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET");
+    return null;
+  }
 
   try {
     const res = await fetch("https://accounts.spotify.com/api/token", {
@@ -266,12 +272,17 @@ async function getSpotifyToken(): Promise<string | null> {
       },
       body: "grant_type=client_credentials",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[Spotify] Token request failed: ${res.status} ${text}`);
+      return null;
+    }
     const data = await res.json();
     spotifyToken = data.access_token;
     spotifyTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
     return spotifyToken;
-  } catch {
+  } catch (err) {
+    console.error("[Spotify] Token request error:", err);
     return null;
   }
 }

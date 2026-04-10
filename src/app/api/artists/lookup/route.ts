@@ -59,12 +59,17 @@ export async function POST(req: Request) {
 
   // If no Spotify in description, search by channel name
   let spotifySuggestions: Array<Record<string, unknown>> = [];
+  let spotifyError: string | null = null;
   if (!spotifyMatch) {
-    const results = await searchSpotifyArtists(yt.name, 5);
-    spotifySuggestions = results.map((r) => ({
-      ...r,
-      url: `https://open.spotify.com/artist/${r.platformId}`,
-    }));
+    try {
+      const results = await searchSpotifyArtists(yt.name, 5);
+      spotifySuggestions = results.map((r) => ({
+        ...r,
+        url: `https://open.spotify.com/artist/${r.platformId}`,
+      }));
+    } catch (err) {
+      spotifyError = err instanceof Error ? err.message : "Spotify search failed";
+    }
   }
 
   return NextResponse.json({
@@ -83,5 +88,6 @@ export async function POST(req: Request) {
         }
       : null,
     spotifySuggestions,
+    spotifyError,
   });
 }
