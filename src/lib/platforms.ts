@@ -257,6 +257,53 @@ export async function searchYouTubeChannels(
 
 let spotifyToken: string | null = null;
 let spotifyTokenExpiry = 0;
+let spotifyWebToken: string | null = null;
+let spotifyWebTokenExpiry = 0;
+
+async function getSpotifyWebToken(): Promise<string | null> {
+  if (spotifyWebToken && Date.now() < spotifyWebTokenExpiry) {
+    return spotifyWebToken;
+  }
+
+  try {
+    const res = await fetch(
+      "https://open.spotify.com/get_access_token?reason=transport&productType=web_player",
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        },
+        next: { revalidate: 0 },
+      }
+    );
+
+    const text = await res.text();
+    if (!res.ok) {
+      console.error(`[Spotify] Web token request failed: ${res.status} ${text}`);
+      return null;
+    }
+
+    const data = JSON.parse(text) as {
+      accessToken?: string;
+      accessTokenExpirationTimestampMs?: number;
+    };
+
+    if (!data.accessToken) {
+      console.error("[Spotify] Web token missing accessToken");
+      return null;
+    }
+
+    spotifyWebToken = data.accessToken;
+    spotifyWebTokenExpiry =
+      (data.accessTokenExpirationTimestampMs ?? Date.now() + 30 * 60 * 1000) -
+      60_000;
+    return spotifyWebToken;
+  } catch (err) {
+    console.error("[Spotify] Web token request error:", err);
+    return null;
+  }
+}
 
 /** Get a Spotify access token via Client Credentials flow */
 async function getSpotifyToken(): Promise<string | null> {
@@ -417,6 +464,34 @@ export async function fetchSpotifyArtist(
       console.error(`[Spotify] Artist lookup failed: ${res.status} ${text}`);
     } catch (err) {
       console.error("[Spotify] Artist lookup error:", err);
+    }
+  }
+
+  const webToken = await getSpotifyWebToken();
+  if (webToken) {
+    try {
+      const res = await fetch(
+        `https://api.spotify.com/v1/artists/${artistId}`,
+        {
+          headers: { Authorization: `Bearer ${webToken}` },
+          next: { revalidate: 0 },
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+
+        return {
+          imageUrl: data.images?.[0]?.url ?? null,
+          followerCount: data.followers?.total ?? 0,
+          name: data.name ?? null,
+          platformId: data.id ?? null,
+        };
+      }
+
+      const text = await res.text().catch(() => "");
+      console.error(`[Spotify] Web token artist lookup failed: ${res.status} ${text}`);
+    } catch (err) {
+      console.error("[Spotify] Web token artist lookup error:", err);
     }
   }
 
