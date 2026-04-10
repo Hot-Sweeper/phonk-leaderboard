@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Plus,
   AlertCircle,
+  ExternalLink,
 } from "lucide-react";
 
 function formatCount(n: number): string {
@@ -798,6 +799,14 @@ function EntryCard({
             </div>
             {entry.showSpotifySearch && (
               <div>
+                <a
+                  href={`https://open.spotify.com/search/${encodeURIComponent(entry.spotifySearchQuery || entry.youtube?.name || "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mb-3 px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white text-xs font-bold transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Search on Spotify
+                </a>
                 <div className="flex gap-2 mb-2">
                   <input
                     type="text"
@@ -807,7 +816,7 @@ function EntryCard({
                       if (e.key === "Enter")
                         onSearchSpotify(entry.spotifySearchQuery);
                     }}
-                    placeholder="Paste Spotify URL or search by name..."
+                    placeholder="Paste Spotify artist URL here..."
                     className="flex-1 bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-green-600 placeholder:text-zinc-500"
                   />
                   <button
@@ -818,7 +827,7 @@ function EntryCard({
                     {entry.spotifySearching ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     ) : (
-                      <Search className="w-3.5 h-3.5" />
+                      <Check className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </div>
