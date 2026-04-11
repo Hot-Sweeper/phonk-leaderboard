@@ -24,6 +24,10 @@ import {
   AlertCircle,
   Music,
   StopCircle,
+  Bug,
+  Play,
+  Database,
+  Zap,
 } from "lucide-react";
 
 type ModInvite = {
@@ -82,7 +86,14 @@ export default function AdminPage() {
   const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings" | "debug">("staff");
+
+  // Debug state
+  const [debugChecks, setDebugChecks] = useState<{ name: string; status: "ok" | "warn" | "error"; message: string; detail?: string }[]>([]);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugTimestamp, setDebugTimestamp] = useState<string | null>(null);
+  const [debugActionResult, setDebugActionResult] = useState<{ status: string; message: string; detail?: string } | null>(null);
+  const [debugActionLoading, setDebugActionLoading] = useState<string | null>(null);
 
   // Settings state
   const [updateIntervalHours, setUpdateIntervalHours] = useState(1);
@@ -426,6 +437,7 @@ export default function AdminPage() {
             { key: "staff" as const, label: "Staff Management", icon: Crown },
             { key: "invites" as const, label: "Mod Invites", icon: Key },
             { key: "settings" as const, label: "Settings", icon: Settings },
+            { key: "debug" as const, label: "Debug", icon: Bug },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -1088,6 +1100,134 @@ export default function AdminPage() {
                     );
                   })}
                 </div>
+              </div>
+            )}
+          </>
+        )}
+        {/* ── Debug Tab ── */}
+        {activeTab === "debug" && (
+          <>
+            <div className="flex items-center gap-3 mb-6">
+              <h2 className="text-lg font-bold text-white">System Diagnostics</h2>
+              <button
+                onClick={async () => {
+                  setDebugLoading(true);
+                  setDebugActionResult(null);
+                  try {
+                    const res = await fetch("/api/admin/debug");
+                    const data = await res.json();
+                    setDebugChecks(data.checks ?? []);
+                    setDebugTimestamp(data.timestamp ?? null);
+                  } catch {
+                    setDebugChecks([{ name: "Fetch Error", status: "error", message: "Failed to reach debug endpoint" }]);
+                  } finally {
+                    setDebugLoading(false);
+                  }
+                }}
+                disabled={debugLoading}
+                className="px-3 py-1.5 bg-[var(--accent)] text-white text-sm font-bold rounded-lg hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-50"
+              >
+                {debugLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                Run Diagnostics
+              </button>
+              {debugTimestamp && (
+                <span className="text-xs text-[var(--muted-foreground)]">
+                  Last run: {new Date(debugTimestamp).toLocaleString()}
+                </span>
+              )}
+            </div>
+
+            {debugChecks.length > 0 && (
+              <div className="bg-[var(--secondary)] rounded-xl border border-[var(--muted)] overflow-hidden mb-6">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--muted)] text-[var(--muted-foreground)] text-left">
+                      <th className="px-4 py-2.5 font-semibold w-8"></th>
+                      <th className="px-4 py-2.5 font-semibold">Check</th>
+                      <th className="px-4 py-2.5 font-semibold">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {debugChecks.map((check, i) => (
+                      <tr key={i} className="border-t border-[var(--muted)]/30 hover:bg-[var(--muted)]/10">
+                        <td className="px-4 py-2">
+                          {check.status === "ok" && <CheckCircle className="w-4 h-4 text-green-400" />}
+                          {check.status === "warn" && <AlertCircle className="w-4 h-4 text-yellow-400" />}
+                          {check.status === "error" && <XCircle className="w-4 h-4 text-red-400" />}
+                        </td>
+                        <td className="px-4 py-2 font-medium text-white whitespace-nowrap">{check.name}</td>
+                        <td className="px-4 py-2">
+                          <span className={check.status === "ok" ? "text-green-400" : check.status === "warn" ? "text-yellow-400" : "text-red-400"}>
+                            {check.message}
+                          </span>
+                          {check.detail && (
+                            <div className="text-xs text-[var(--muted-foreground)] mt-0.5 break-all max-w-xl">{check.detail}</div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Debug Actions */}
+            <h3 className="text-sm font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-3">Debug Actions</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+              {[
+                { action: "testSettingWrite", label: "Test Settings Write", icon: Database, desc: "Write, read, delete a test setting" },
+                { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks for a test artist" },
+                { action: "clearStaleRunning", label: "Clear Stale Running", icon: StopCircle, desc: "Mark all running logs as failed" },
+              ].map((btn) => (
+                <button
+                  key={btn.action}
+                  onClick={async () => {
+                    setDebugActionLoading(btn.action);
+                    setDebugActionResult(null);
+                    try {
+                      const res = await fetch("/api/admin/debug", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: btn.action }),
+                      });
+                      const data = await res.json();
+                      setDebugActionResult(data);
+                    } catch {
+                      setDebugActionResult({ status: "error", message: "Request failed" });
+                    } finally {
+                      setDebugActionLoading(null);
+                    }
+                  }}
+                  disabled={debugActionLoading !== null}
+                  className="bg-[var(--secondary)] border border-[var(--muted)] rounded-xl p-4 text-left hover:border-[var(--accent)]/50 transition-all disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {debugActionLoading === btn.action ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)]" />
+                    ) : (
+                      <btn.icon className="w-4 h-4 text-[var(--accent)]" />
+                    )}
+                    <span className="font-bold text-white text-sm">{btn.label}</span>
+                  </div>
+                  <p className="text-xs text-[var(--muted-foreground)]">{btn.desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {debugActionResult && (
+              <div className={`rounded-xl border p-4 mb-6 ${
+                debugActionResult.status === "ok"
+                  ? "bg-green-950/20 border-green-800/40 text-green-400"
+                  : "bg-red-950/20 border-red-800/40 text-red-400"
+              }`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {debugActionResult.status === "ok" ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  <span className="font-bold text-sm">{debugActionResult.status === "ok" ? "Success" : "Error"}</span>
+                </div>
+                <p className="text-sm">{debugActionResult.message}</p>
+                {debugActionResult.detail && (
+                  <pre className="text-xs mt-2 bg-black/30 p-2 rounded-lg overflow-x-auto max-h-40">{debugActionResult.detail}</pre>
+                )}
               </div>
             )}
           </>
