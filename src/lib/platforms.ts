@@ -416,14 +416,21 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
   artists: { name: string; id: string }[];
 }[] | null> {
   const token = await getSpotifyToken();
-  if (!token) return null;
+  if (!token) {
+    console.error(`[Spotify] No token available for top-tracks of ${spotifyId}`);
+    return null;
+  }
 
   try {
     const res = await fetch(
       `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks?market=US`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[Spotify] top-tracks failed for ${spotifyId}: ${res.status} ${text.substring(0, 200)}`);
+      return null;
+    }
     const data = await res.json();
     return (data.tracks ?? []).map((t: Record<string, unknown>) => ({
       id: t.id as string,
@@ -445,7 +452,8 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
         id: a.id,
       })),
     }));
-  } catch {
+  } catch (err) {
+    console.error(`[Spotify] top-tracks exception for ${spotifyId}:`, err);
     return null;
   }
 }

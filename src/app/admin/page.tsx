@@ -182,20 +182,41 @@ export default function AdminPage() {
 
   async function saveInterval(hours: number) {
     setUpdateIntervalHours(hours);
-    await fetch("/api/admin/settings", {
+    const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "updateIntervalHours", value: String(hours) }),
     });
+    if (res.ok) {
+      setSettingsResult(`Stats update interval saved: every ${hours}h`);
+    } else {
+      setSettingsResult(`Failed to save interval (${res.status})`);
+      // Reload to get actual value
+      const settingsRes = await fetch("/api/admin/settings");
+      if (settingsRes.ok) {
+        const s = await settingsRes.json();
+        setUpdateIntervalHours(s.updateIntervalHours ?? 1);
+      }
+    }
   }
 
   async function saveSongInterval(hours: number) {
     setSongUpdateIntervalHours(hours);
-    await fetch("/api/admin/settings", {
+    const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key: "songUpdateIntervalHours", value: String(hours) }),
     });
+    if (res.ok) {
+      setSettingsResult(`Song update interval saved: every ${hours}h`);
+    } else {
+      setSettingsResult(`Failed to save song interval (${res.status})`);
+      const settingsRes = await fetch("/api/admin/settings");
+      if (settingsRes.ok) {
+        const s = await settingsRes.json();
+        setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
+      }
+    }
   }
 
   async function updateAllArtists() {
@@ -1036,10 +1057,15 @@ export default function AdminPage() {
                               </thead>
                               <tbody>
                                 {details.map((d, i) => (
-                                  <tr key={i} className="border-t border-[var(--muted)]/30" title={d.error || undefined}>
+                                  <tr key={i} className="border-t border-[var(--muted)]/30">
                                     <td className="py-1 truncate max-w-[180px]">{d.name}</td>
                                     <td className={`py-1 ${d.status === "ok" ? "text-green-400" : d.status === "skipped" || d.status === "no-tracks" ? "text-yellow-400" : "text-red-400"}`}>
                                       {d.status === "ok" ? "OK" : d.status === "skipped" ? "Skipped" : d.status === "no-tracks" ? "No tracks" : "Failed"}
+                                      {d.error && (
+                                        <span className="block text-[10px] text-red-400/70 truncate max-w-[300px]" title={d.error}>
+                                          {d.error.substring(0, 80)}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="py-1 text-right text-[var(--muted-foreground)]">
                                       {(d.durationMs / 1000).toFixed(1)}s
