@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   ArrowLeft,
   Star,
@@ -349,9 +350,11 @@ export default function ArtistPage() {
           <div className="flex items-start gap-6 relative">
             {/* Avatar */}
             {artist.imageUrl ? (
-              <img
+              <Image
                 src={artist.imageUrl}
                 alt={artist.name}
+                width={128}
+                height={128}
                 className="w-24 h-24 md:w-32 md:h-32 rounded-2xl object-cover border-2 border-[var(--muted)] shadow-2xl shrink-0"
               />
             ) : (

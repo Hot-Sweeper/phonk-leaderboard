@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Trophy,
   TrendingUp,
@@ -173,9 +174,11 @@ function PodiumCard({
         )}
         <Link href={`/artist/${artist.id}`}>
           {artist.imageUrl ? (
-            <img
+            <Image
               src={artist.imageUrl}
               alt={artist.name}
+              width={96}
+              height={96}
               className={`w-20 h-20 md:w-24 md:h-24 rounded-full ring-4 ${rings[rank]} object-cover transition-transform hover:scale-105`}
             />
           ) : (
@@ -657,9 +660,11 @@ export default function LeaderboardPage() {
                   {/* Avatar */}
                   <Link href={`/artist/${artist.id}`} className="shrink-0">
                     {artist.imageUrl ? (
-                      <img
+                      <Image
                         src={artist.imageUrl}
                         alt={artist.name}
+                        width={40}
+                        height={40}
                         className="w-10 h-10 rounded-full object-cover border border-[var(--muted)] group-hover:border-[var(--accent)] transition-colors"
                       />
                     ) : (
