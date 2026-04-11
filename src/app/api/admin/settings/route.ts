@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
-import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
+import { fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
+import { runFullUpdate } from "@/lib/update-runner";
 
 // GET — fetch site settings + recent update logs
 export async function GET() {
@@ -77,100 +77,9 @@ export async function POST(req: Request) {
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
 
-async function handleUpdateAll(trigger: string = "manual") {
-  const startTime = Date.now();
-
-  const artists = await prisma.artist.findMany({
-    include: { links: true },
-  });
-
-  // Create log entry
-  const log = await prisma.updateLog.create({
-    data: {
-      trigger,
-      status: "running",
-      totalArtists: artists.length,
-    },
-  });
-
-  let updated = 0;
-  let failed = 0;
-  const details: { name: string; status: string; durationMs: number; error?: string }[] = [];
-
-  for (const artist of artists) {
-    const artistStart = Date.now();
-    try {
-      let newImageUrl = artist.imageUrl;
-
-      for (const link of artist.links) {
-        const stats = await fetchPlatformStats(link.platform, link.url);
-        if (!stats) continue;
-
-        await prisma.artistLink.update({
-          where: { id: link.id },
-          data: {
-            followerCount: stats.followerCount,
-            monthlyListeners: stats.monthlyListeners,
-            handle: stats.handle ?? link.handle,
-            platformId: stats.platformId ?? link.platformId,
-          },
-        });
-
-        if (link.platform === "SPOTIFY" && stats.imageUrl) {
-          newImageUrl = stats.imageUrl;
-        }
-      }
-
-      if (newImageUrl !== artist.imageUrl) {
-        await prisma.artist.update({
-          where: { id: artist.id },
-          data: { imageUrl: newImageUrl },
-        });
-      }
-
-      // Record snapshot for growth tracking
-      await recordSnapshot(artist.id);
-
-      updated++;
-      details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart });
-    } catch (err) {
-      failed++;
-      details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
-    }
-
-    // Update progress in log
-    await prisma.updateLog.update({
-      where: { id: log.id },
-      data: { updatedCount: updated, failedCount: failed },
-    });
-  }
-
-  // Record the time of last update
-  await prisma.siteSetting.upsert({
-    where: { key: "lastFullUpdate" },
-    update: { value: new Date().toISOString() },
-    create: { key: "lastFullUpdate", value: new Date().toISOString() },
-  });
-
-  // Record rank snapshots after all stats are updated
-  await recordRankSnapshots();
-
-  const totalDuration = Date.now() - startTime;
-
-  // Finalize log
-  await prisma.updateLog.update({
-    where: { id: log.id },
-    data: {
-      status: "completed",
-      updatedCount: updated,
-      failedCount: failed,
-      durationMs: totalDuration,
-      details: JSON.stringify(details),
-      completedAt: new Date(),
-    },
-  });
-
-  return NextResponse.json({ updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration });
+async function handleUpdateAll() {
+  const result = await runFullUpdate("manual");
+  return NextResponse.json(result);
 }
 
 async function handleMigrateToSpotify() {
