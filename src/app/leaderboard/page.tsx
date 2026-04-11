@@ -656,7 +656,8 @@ export default function LeaderboardPage() {
               const showPodium = !search && !platform && artists.length >= 3;
               const listArtists = showPodium ? rest : artists;
               return listArtists.map((artist, idx) => {
-              const rank = showPodium ? idx + 3 : idx;
+              const rc = rankChanges[artist.id];
+              const rank = (search || platform) && rc ? rc.currentRank - 1 : (showPodium ? idx + 3 : idx);
               const isWatched = watchlistedIds.has(artist.id);
               const rc = rankChanges[artist.id];
               return (
