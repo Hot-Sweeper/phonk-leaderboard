@@ -4,6 +4,25 @@ import { prisma } from "@/lib/prisma";
 import { fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
 import { runFullUpdate, runSongUpdate, cancelAllRunning } from "@/lib/update-runner";
 
+const SCHEDULED_UPDATERS = [
+  {
+    key: "updateIntervalHours",
+    lastRunKey: "lastFullUpdate",
+    label: "Stats Updater",
+    description: "Refreshes artist platform stats, rank history, and profile metadata.",
+    defaultHours: 1,
+    updateType: "stats",
+  },
+  {
+    key: "songUpdateIntervalHours",
+    lastRunKey: "lastSongUpdate",
+    label: "Song Updater",
+    description: "Refreshes track popularity, credits, and song hype snapshot history.",
+    defaultHours: 6,
+    updateType: "songs",
+  },
+] as const;
+
 // GET — fetch site settings + recent update logs
 export async function GET() {
   const session = await auth();
@@ -25,6 +44,14 @@ export async function GET() {
     lastFullUpdate: map["lastFullUpdate"] ?? null,
     songUpdateIntervalHours: parseInt(map["songUpdateIntervalHours"] ?? "6", 10),
     lastSongUpdate: map["lastSongUpdate"] ?? null,
+    updaters: SCHEDULED_UPDATERS.map((updater) => ({
+      key: updater.key,
+      label: updater.label,
+      description: updater.description,
+      updateType: updater.updateType,
+      intervalHours: parseInt(map[updater.key] ?? String(updater.defaultHours), 10),
+      lastRun: map[updater.lastRunKey] ?? null,
+    })),
     logs,
   });
 }
@@ -41,7 +68,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "key and value required" }, { status: 400 });
   }
 
-  const allowed = ["updateIntervalHours", "songUpdateIntervalHours"];
+  const allowed = SCHEDULED_UPDATERS.map((updater) => updater.key);
   if (!allowed.includes(key)) {
     return NextResponse.json({ error: "Invalid setting key" }, { status: 400 });
   }

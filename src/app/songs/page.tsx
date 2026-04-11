@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { Skeleton } from "@/components/Skeleton";
 import { isValidPreviewUrl, toPreviewProxyUrl } from "@/lib/preview";
 import {
   Music,
@@ -22,6 +23,22 @@ type Contributor = {
   imageUrl: string | null;
 };
 
+type DisplayArtist = {
+  key: string;
+  name: string;
+  href: string;
+  external: boolean;
+};
+
+type LeaderboardMode = "popularity" | "day" | "week" | "month";
+
+const LEADERBOARD_MODES: Array<{ key: LeaderboardMode; label: string; shortLabel: string }> = [
+  { key: "popularity", label: "Popularity", shortLabel: "Pop" },
+  { key: "day", label: "24H Hype", shortLabel: "24H" },
+  { key: "week", label: "7D Hype", shortLabel: "7D" },
+  { key: "month", label: "30D Hype", shortLabel: "30D" },
+];
+
 type Track = {
   id: string;
   spotifyId: string | null;
@@ -38,7 +55,15 @@ type Track = {
   previewUrl: string | null;
   bpm: number | null;
   gain: number | null;
+  rank: number;
   versions: string[];
+  primaryVersion: string;
+  metricValue: number;
+  trendDelta: number;
+  trendPercent: number;
+  hasTrendData: boolean;
+  leaderboardMode: LeaderboardMode;
+  artists?: DisplayArtist[];
   featuredArtists: string[];
   contributorIds: string[];
   contributors: Contributor[];
@@ -87,28 +112,135 @@ function formatPopularity(p: number) {
   return String(p);
 }
 
-function getVersionLabel(versions: string[]) {
-  const variantVersions = versions.filter((version) => version.toLowerCase() !== "original");
+function formatTrendDelta(delta: number) {
+  if (delta === 0) return "0";
+  const sign = delta > 0 ? "+" : "-";
+  return `${sign}${formatPopularity(Math.abs(delta))}`;
+}
 
-  if (variantVersions.length === 0) return "Original";
-  if (variantVersions.length === 1) return variantVersions[0];
-  if (variantVersions.length === 2) return variantVersions.join(" / ");
-  return `${variantVersions[0]} +${variantVersions.length - 1}`;
+function getModeSummary(mode: LeaderboardMode, totalCount: number) {
+  if (totalCount <= 0) {
+    return mode === "popularity" ? "Loading tracks..." : "Loading hype rankings...";
+  }
+
+  switch (mode) {
+    case "day":
+      return `${totalCount} tracks ranked by 24-hour popularity gain`;
+    case "week":
+      return `${totalCount} tracks ranked by 7-day popularity gain`;
+    case "month":
+      return `${totalCount} tracks ranked by 30-day popularity gain`;
+    default:
+      return `${totalCount} tracks ranked by popularity`;
+  }
+}
+
+function getMetricHeaderLabel(mode: LeaderboardMode) {
+  switch (mode) {
+    case "day":
+      return "24H Hype";
+    case "week":
+      return "7D Hype";
+    case "month":
+      return "30D Hype";
+    default:
+      return "Popularity";
+  }
+}
+
+function getMetricText(track: Track, mode: LeaderboardMode) {
+  if (mode === "popularity") {
+    return formatPopularity(track.popularity);
+  }
+
+  if (!track.hasTrendData) {
+    return "--";
+  }
+
+  return formatTrendDelta(track.metricValue);
+}
+
+function getMetricSubtext(track: Track, mode: LeaderboardMode) {
+  if (mode === "popularity") {
+    return null;
+  }
+
+  if (!track.hasTrendData) {
+    return "Waiting for history";
+  }
+
+  const sign = track.trendPercent > 0 ? "+" : "";
+  return `${sign}${track.trendPercent.toFixed(2)}% vs ${formatPopularity(track.popularity)}`;
+}
+
+function getMetricTextClass(track: Track, mode: LeaderboardMode) {
+  if (mode === "popularity") {
+    return popularityColor(track.popularity);
+  }
+
+  if (!track.hasTrendData) {
+    return "text-[var(--muted-foreground)]";
+  }
+
+  if (track.metricValue > 0) return "text-green-400";
+  if (track.metricValue < 0) return "text-rose-400";
+  return "text-[var(--muted-foreground)]";
+}
+
+function getMetricBarClass(track: Track, mode: LeaderboardMode) {
+  if (mode === "popularity") {
+    return popularityBar(track.popularity);
+  }
+
+  if (!track.hasTrendData || track.metricValue === 0) {
+    return "bg-zinc-600";
+  }
+
+  return track.metricValue > 0 ? "bg-green-500" : "bg-rose-500";
+}
+
+function getVersionLabel(primaryVersion: string | null | undefined, showOriginal = true) {
+  const label = primaryVersion?.trim() || "Original";
+  if (!showOriginal && label.toLowerCase() === "original") {
+    return null;
+  }
+
+  return label;
 }
 
 function normalizeArtistName(value: string) {
-  return value.trim().toLowerCase();
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function getSupportingArtists(track: Track) {
-  const seen = new Set([normalizeArtistName(track.artist.name)]);
+function getTrackArtists(track: Track) {
+  if (track.artists && track.artists.length > 0) {
+    return track.artists;
+  }
+
+  const seen = new Set<string>();
   const artists: Array<{ key: string; name: string; href: string; external: boolean }> = [];
 
-  for (const contributor of track.contributors) {
-    const normalized = normalizeArtistName(contributor.name);
-    if (seen.has(normalized)) continue;
+  const pushArtist = (artist: { key: string; name: string; href: string; external: boolean }) => {
+    const normalized = normalizeArtistName(artist.name);
+    if (seen.has(normalized)) return;
     seen.add(normalized);
-    artists.push({
+    artists.push(artist);
+  };
+
+  pushArtist({
+    key: track.artist.id,
+    name: track.artist.name,
+    href: `/artist/${track.artist.id}`,
+    external: false,
+  });
+
+  for (const contributor of track.contributors) {
+    pushArtist({
       key: contributor.id,
       name: contributor.name,
       href: `/artist/${contributor.id}`,
@@ -117,10 +249,7 @@ function getSupportingArtists(track: Track) {
   }
 
   for (const featuredArtist of track.featuredArtists) {
-    const normalized = normalizeArtistName(featuredArtist);
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    artists.push({
+    pushArtist({
       key: `search:${featuredArtist}`,
       name: featuredArtist,
       href: `https://open.spotify.com/search/${encodeURIComponent(featuredArtist)}`,
@@ -131,24 +260,84 @@ function getSupportingArtists(track: Track) {
   return artists;
 }
 
-function contributorTextClass() {
-  return "text-[var(--muted-foreground)] hover:text-white underline decoration-[var(--accent)]/45 underline-offset-2 transition-colors";
+function artistTextClass(external = false) {
+  return external
+    ? "text-white/40 hover:text-white/70 transition-colors"
+    : "text-[var(--accent)] hover:text-white transition-colors";
+}
+
+function SongsPageSkeleton() {
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className={`rounded-[28px] border border-[var(--muted)] bg-[var(--secondary)]/60 p-5 ${index === 1 ? "md:-translate-y-6" : ""}`}>
+            <div className="flex items-center justify-between mb-4">
+              <Skeleton className="h-4 w-10 rounded-full" />
+              <Skeleton className="h-10 w-10 rounded-full" />
+            </div>
+            <div className="flex flex-col items-center text-center gap-3">
+              <Skeleton className={`rounded-2xl ${index === 1 ? "h-44 w-44" : "h-36 w-36"}`} />
+              <Skeleton className="h-6 w-40" />
+              <Skeleton className="h-4 w-24" />
+              <div className="flex gap-2">
+                <Skeleton className="h-4 w-20 rounded-full" />
+                <Skeleton className="h-4 w-24 rounded-full" />
+              </div>
+              <Skeleton className="h-8 w-24" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="border border-[var(--muted)] rounded-2xl overflow-hidden bg-[var(--secondary)]/35">
+        <div className="hidden md:grid grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 border-b border-[var(--muted)]">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <Skeleton key={index} className="h-3 w-full" />
+          ))}
+        </div>
+        <div className="divide-y divide-[var(--muted)]/40">
+          {Array.from({ length: 8 }).map((_, index) => (
+            <div key={index} className="grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center">
+              <Skeleton className="h-7 w-7 rounded-full" />
+              <Skeleton className="h-6 w-6" />
+              <div className="flex items-center gap-3 min-w-0">
+                <Skeleton className="h-11 w-11 rounded-lg" />
+                <div className="space-y-2 min-w-0 flex-1">
+                  <Skeleton className="h-4 w-48 max-w-full" />
+                  <Skeleton className="h-3 w-32 max-w-full" />
+                </div>
+              </div>
+              <Skeleton className="h-4 w-14 hidden md:block" />
+              <Skeleton className="h-4 w-20 hidden md:block justify-self-end" />
+              <Skeleton className="h-4 w-10 hidden md:block justify-self-end" />
+              <Skeleton className="h-4 w-12 hidden md:block justify-self-end" />
+              <Skeleton className="h-4 w-4 hidden md:block justify-self-end" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PodiumTrackCard({
   track,
   rank,
   isPlaying,
-  previewUnavailable,
   onTogglePreview,
+  showOriginalVersion,
+  mode,
 }: {
   track: Track;
   rank: number;
   isPlaying: boolean;
-  previewUnavailable: boolean;
   onTogglePreview: (trackId: string, previewUrl: string, deezerId?: string | null) => void;
+  showOriginalVersion: boolean;
+  mode: LeaderboardMode;
 }) {
   const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
+  const artists = getTrackArtists(track);
+  const versionLabel = getVersionLabel(track.primaryVersion, showOriginalVersion);
 
   return (
     <div className={`rounded-[28px] overflow-hidden border bg-[var(--secondary)]/70 relative ${rank === 1 ? "md:-translate-y-6" : ""} ${accent}`}>
@@ -162,9 +351,8 @@ function PodiumTrackCard({
           {isValidPreviewUrl(track.previewUrl) ? (
             <button
               onClick={() => onTogglePreview(track.id, track.previewUrl!, track.deezerId)}
-              disabled={previewUnavailable}
-              className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-colors ${previewUnavailable ? "bg-white/10 text-white/35 cursor-not-allowed" : "bg-black/35 hover:bg-green-600"}`}
-              title={previewUnavailable ? "Preview unavailable" : isPlaying ? "Pause preview" : "Play preview"}
+              className="w-10 h-10 rounded-full text-white flex items-center justify-center transition-colors bg-black/35 hover:bg-green-600"
+              title={isPlaying ? "Pause preview" : "Play preview"}
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
             </button>
@@ -179,19 +367,39 @@ function PodiumTrackCard({
             </div>
           )}
           <div className="font-black text-lg text-white leading-tight line-clamp-2">{track.name}</div>
-          <Link
-            href={`/artist/${track.artist.id}`}
-            className="text-sm text-[var(--muted-foreground)] mt-1 truncate max-w-full hover:text-white transition-colors"
-          >
-            {track.artist.name}
-          </Link>
+          <div className="text-sm mt-1 max-w-full leading-snug text-center">
+            {artists.map((artist, index) => (
+              <span key={artist.key}>
+                {index > 0 ? <span className="text-[var(--muted-foreground)]">, </span> : null}
+                {artist.external ? (
+                  <a
+                    href={artist.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={artistTextClass(true)}
+                  >
+                    {artist.name}
+                  </a>
+                ) : (
+                  <Link href={artist.href} className={artistTextClass()}>
+                    {artist.name}
+                  </Link>
+                )}
+              </span>
+            ))}
+          </div>
           <div className="flex items-center justify-center gap-2 mt-3 text-[11px] font-bold">
             {track.releaseDate ? (
               <span className="text-[var(--muted-foreground)]">{track.releaseDate}</span>
             ) : null}
-            <span className="text-white/70">{getVersionLabel(track.versions)}</span>
+            {versionLabel ? <span className="text-white/70">{versionLabel}</span> : null}
           </div>
-          <div className="mt-4 text-xl font-black text-green-400">{formatPopularity(track.popularity)}</div>
+          <div className={`mt-4 text-xl font-black ${getMetricTextClass(track, mode)}`}>{getMetricText(track, mode)}</div>
+          {mode !== "popularity" ? (
+            <div className="mt-1 text-[11px] font-medium text-[var(--muted-foreground)]">
+              {getMetricSubtext(track, mode)}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
@@ -203,11 +411,12 @@ export default function SongsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>("popularity");
+  const [collapseVersions, setCollapseVersions] = useState(true);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
-  const [failedPreviewTrackIds, setFailedPreviewTrackIds] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -220,10 +429,6 @@ export default function SongsPage() {
     setPlayingTrackId(null);
   }, []);
 
-  const markPreviewFailed = useCallback((trackId: string) => {
-    setFailedPreviewTrackIds((current) => (current.includes(trackId) ? current : [...current, trackId]));
-  }, []);
-
   // Debounce search
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -231,11 +436,13 @@ export default function SongsPage() {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search]);
 
-  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean) => {
+  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, mode: LeaderboardMode) => {
     if (append) setLoadingMore(true); else setLoading(true);
     try {
       const params = new URLSearchParams({ skip: String(skip), take: "50" });
       if (searchQuery) params.set("search", searchQuery);
+      params.set("collapseVersions", groupedVersions ? "true" : "false");
+      params.set("mode", mode);
       const res = await fetch(`/api/songs?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -250,8 +457,8 @@ export default function SongsPage() {
 
   // Initial load + search changes
   useEffect(() => {
-    fetchTracks(0, debouncedSearch, false);
-  }, [debouncedSearch, fetchTracks]);
+    fetchTracks(0, debouncedSearch, false, collapseVersions, leaderboardMode);
+  }, [collapseVersions, debouncedSearch, fetchTracks, leaderboardMode]);
 
   // Scroll to top button
   useEffect(() => {
@@ -268,15 +475,13 @@ export default function SongsPage() {
   }, [stopCurrentAudio]);
 
   async function togglePreview(trackId: string, previewUrl: string, deezerId?: string | null) {
-    if (failedPreviewTrackIds.includes(trackId)) return;
-
     if (playingTrackId === trackId) {
       stopCurrentAudio();
       return;
     }
 
     if (!isValidPreviewUrl(previewUrl)) {
-      markPreviewFailed(trackId);
+      stopCurrentAudio();
       return;
     }
 
@@ -296,7 +501,6 @@ export default function SongsPage() {
       if (audioRef.current === audio) {
         stopCurrentAudio();
       }
-      markPreviewFailed(trackId);
     };
 
     audioRef.current = audio;
@@ -308,16 +512,18 @@ export default function SongsPage() {
       if (audioRef.current === audio) {
         stopCurrentAudio();
       }
-      markPreviewFailed(trackId);
     }
   }
 
   function loadMore() {
-    fetchTracks(tracks.length, debouncedSearch, true);
+    fetchTracks(tracks.length, debouncedSearch, true, collapseVersions, leaderboardMode);
   }
 
-  const podiumTracks = tracks.slice(0, 3);
-  const tableTracks = podiumTracks.length === 3 ? tracks.slice(3) : tracks;
+  const showPodium = !debouncedSearch && tracks.length >= 3;
+  const podiumTracks = showPodium ? tracks.slice(0, 3) : [];
+  const tableTracks = showPodium ? tracks.slice(3) : tracks;
+  const hasTrendData = tracks.some((track) => track.hasTrendData);
+  const maxTrendMetric = tracks.reduce((max, track) => Math.max(max, Math.abs(track.metricValue)), 0);
 
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans relative">
@@ -334,29 +540,80 @@ export default function SongsPage() {
                 Song Rankings
               </span>
             </h1>
-            <p className="text-[var(--muted-foreground)] text-sm">
-              {totalCount > 0 ? `${totalCount} tracks ranked by popularity` : "Loading tracks..."}
+            <p className="text-[var(--muted-foreground)] text-sm md:text-base max-w-xl">
+              {loading
+                ? "Loading tracks..."
+                : totalCount > 0
+                  ? getModeSummary(leaderboardMode, totalCount)
+                  : debouncedSearch
+                    ? "No tracks matched your search."
+                    : "No tracks available yet."}
             </p>
           </div>
 
-          {/* Search */}
-          <div className="relative w-full md:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
-            <input
-              type="text"
-              placeholder="Search songs, artists, albums..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[var(--secondary)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-green-500/50 placeholder:text-zinc-500"
-            />
+          {/* Search + toggle */}
+          <div className="w-full md:w-80 space-y-3">
+            <div className="grid grid-cols-4 gap-2">
+              {LEADERBOARD_MODES.map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  onClick={() => setLeaderboardMode(mode.key)}
+                  className={`rounded-xl border px-2 py-2 text-xs font-black uppercase tracking-[0.18em] transition-colors ${leaderboardMode === mode.key ? "border-green-500/50 bg-green-500/15 text-green-300" : "border-[var(--muted)] bg-[var(--secondary)]/80 text-[var(--muted-foreground)] hover:text-white"}`}
+                  aria-pressed={leaderboardMode === mode.key}
+                >
+                  {mode.shortLabel}
+                </button>
+              ))}
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
+              <input
+                type="text"
+                placeholder="Search songs, artists, albums..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-[var(--secondary)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-green-500/50 placeholder:text-zinc-500"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setCollapseVersions((current) => !current)}
+              className="w-full flex items-center justify-between rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/80 px-3 py-2.5 text-sm transition-colors hover:bg-[var(--secondary)]"
+              aria-pressed={collapseVersions}
+            >
+              <div className="text-left">
+                <div className="font-bold text-white">Group versions</div>
+                <div className="text-[11px] text-[var(--muted-foreground)]">
+                  {collapseVersions
+                    ? leaderboardMode === "popularity"
+                      ? "Highest-scoring version counts as the song"
+                      : "Highest-hype version counts as the song"
+                    : "Show every version as its own row"}
+                </div>
+              </div>
+              <span
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${collapseVersions ? "bg-green-500" : "bg-[var(--muted)]"}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 rounded-full bg-white transition-transform ${collapseVersions ? "translate-x-5" : "translate-x-1"}`}
+                />
+              </span>
+            </button>
           </div>
         </div>
 
         {!loading && podiumTracks.length === 3 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
-            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[1].id)} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[0].id)} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[2].id)} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
+            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
+            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
+          </div>
+        )}
+
+        {!loading && leaderboardMode !== "popularity" && !hasTrendData && tracks.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/50 px-4 py-3 text-sm text-[var(--muted-foreground)]">
+            Hype rankings need at least two song snapshots across the selected period. The data will start filling in after song updates keep running.
           </div>
         )}
 
@@ -370,15 +627,13 @@ export default function SongsPage() {
           <span className="text-right">
             <Clock className="w-3 h-3 inline" />
           </span>
-          <span className="text-right">Popularity</span>
+          <span className="text-right">{getMetricHeaderLabel(leaderboardMode)}</span>
           <span />
         </div>
 
         {/* Loading state */}
         {loading && (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-[var(--muted-foreground)]" />
-          </div>
+          <SongsPageSkeleton />
         )}
 
         {/* Empty state */}
@@ -395,10 +650,16 @@ export default function SongsPage() {
         {!loading && (
           <div className="flex flex-col">
             {tableTracks.map((track, i) => {
-              const rank = i + (podiumTracks.length === 3 ? 4 : 1);
+              const rank = track.rank || i + (podiumTracks.length === 3 ? 4 : 1);
               const rankColor = "text-[var(--muted-foreground)]";
               const isPlaying = playingTrackId === track.id;
-              const supportingArtists = getSupportingArtists(track);
+              const artists = getTrackArtists(track);
+              const versionLabel = getVersionLabel(track.primaryVersion, collapseVersions);
+              const metricBarWidth = leaderboardMode === "popularity"
+                ? normalizePopularity(track.popularity)
+                : maxTrendMetric > 0 && track.hasTrendData
+                  ? Math.max(8, (Math.abs(track.metricValue) / maxTrendMetric) * 100)
+                  : 0;
 
               return (
                 <div
@@ -410,15 +671,12 @@ export default function SongsPage() {
                     {isValidPreviewUrl(track.previewUrl) ? (
                       <button
                         onClick={() => togglePreview(track.id, track.previewUrl!, track.deezerId)}
-                        disabled={failedPreviewTrackIds.includes(track.id)}
                         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                          failedPreviewTrackIds.includes(track.id)
-                            ? "bg-[var(--muted)] text-[var(--muted-foreground)]/40 cursor-not-allowed"
-                            : isPlaying
-                              ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
-                              : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"
+                          isPlaying
+                            ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
+                            : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"
                         }`}
-                        title={failedPreviewTrackIds.includes(track.id) ? "Preview unavailable" : isPlaying ? "Pause preview" : "Play 30s preview"}
+                        title={isPlaying ? "Pause preview" : "Play 30s preview"}
                       >
                         {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
                       </button>
@@ -458,27 +716,21 @@ export default function SongsPage() {
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-[var(--muted-foreground)] truncate">
-                        <Link
-                          href={`/artist/${track.artist.id}`}
-                          className="hover:text-white transition-colors"
-                        >
-                          {track.artist.name}
-                        </Link>
-                        {supportingArtists.map((artist) => (
-                          <span key={artist.key} className="opacity-60">
-                            {", "}
+                      <div className="text-xs leading-relaxed whitespace-normal break-words">
+                        {artists.map((artist, index) => (
+                          <span key={artist.key}>
+                            {index > 0 ? <span className="text-[var(--muted-foreground)]">, </span> : null}
                             {artist.external ? (
                               <a
                                 href={artist.href}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className={contributorTextClass()}
+                                className={artistTextClass(true)}
                               >
                                 {artist.name}
                               </a>
                             ) : (
-                              <Link href={artist.href} className={contributorTextClass()}>
+                              <Link href={artist.href} className={artistTextClass()}>
                                 {artist.name}
                               </Link>
                             )}
@@ -486,15 +738,19 @@ export default function SongsPage() {
                         ))}
                       </div>
                       <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
-                        {getVersionLabel(track.versions)}
-                        <span className="mx-1.5">•</span>
+                        {versionLabel ? (
+                          <>
+                            {versionLabel}
+                            <span className="mx-1.5">•</span>
+                          </>
+                        ) : null}
                         {track.releaseDate ?? "Unknown date"}
                       </div>
                     </div>
                   </div>
 
                   <span className="hidden md:block text-xs text-[var(--muted-foreground)] truncate font-medium">
-                    {getVersionLabel(track.versions)}
+                    {versionLabel ?? "-"}
                   </span>
 
                   <span className="hidden md:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
@@ -509,13 +765,18 @@ export default function SongsPage() {
 
                   {/* Popularity */}
                   <div className="flex flex-col items-end gap-0.5">
-                    <span className={`text-xs font-bold tabular-nums ${popularityColor(track.popularity)}`}>
-                      {formatPopularity(track.popularity)}
+                    <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, leaderboardMode)}`}>
+                      {getMetricText(track, leaderboardMode)}
                     </span>
+                    {leaderboardMode !== "popularity" ? (
+                      <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">
+                        {getMetricSubtext(track, leaderboardMode)}
+                      </span>
+                    ) : null}
                     <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${popularityBar(track.popularity)}`}
-                        style={{ width: `${normalizePopularity(track.popularity)}%` }}
+                        className={`h-full rounded-full ${getMetricBarClass(track, leaderboardMode)}`}
+                        style={{ width: `${metricBarWidth}%` }}
                       />
                     </div>
                   </div>

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, Upload, User, LogOut, LogIn, Settings, Music, Package, Circle } from "lucide-react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -11,12 +11,15 @@ export default function Navbar() {
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
 
-  const linkClass = (href: string) =>
+  const linkClass = (href: string, match?: boolean) =>
     `flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-      path === href
+      (match ?? path === href)
         ? "bg-[var(--muted)] text-white"
         : "text-[var(--muted-foreground)] hover:text-white"
     }`;
+
+  const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs";
+  const isModeration = path === "/moderation" || path === "/review" || path === "/import";
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--muted)] bg-[var(--background)]/80 backdrop-blur-md">
@@ -31,26 +34,15 @@ export default function Navbar() {
 
         {/* Nav links */}
         <div className="hidden sm:flex items-center gap-1">
-          <Link href="/leaderboard" className={linkClass("/leaderboard")}>
-            <Trophy className="w-4 h-4" /> Phonk Ranks
-          </Link>
-          <Link href="/bubbles" className={linkClass("/bubbles")}>
-            <Circle className="w-4 h-4" /> Bubbles
-          </Link>
-          <Link href="/songs" className={linkClass("/songs")}>
-            <Music className="w-4 h-4" /> Songs
+          <Link href="/rankings" className={linkClass("/rankings", isRankings)}>
+            <Trophy className="w-4 h-4" /> Rankings
           </Link>
           <Link href="/samples" className={linkClass("/samples")}>
             <Package className="w-4 h-4" /> Samples
           </Link>
           {session && (
-            <Link href="/review" className={linkClass("/review")}>
-              <Shield className="w-4 h-4" /> {isPrivileged ? "Review" : "My Requests"}
-            </Link>
-          )}
-          {isPrivileged && (
-            <Link href="/import" className={linkClass("/import")}>
-              <Upload className="w-4 h-4" /> Import
+            <Link href="/moderation" className={linkClass("/moderation", isModeration)}>
+              <Shield className="w-4 h-4" /> {isPrivileged ? "Moderation" : "Requests"}
             </Link>
           )}
           {session?.user?.role === "ADMIN" && (

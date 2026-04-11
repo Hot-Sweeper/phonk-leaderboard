@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks } from "@/lib/platforms";
-import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
+import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 
 export type UpdateResult = {
@@ -344,6 +344,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
       update: { value: new Date().toISOString() },
       create: { key: "lastSongUpdate", value: new Date().toISOString() },
     });
+
+    await recordTrackSnapshots();
 
     const totalDuration = Date.now() - startTime;
 

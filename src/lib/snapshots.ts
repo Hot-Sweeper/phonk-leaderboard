@@ -28,6 +28,25 @@ export async function recordSnapshot(artistId: string) {
 }
 
 /**
+ * Record a popularity snapshot for tracks so song hype rankings can compare changes over time.
+ */
+export async function recordTrackSnapshots(trackIds?: string[]) {
+  const tracks = await prisma.track.findMany({
+    where: trackIds ? { id: { in: trackIds } } : undefined,
+    select: { id: true, popularity: true },
+  });
+
+  if (tracks.length === 0) return;
+
+  await prisma.trackSnapshot.createMany({
+    data: tracks.map((track) => ({
+      trackId: track.id,
+      popularity: track.popularity,
+    })),
+  });
+}
+
+/**
  * Record today's rank for all artists (sorted by Spotify monthly listeners).
  * Uses upsert to avoid duplicates if called multiple times per day.
  */

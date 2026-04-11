@@ -42,28 +42,28 @@ export default function HomePage() {
 
   const sections = [
     {
-      href: "/leaderboard",
+      href: "/rankings",
       icon: Trophy,
-      title: "Phonk Ranks",
-      desc: "The definitive ranking of Phonk artists by Spotify listeners, YouTube subs, and community watchlists.",
+      title: "Rankings",
+      desc: "The definitive ranking of Phonk artists and songs. List view, bubble visualization, all platforms.",
       color: "from-yellow-500/20 to-transparent",
       iconColor: "text-yellow-400",
       borderHover: "hover:border-yellow-500/40",
     },
     {
-      href: "/bubbles",
+      href: "/rankings?view=bubbles",
       icon: Circle,
-      title: "Artist Bubbles",
-      desc: "Visualize the Phonk scene at a glance \u2014 every artist as a bubble sized by their monthly listeners.",
+      title: "Bubbles",
+      desc: "Visualize the Phonk scene at a glance -- every artist as a bubble sized by their metrics.",
       color: "from-[var(--accent)]/20 to-transparent",
       iconColor: "text-[var(--accent)]",
       borderHover: "hover:border-[var(--accent)]/40",
     },
     {
-      href: "/songs",
+      href: "/rankings?entity=songs",
       icon: Music,
       title: "Trending Songs",
-      desc: "Discover what\u2019s hot right now in the Phonk world. Curated picks and trending tracks.",
+      desc: "Discover what's hot right now in the Phonk world. Popularity and hype trends.",
       color: "from-green-500/20 to-transparent",
       iconColor: "text-green-400",
       borderHover: "hover:border-green-500/40",
@@ -155,7 +155,7 @@ export default function HomePage() {
                 Top Artists
               </h2>
               <Link
-                href="/leaderboard"
+                href="/rankings"
                 className="text-sm font-bold text-[var(--muted-foreground)] hover:text-white flex items-center gap-1 transition-colors"
               >
                 View Full Rankings <ArrowRight className="w-4 h-4" />

@@ -3,7 +3,27 @@ import { useState, useEffect } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { Skeleton } from "@/components/Skeleton";
 import { Shield, Key, Check, X, LogIn } from "lucide-react";
+
+function JoinPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
+      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
+      <div className="max-w-md mx-auto relative z-10 pt-20 space-y-6">
+        <div className="text-center space-y-4">
+          <Skeleton className="h-16 w-16 rounded-full mx-auto" />
+          <Skeleton className="h-8 w-44 mx-auto max-w-full" />
+          <Skeleton className="h-4 w-64 mx-auto max-w-full" />
+        </div>
+        <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-6 space-y-4">
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-11 w-32 rounded-lg" />
+        </div>
+      </div>
+    </main>
+  );
+}
 
 function JoinContent() {
   const { data: session, status } = useSession();
@@ -53,11 +73,7 @@ function JoinContent() {
   }
 
   if (status === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    );
+    return <JoinPageSkeleton />;
   }
 
   if (!session) {
@@ -152,11 +168,7 @@ function JoinContent() {
 export default function JoinPage() {
   return (
     <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-          Loading...
-        </div>
-      }
+      fallback={<JoinPageSkeleton />}
     >
       <JoinContent />
     </Suspense>

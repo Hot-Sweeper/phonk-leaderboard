@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
 import Image from "next/image";
+import { Skeleton } from "@/components/Skeleton";
 import {
   Trophy,
   TrendingUp,
@@ -135,6 +136,54 @@ const PLATFORM_DOT: Record<string, string> = {
   TIKTOK: "bg-cyan-400",
   INSTAGRAM: "bg-fuchsia-400",
 };
+
+function LeaderboardPageSkeleton() {
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4 space-y-3">
+            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-8 w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 items-end max-w-2xl mx-auto">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className={`rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4 ${index === 1 ? "md:-mt-8" : ""}`}>
+            <div className="flex flex-col items-center gap-3">
+              <Skeleton className="h-24 w-24 rounded-full" />
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className={`w-full rounded-t-2xl ${index === 1 ? "h-44" : "h-36"}`} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex gap-1.5 overflow-x-auto pb-1">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-10 w-28 rounded-xl shrink-0" />
+          ))}
+        </div>
+        <Skeleton className="h-10 flex-1 rounded-xl" />
+      </div>
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div key={index} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 px-5 py-4 flex items-center gap-4">
+            <Skeleton className="h-8 w-8" />
+            <Skeleton className="h-14 w-14 rounded-full" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-40 max-w-full" />
+              <Skeleton className="h-3 w-28 max-w-full" />
+            </div>
+            <Skeleton className="h-8 w-20 rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ─── Podium Card ─── */
 function PodiumCard({
@@ -735,9 +784,7 @@ export default function LeaderboardPage() {
 
         {/* ── Leaderboard List ── */}
         {loading ? (
-          <div className="text-center text-[var(--muted-foreground)] py-20">
-            Loading...
-          </div>
+          <LeaderboardPageSkeleton />
         ) : artists.length === 0 ? (
           <div className="text-center text-[var(--muted-foreground)] py-20">
             {search || platform

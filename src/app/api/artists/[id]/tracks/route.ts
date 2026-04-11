@@ -23,9 +23,10 @@ export async function GET(
 
   const tracks = collapseArtistTracks(artist.tracks)
     .slice(0, 10)
-    .map(({ track, versions }) => ({
+    .map(({ track, versions, primaryVersion }) => ({
       ...track,
       versions,
+      primaryVersion,
       featuredArtists: dedupeNames(track.featuredArtists),
     }));
 

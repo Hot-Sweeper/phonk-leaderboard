@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
+import { Skeleton } from "@/components/Skeleton";
 import {
   Shield,
   Check,
@@ -56,6 +57,37 @@ const PLATFORM_COLORS: Record<string, string> = {
   INSTAGRAM: "text-fuchsia-400",
 };
 
+function ReviewPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
+      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
+      <div className="max-w-3xl mx-auto relative z-10 space-y-6">
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-56 max-w-full" />
+          <Skeleton className="h-4 w-32 max-w-full" />
+        </div>
+        {Array.from({ length: 5 }).map((_, index) => (
+          <div key={index} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-5 space-y-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-2 flex-1 min-w-0">
+                <Skeleton className="h-5 w-48 max-w-full" />
+                <Skeleton className="h-3 w-28 max-w-full" />
+              </div>
+              <Skeleton className="h-7 w-24 rounded-full" />
+            </div>
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-5/6" />
+            <div className="flex gap-2">
+              <Skeleton className="h-9 w-24 rounded-xl" />
+              <Skeleton className="h-9 w-24 rounded-xl" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </main>
+  );
+}
+
 export default function ReviewPage() {
   const { data: session, status } = useSession();
   const [requests, setRequests] = useState<ArtistRequest[]>([]);
@@ -99,11 +131,7 @@ export default function ReviewPage() {
   }
 
   if (status === "loading" || loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    );
+    return <ReviewPageSkeleton />;
   }
 
   if (!session) {

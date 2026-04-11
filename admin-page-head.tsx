@@ -1,7 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { Skeleton } from "@/components/Skeleton";
 import {
   Shield,
   Plus,
@@ -76,60 +75,6 @@ type UpdateLogEntry = {
   completedAt: string | null;
 };
 
-type ScheduledUpdaterSetting = {
-  key: "updateIntervalHours" | "songUpdateIntervalHours";
-  label: string;
-  description: string;
-  updateType: string;
-  intervalHours: number;
-  lastRun: string | null;
-};
-
-const INTERVAL_OPTIONS = [
-  { value: 1, label: "Every hour" },
-  { value: 6, label: "Every 6 hours" },
-  { value: 12, label: "Every 12 hours" },
-  { value: 24, label: "Every 24 hours" },
-  { value: 48, label: "Every 48 hours" },
-  { value: 168, label: "Every week" },
-];
-
-function AdminPageSkeleton() {
-  return (
-    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
-      <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
-      <div className="max-w-3xl mx-auto relative z-10 space-y-8">
-        <div className="space-y-3">
-          <Skeleton className="h-10 w-56 max-w-full" />
-          <Skeleton className="h-4 w-40 max-w-full" />
-        </div>
-        <div className="flex gap-1.5">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-10 w-28 rounded-xl" />
-          ))}
-        </div>
-        {Array.from({ length: 4 }).map((_, index) => (
-          <div key={index} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-6 space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <Skeleton className="h-5 w-40 max-w-full" />
-              <Skeleton className="h-9 w-28 rounded-xl" />
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {Array.from({ length: 4 }).map((__, cardIndex) => (
-                <div key={cardIndex} className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/20 p-4 space-y-3">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-3 w-48 max-w-full" />
-                  <Skeleton className="h-9 w-24 rounded-lg" />
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </main>
-  );
-}
-
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const [invites, setInvites] = useState<ModInvite[]>([]);
@@ -165,7 +110,6 @@ export default function AdminPage() {
   const [updateProgress, setUpdateProgress] = useState<{ current: number; total: number } | null>(null);
   const [songUpdateIntervalHours, setSongUpdateIntervalHours] = useState(6);
   const [lastSongUpdate, setLastSongUpdate] = useState<string | null>(null);
-  const [scheduledUpdaters, setScheduledUpdaters] = useState<ScheduledUpdaterSetting[]>([]);
   const [updatingSongs, setUpdatingSongs] = useState(false);
   const [songProgress, setSongProgress] = useState<{ current: number; total: number } | null>(null);
   const [migrating, setMigrating] = useState(false);
@@ -193,7 +137,6 @@ export default function AdminPage() {
       setLastFullUpdate(s.lastFullUpdate ?? null);
       setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
       setLastSongUpdate(s.lastSongUpdate ?? null);
-      setScheduledUpdaters(s.updaters ?? []);
       setUpdateLogs(s.logs ?? []);
     }
     setLoading(false);
@@ -324,9 +267,6 @@ export default function AdminPage() {
 
   async function saveInterval(hours: number) {
     setUpdateIntervalHours(hours);
-    setScheduledUpdaters((current) => current.map((updater) => (
-      updater.key === "updateIntervalHours" ? { ...updater, intervalHours: hours } : updater
-    )));
     const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -341,16 +281,12 @@ export default function AdminPage() {
       if (settingsRes.ok) {
         const s = await settingsRes.json();
         setUpdateIntervalHours(s.updateIntervalHours ?? 1);
-        setScheduledUpdaters(s.updaters ?? []);
       }
     }
   }
 
   async function saveSongInterval(hours: number) {
     setSongUpdateIntervalHours(hours);
-    setScheduledUpdaters((current) => current.map((updater) => (
-      updater.key === "songUpdateIntervalHours" ? { ...updater, intervalHours: hours } : updater
-    )));
     const res = await fetch("/api/admin/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -364,7 +300,6 @@ export default function AdminPage() {
       if (settingsRes.ok) {
         const s = await settingsRes.json();
         setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
-        setScheduledUpdaters(s.updaters ?? []);
       }
     }
   }
@@ -400,16 +335,10 @@ export default function AdminPage() {
           `Updated ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
         );
         setLastFullUpdate(new Date().toISOString());
-        setScheduledUpdaters((current) => current.map((updater) => (
-          updater.key === "updateIntervalHours"
-            ? { ...updater, lastRun: new Date().toISOString() }
-            : updater
-        )));
         // Refresh logs
         const logsRes = await fetch("/api/admin/settings");
         if (logsRes.ok) {
           const s = await logsRes.json();
-          setScheduledUpdaters(s.updaters ?? []);
           setUpdateLogs(s.logs ?? []);
         }
       }
@@ -450,15 +379,9 @@ export default function AdminPage() {
           `Songs updated for ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
         );
         setLastSongUpdate(new Date().toISOString());
-        setScheduledUpdaters((current) => current.map((updater) => (
-          updater.key === "songUpdateIntervalHours"
-            ? { ...updater, lastRun: new Date().toISOString() }
-            : updater
-        )));
         const logsRes = await fetch("/api/admin/settings");
         if (logsRes.ok) {
           const s = await logsRes.json();
-          setScheduledUpdaters(s.updaters ?? []);
           setUpdateLogs(s.logs ?? []);
         }
       }
@@ -487,7 +410,6 @@ export default function AdminPage() {
         const logsRes = await fetch("/api/admin/settings");
         if (logsRes.ok) {
           const s = await logsRes.json();
-          setScheduledUpdaters(s.updaters ?? []);
           setUpdateLogs(s.logs ?? []);
         }
       }
@@ -583,7 +505,7 @@ export default function AdminPage() {
           </h1>
         </div>
 
-        {/* â”€â”€ Tabs â”€â”€ */}
+        {/* ÔöÇÔöÇ Tabs ÔöÇÔöÇ */}
         <div className="flex gap-1.5 mb-8">
           {[
             { key: "staff" as const, label: "Staff Management", icon: Crown },
@@ -605,7 +527,7 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {/* â”€â”€ Staff Management Tab â”€â”€ */}
+        {/* ÔöÇÔöÇ Staff Management Tab ÔöÇÔöÇ */}
         {activeTab === "staff" && (
           <>
             <div className="mb-10">
@@ -672,11 +594,11 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* â”€â”€ Invites Tab â”€â”€ */}
+        {/* ÔöÇÔöÇ Invites Tab ÔöÇÔöÇ */}
         {activeTab === "invites" && (
           <>
 
-        {/* â”€â”€ Create Mod Invite â”€â”€ */}
+        {/* ÔöÇÔöÇ Create Mod Invite ÔöÇÔöÇ */}
         <div className="mb-10">
           <h2 className="text-lg font-black mb-3 flex items-center gap-2">
             <Key className="w-5 h-5 text-cyan-400" />
@@ -724,7 +646,7 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* â”€â”€ Active Invites â”€â”€ */}
+        {/* ÔöÇÔöÇ Active Invites ÔöÇÔöÇ */}
         {invites.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-black mb-3 flex items-center gap-2">
@@ -793,7 +715,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* â”€â”€ Pending Mod Requests â”€â”€ */}
+        {/* ÔöÇÔöÇ Pending Mod Requests ÔöÇÔöÇ */}
         {pendingMod.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-black mb-3 flex items-center gap-2">
@@ -869,7 +791,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* â”€â”€ Reviewed Mod Requests â”€â”€ */}
+        {/* ÔöÇÔöÇ Reviewed Mod Requests ÔöÇÔöÇ */}
         {reviewedMod.length > 0 && (
           <div>
             <h2 className="text-lg font-black mb-3 flex items-center gap-2">
@@ -934,109 +856,142 @@ export default function AdminPage() {
           </>
         )}
 
-        {/* â”€â”€ Settings Tab â”€â”€ */}
+        {/* ÔöÇÔöÇ Settings Tab ÔöÇÔöÇ */}
         {activeTab === "settings" && (
           <>
             <div className="mb-10">
               <h2 className="text-lg font-black mb-3 flex items-center gap-2">
-                <Clock className="w-5 h-5 text-blue-400" />
-                Updater Settings
+                <Settings className="w-5 h-5 text-zinc-400" />
+                Update Settings
               </h2>
-              <p className="text-sm text-[var(--muted-foreground)] mb-4">
-                Configure every scheduled updater here. Right now the app has a stats updater and a song updater.
-              </p>
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                {scheduledUpdaters.map((updater) => {
-                  const isStatsUpdater = updater.key === "updateIntervalHours";
-                  const isRunning = isStatsUpdater ? updatingAll : updatingSongs;
-                  const progress = isStatsUpdater ? updateProgress : songProgress;
-                  const runUpdater = isStatsUpdater ? updateAllArtists : updateAllSongs;
-                  const saveUpdaterInterval = isStatsUpdater ? saveInterval : saveSongInterval;
-                  const buttonClass = isStatsUpdater
-                    ? "bg-blue-600 hover:bg-blue-500"
-                    : "bg-green-600 hover:bg-green-500";
-                  const progressClass = isStatsUpdater ? "bg-blue-500" : "bg-green-500";
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 flex flex-col gap-4">
+                {/* Update interval */}
+                <div>
+                  <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] mb-1 block">
+                    Stats Update Interval
+                  </label>
+                  <select
+                    value={updateIntervalHours}
+                    onChange={(e) => saveInterval(Number(e.target.value))}
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] w-48"
+                  >
+                    <option value={1}>Every hour</option>
+                    <option value={6}>Every 6 hours</option>
+                    <option value={12}>Every 12 hours</option>
+                    <option value={24}>Every 24 hours</option>
+                    <option value={48}>Every 48 hours</option>
+                    <option value={168}>Every week</option>
+                  </select>
+                  {lastFullUpdate && (
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      Last full update: {new Date(lastFullUpdate).toLocaleString()}
+                    </p>
+                  )}
+                </div>
 
-                  return (
-                    <div key={updater.key} className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 flex flex-col gap-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            {isStatsUpdater ? (
-                              <RefreshCw className="w-4 h-4 text-blue-400" />
-                            ) : (
-                              <Music className="w-4 h-4 text-green-400" />
-                            )}
-                            <h3 className="text-base font-black">{updater.label}</h3>
-                          </div>
-                          <p className="text-sm text-[var(--muted-foreground)]">{updater.description}</p>
-                        </div>
-                        <span className="rounded-full border border-[var(--muted)] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted-foreground)]">
-                          {updater.updateType}
-                        </span>
+                {/* Update All */}
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={updateAllArtists}
+                      disabled={updatingAll}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {updatingAll ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      {updatingAll ? "Updating..." : "Update All Stats Now"}
+                    </button>
+                  </div>
+
+                  {/* Progress Bar */}
+                  {updatingAll && updateProgress && updateProgress.total > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
+                        <span>Updating artists...</span>
+                        <span>{updateProgress.current}/{updateProgress.total}</span>
                       </div>
-
-                      <div>
-                        <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] mb-1 block">
-                          Refresh Interval
-                        </label>
-                        <select
-                          value={updater.intervalHours}
-                          onChange={(e) => saveUpdaterInterval(Number(e.target.value))}
-                          className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] w-48"
-                        >
-                          {INTERVAL_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                        {updater.lastRun && (
-                          <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                            Last run: {new Date(updater.lastRun).toLocaleString()}
-                          </p>
-                        )}
+                      <div className="w-full bg-[var(--muted)] rounded-full h-2.5 overflow-hidden">
+                        <div
+                          className="bg-blue-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((updateProgress.current / updateProgress.total) * 100)}%` }}
+                        />
                       </div>
-
-                      <div className="flex flex-col gap-3">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={runUpdater}
-                            disabled={isRunning}
-                            className={`px-4 py-2 rounded-xl text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all ${buttonClass}`}
-                          >
-                            {isRunning ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : isStatsUpdater ? (
-                              <RefreshCw className="w-4 h-4" />
-                            ) : (
-                              <Music className="w-4 h-4" />
-                            )}
-                            {isRunning
-                              ? isStatsUpdater ? "Updating Stats..." : "Updating Songs..."
-                              : isStatsUpdater ? "Run Stats Update Now" : "Run Song Update Now"}
-                          </button>
-                        </div>
-
-                        {isRunning && progress && progress.total > 0 && (
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
-                              <span>{isStatsUpdater ? "Updating artists..." : "Fetching tracks..."}</span>
-                              <span>{progress.current}/{progress.total}</span>
-                            </div>
-                            <div className="w-full bg-[var(--muted)] rounded-full h-2.5 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-500 ${progressClass}`}
-                                style={{ width: `${Math.round((progress.current / progress.total) * 100)}%` }}
-                              />
-                            </div>
-                            <p className="text-xs text-[var(--muted-foreground)]">
-                              {Math.round((progress.current / progress.total) * 100)}% complete
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {Math.round((updateProgress.current / updateProgress.total) * 100)}% complete
+                      </p>
                     </div>
-                  );
-                })}
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Song Update Settings */}
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Music className="w-5 h-5 text-green-400" />
+                Song Update Settings
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 flex flex-col gap-4">
+                <div>
+                  <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] mb-1 block">
+                    Song Update Interval
+                  </label>
+                  <select
+                    value={songUpdateIntervalHours}
+                    onChange={(e) => saveSongInterval(Number(e.target.value))}
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] w-48"
+                  >
+                    <option value={1}>Every hour</option>
+                    <option value={6}>Every 6 hours</option>
+                    <option value={12}>Every 12 hours</option>
+                    <option value={24}>Every 24 hours</option>
+                    <option value={48}>Every 48 hours</option>
+                    <option value={168}>Every week</option>
+                  </select>
+                  {lastSongUpdate && (
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      Last song update: {new Date(lastSongUpdate).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={updateAllSongs}
+                      disabled={updatingSongs}
+                      className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {updatingSongs ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Music className="w-4 h-4" />
+                      )}
+                      {updatingSongs ? "Updating Songs..." : "Update All Songs Now"}
+                    </button>
+                  </div>
+
+                  {updatingSongs && songProgress && songProgress.total > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
+                        <span>Fetching tracks...</span>
+                        <span>{songProgress.current}/{songProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-[var(--muted)] rounded-full h-2.5 overflow-hidden">
+                        <div
+                          className="bg-green-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((songProgress.current / songProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {Math.round((songProgress.current / songProgress.total) * 100)}% complete
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1223,7 +1178,7 @@ export default function AdminPage() {
             )}
           </>
         )}
-        {/* â”€â”€ Debug Tab â”€â”€ */}
+        {/* ÔöÇÔöÇ Debug Tab ÔöÇÔöÇ */}
         {activeTab === "debug" && (
           <>
             <div className="flex items-center gap-3 mb-6">

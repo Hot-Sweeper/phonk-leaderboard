@@ -240,10 +240,21 @@ model Track {
   featuredArtists String[] @default([])
   contributorIds  String[] @default([])
   artist          Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  snapshots       TrackSnapshot[]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([artistId, popularity(sort: Desc)])
+}
+
+model TrackSnapshot {
+  id         String   @id @default(cuid())
+  trackId     String
+  popularity  Int      @default(0)
+  track       Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([trackId, createdAt])
 }
 
 model UpdateLog {

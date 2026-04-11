@@ -4,6 +4,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { Skeleton } from "@/components/Skeleton";
 import { toPreviewProxyUrl } from "@/lib/preview";
 import {
   ArrowLeft,
@@ -29,6 +30,7 @@ import {
   Hash,
   Users,
   Eye,
+  CalendarDays,
 } from "lucide-react";
 
 /* ─── SVG Platform Icons ─── */
@@ -148,6 +150,45 @@ type Artist = {
   suggestions: Suggestion[];
 };
 
+function ArtistPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans">
+      <div className="h-48 md:h-64 relative overflow-hidden bg-[var(--secondary)]/60 rounded-b-[2rem]" />
+      <div className="max-w-5xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6 space-y-8">
+        <div className="flex items-end gap-5 md:gap-7">
+          <Skeleton className="w-32 h-32 md:w-40 md:h-40 rounded-2xl shrink-0" />
+          <div className="flex-1 space-y-3 pb-3">
+            <Skeleton className="h-10 w-56 max-w-full" />
+            <Skeleton className="h-5 w-40 max-w-full" />
+            <div className="flex gap-2 flex-wrap">
+              <Skeleton className="h-8 w-28 rounded-full" />
+              <Skeleton className="h-8 w-32 rounded-full" />
+              <Skeleton className="h-8 w-24 rounded-full" />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4 space-y-3">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-8 w-20" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4 space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
 type Track = {
   id: string;
   spotifyId: string | null;
@@ -162,10 +203,10 @@ type Track = {
   releaseDate: string | null;
   spotifyUrl: string | null;
   deezerUrl?: string | null;
+  primaryVersion?: string;
   versions?: string[];
   featuredArtists: string[];
 };
-
 function normalizeTrackPopularity(p: number): number {
   return p > 100 ? Math.min(100, p / 10000) : p;
 }
@@ -215,7 +256,6 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
         onEnded={() => setPlaying(false)}
         onError={() => {
           setPlaying(false);
-          setFailed(true);
         }}
         preload="none"
       />
@@ -225,11 +265,10 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
           e.stopPropagation();
           void toggle();
         }}
-        disabled={failed}
-        title={failed ? "Preview unavailable" : playing ? "Pause preview" : "Play preview"}
-        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 ${failed ? "bg-white/5 text-white/30 cursor-not-allowed" : "bg-white/10 hover:bg-white/20"}`}
+        title={playing ? "Pause preview" : "Play preview"}
+        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all shrink-0 ${playing ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"}`}
       >
-        {playing ? <Pause className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white ml-0.5" />}
+        {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
       </button>
     </>
   );
@@ -389,7 +428,10 @@ function GrowthChart({ artistId }: { artistId: string }) {
       </div>
       <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4">
         {loading ? (
-          <div className="h-44 flex items-center justify-center text-[var(--muted-foreground)] text-sm">Loading...</div>
+          <div className="space-y-3">
+            <Skeleton className="h-6 w-28" />
+            <Skeleton className="h-44 w-full rounded-xl" />
+          </div>
         ) : snapshots.length < 2 ? (
           <div className="h-44 flex items-center justify-center text-[var(--muted-foreground)] text-sm">
             Not enough data yet. Stats are recorded on each refresh.
@@ -590,11 +632,7 @@ export default function ArtistPage() {
   }
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        <RefreshCw className="w-6 h-6 animate-spin" />
-      </div>
-    );
+    return <ArtistPageSkeleton />;
   }
 
   if (!artist) {
@@ -942,85 +980,95 @@ export default function ArtistPage() {
             <h2 className="text-base font-black mb-3 uppercase tracking-wider text-[var(--muted-foreground)] flex items-center gap-2">
               <Music className="w-4 h-4" /> Popular Songs
             </h2>
-            <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/40 overflow-hidden">
-              {tracks.map((track, i) => (
-                <a
-                  key={track.id}
-                  href={track.deezerUrl ?? track.spotifyUrl ?? "#"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 md:gap-4 px-4 py-3 hover:bg-white/[0.03] transition-colors group border-b border-[var(--muted)] last:border-0"
-                >
-                  {/* Track number */}
-                  <span className="w-6 text-right text-xs font-bold text-[var(--muted-foreground)] tabular-nums shrink-0">
-                    {i + 1}
-                  </span>
+            <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/35 overflow-hidden">
+              {/* Table header */}
+              <div className="hidden md:grid grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+                <span /><span>#</span><span>Title</span><span>Version</span>
+                <span className="text-right">Released</span>
+                <span className="text-right"><Clock className="w-3 h-3 inline" /></span>
+                <span className="text-right">Popularity</span>
+                <span />
+              </div>
 
-                  {/* Album art */}
-                  {track.albumImageUrl ? (
-                    <Image
-                      src={track.albumImageUrl}
-                      alt={track.albumName ?? ""}
-                      width={44}
-                      height={44}
-                      className="w-11 h-11 rounded-md object-cover shrink-0 shadow"
-                    />
-                  ) : (
-                    <div className="w-11 h-11 rounded-md bg-[var(--muted)] flex items-center justify-center shrink-0">
-                      <Disc3 className="w-5 h-5 text-[var(--muted-foreground)]" />
+              {/* Track rows */}
+              {tracks.map((track, i) => {
+                const rank = i + 1;
+                const normalized = normalizeTrackPopularity(track.popularity);
+                const popColorClass = normalized >= 70 ? "text-green-400" : normalized >= 50 ? "text-yellow-400" : normalized >= 30 ? "text-orange-400" : "text-[var(--muted-foreground)]";
+                const popBarClass = normalized >= 70 ? "bg-green-500" : normalized >= 50 ? "bg-yellow-500" : normalized >= 30 ? "bg-orange-500" : "bg-zinc-600";
+                const versionLabel = track.primaryVersion?.trim() || null;
+
+                return (
+                  <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
+                    {/* Play */}
+                    <div className="flex justify-center">
+                      {track.previewUrl ? (
+                        <TrackPreview url={track.previewUrl} deezerId={track.deezerId} />
+                      ) : <div className="w-7 h-7" />}
                     </div>
-                  )}
 
-                  {/* Preview button */}
-                  <div className="shrink-0">
-                    {track.previewUrl ? (
-                      <TrackPreview url={track.previewUrl} deezerId={track.deezerId} />
-                    ) : (
-                      <div className="w-8 h-8" />
-                    )}
-                  </div>
+                    {/* Rank */}
+                    <span className="text-center font-black text-base tabular-nums text-[var(--muted-foreground)]">{rank}</span>
 
-                  {/* Track info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm truncate">{track.name}</span>
-                      {track.explicit && (
-                        <span className="px-1 py-px rounded text-[9px] font-bold bg-white/10 text-white/50 shrink-0">E</span>
+                    {/* Title + Artist */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      {track.albumImageUrl ? (
+                        <Image src={track.albumImageUrl} alt={track.albumName ?? ""} width={44} height={44} className="rounded-lg shrink-0 shadow-md" />
+                      ) : (
+                        <div className="w-11 h-11 rounded-lg bg-[var(--muted)] flex items-center justify-center shrink-0"><Music className="w-4 h-4 text-[var(--muted-foreground)]" /></div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-sm truncate">{track.name}</span>
+                          {track.explicit && <span className="shrink-0 text-[9px] font-bold bg-zinc-700 text-zinc-300 px-1 py-px rounded">E</span>}
+                        </div>
+                        <div className="text-xs leading-relaxed whitespace-normal break-words">
+                          <Link href={`/artist/${id}`} className="text-[var(--accent)] hover:text-white transition-colors">{artist.name}</Link>
+                          {track.featuredArtists.map((name) => (
+                            <span key={name}>
+                              <span className="text-[var(--muted-foreground)]">, </span>
+                              <span className="text-white/40">{name}</span>
+                            </span>
+                          ))}
+                        </div>
+                        {/* Mobile-only meta */}
+                        <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
+                          {versionLabel && <>{versionLabel}<span className="mx-1.5">&bull;</span></>}
+                          {track.releaseDate ?? "Unknown date"}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Version (desktop) */}
+                    <span className="hidden md:block text-xs text-[var(--muted-foreground)] truncate font-medium">{versionLabel ?? "-"}</span>
+
+                    {/* Release date (desktop) */}
+                    <span className="hidden md:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
+                      <CalendarDays className="w-3 h-3 opacity-50" />{track.releaseDate ?? "--"}
+                    </span>
+
+                    {/* Duration (desktop) */}
+                    <span className="hidden md:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">{formatDuration(track.durationMs)}</span>
+
+                    {/* Popularity metric */}
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className={`text-xs font-bold tabular-nums ${popColorClass}`}>{track.popularity > 100 ? formatCount(track.popularity) : String(track.popularity)}</span>
+                      <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
+                        <div className={`h-full rounded-full ${popBarClass}`} style={{ width: `${normalized}%` }} />
+                      </div>
+                    </div>
+
+                    {/* External link */}
+                    <div className="hidden md:flex justify-end">
+                      {(track.deezerUrl || track.spotifyUrl) && (
+                        <a href={track.deezerUrl ?? track.spotifyUrl!} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
                       )}
                     </div>
-                    <div className="text-xs text-[var(--muted-foreground)] truncate">
-                      {track.featuredArtists.length > 0 && (
-                        <span className="text-white/40">feat. {track.featuredArtists.join(", ")}</span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {track.releaseDate && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/5 text-[var(--muted-foreground)]">
-                          {track.releaseDate}
-                        </span>
-                      )}
-                      {(track.versions ?? []).slice(0, 3).map((version) => (
-                        <span key={version} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-white/75">
-                          {version}
-                        </span>
-                      ))}
-                    </div>
                   </div>
-
-                  {/* Duration */}
-                  <div className="text-xs text-[var(--muted-foreground)] tabular-nums shrink-0 w-10 text-right">
-                    {formatDuration(track.durationMs)}
-                  </div>
-
-                  {/* Popularity bar */}
-                  <div className="hidden sm:flex items-center gap-2 shrink-0 w-24">
-                    <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
-                      <div className="h-full rounded-full bg-green-400/60" style={{ width: `${normalizeTrackPopularity(track.popularity)}%` }} />
-                    </div>
-                    <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums w-6 text-right">{track.popularity}</span>
-                  </div>
-                </a>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

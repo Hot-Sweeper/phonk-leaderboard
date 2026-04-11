@@ -780,6 +780,76 @@ type DeezerTrack = {
   releaseDate: string | null;
 };
 
+export type DeezerTrackDetail = {
+  deezerId: number;
+  name: string;
+  fullTitle: string;
+  titleVersion: string | null;
+  popularity: number;
+  durationMs: number;
+  explicit: boolean;
+  previewUrl: string | null;
+  trackNumber: number;
+  deezerUrl: string;
+  album: {
+    name: string;
+    imageUrl: string | null;
+    releaseDate: string | null;
+  };
+  artists: Array<{
+    name: string;
+    deezerId: number;
+    role: string | null;
+  }>;
+  bpm: number | null;
+  gain: number | null;
+  releaseDate: string | null;
+};
+
+export async function fetchDeezerTrackDetail(deezerTrackId: number): Promise<DeezerTrackDetail | null> {
+  try {
+    const detailRes = await fetch(`https://api.deezer.com/track/${deezerTrackId}`);
+    if (!detailRes.ok) {
+      return null;
+    }
+
+    const detail = await detailRes.json();
+    const contributors = Array.isArray(detail.contributors) && detail.contributors.length > 0
+      ? detail.contributors
+      : detail.artist
+        ? [detail.artist]
+        : [];
+
+    return {
+      deezerId: detail.id,
+      name: detail.title_short ?? detail.title,
+      fullTitle: detail.title ?? detail.title_short,
+      titleVersion: detail.title_version || null,
+      popularity: detail.rank ?? 0,
+      durationMs: (detail.duration ?? 0) * 1000,
+      explicit: detail.explicit_lyrics ?? false,
+      previewUrl: detail.preview ?? null,
+      trackNumber: detail.track_position ?? 0,
+      deezerUrl: detail.link ?? `https://www.deezer.com/track/${detail.id}`,
+      album: {
+        name: detail.album?.title ?? "",
+        imageUrl: detail.album?.cover_big ?? detail.album?.cover_medium ?? null,
+        releaseDate: detail.release_date ?? detail.album?.release_date ?? null,
+      },
+      artists: contributors.map((artist: { name: string; id: number; role?: string }) => ({
+        name: artist.name,
+        deezerId: artist.id,
+        role: artist.role ?? null,
+      })),
+      bpm: detail.bpm && detail.bpm > 0 ? detail.bpm : null,
+      gain: detail.gain ?? null,
+      releaseDate: detail.release_date ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch top tracks for an artist from Deezer */
 export async function fetchDeezerTopTracks(deezerId: number): Promise<DeezerTrack[] | null> {
   try {
@@ -794,46 +864,32 @@ export async function fetchDeezerTopTracks(deezerId: number): Promise<DeezerTrac
     // Fetch BPM/gain/release_date for each track (detail endpoint)
     const tracks: DeezerTrack[] = [];
     for (const t of data.data) {
-      let bpm: number | null = null;
-      let gain: number | null = null;
-      let releaseDate: string | null = null;
-      let trackPosition = 0;
-
-      // Fetch individual track details for BPM, gain, and release date
-      try {
-        const detailRes = await fetch(`https://api.deezer.com/track/${t.id}`);
-        if (detailRes.ok) {
-          const detail = await detailRes.json();
-          bpm = detail.bpm && detail.bpm > 0 ? detail.bpm : null;
-          gain = detail.gain ?? null;
-          releaseDate = detail.release_date ?? null;
-          trackPosition = detail.track_position ?? 0;
-        }
-      } catch {
-        // Non-critical, continue without detail
-      }
+      const detail = await fetchDeezerTrackDetail(t.id);
 
       tracks.push({
         deezerId: t.id,
-        name: t.title_short ?? t.title,
-        popularity: t.rank ?? 0,
-        durationMs: (t.duration ?? 0) * 1000,
-        explicit: t.explicit_lyrics ?? false,
-        previewUrl: t.preview ?? null,
-        trackNumber: trackPosition,
-        deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
+        name: t.title ?? detail?.fullTitle ?? detail?.name ?? t.title_short,
+        popularity: detail?.popularity ?? t.rank ?? 0,
+        durationMs: detail?.durationMs ?? (t.duration ?? 0) * 1000,
+        explicit: detail?.explicit ?? t.explicit_lyrics ?? false,
+        previewUrl: detail?.previewUrl ?? t.preview ?? null,
+        trackNumber: detail?.trackNumber ?? 0,
+        deezerUrl: detail?.deezerUrl ?? t.link ?? `https://www.deezer.com/track/${t.id}`,
         album: {
-          name: t.album?.title ?? "",
-          imageUrl: t.album?.cover_big ?? t.album?.cover_medium ?? null,
-          releaseDate: releaseDate,
+          name: detail?.album.name ?? t.album?.title ?? "",
+          imageUrl: detail?.album.imageUrl ?? t.album?.cover_big ?? t.album?.cover_medium ?? null,
+          releaseDate: detail?.album.releaseDate ?? null,
         },
-        artists: (t.contributors ?? []).map((c: { name: string; id: number }) => ({
+        artists: detail?.artists.map((artist) => ({
+          name: artist.name,
+          deezerId: artist.deezerId,
+        })) ?? (t.contributors ?? []).map((c: { name: string; id: number }) => ({
           name: c.name,
           deezerId: c.id,
         })),
-        bpm,
-        gain,
-        releaseDate,
+        bpm: detail?.bpm ?? null,
+        gain: detail?.gain ?? null,
+        releaseDate: detail?.releaseDate ?? null,
       });
     }
 

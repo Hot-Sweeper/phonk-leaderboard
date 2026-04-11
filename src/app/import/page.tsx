@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import Link from "next/link";
+import { Skeleton } from "@/components/Skeleton";
 import {
   ArrowLeft,
   Check,
@@ -33,6 +34,35 @@ type LogEntry = {
   error?: string;
 };
 
+function ImportPageSkeleton() {
+  return (
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans relative">
+      <div className="max-w-4xl mx-auto space-y-6">
+        <div className="space-y-3">
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-10 w-64 max-w-full" />
+          <Skeleton className="h-4 w-80 max-w-full" />
+        </div>
+        <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-6 space-y-4">
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <div className="flex gap-3">
+            <Skeleton className="h-11 w-32 rounded-xl" />
+            <Skeleton className="h-11 w-24 rounded-xl" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4 space-y-3">
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-8 w-16" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export default function ImportPage() {
   const { data: session, status } = useSession();
   const [urlInput, setUrlInput] = useState("");
@@ -51,11 +81,7 @@ export default function ImportPage() {
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
 
   if (status === "loading")
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    );
+    return <ImportPageSkeleton />;
   if (!session || !isPrivileged) {
     return (
       <main className="min-h-screen flex flex-col items-center justify-center gap-4 text-center px-4">

@@ -1,27 +1,20 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Skeleton } from "@/components/Skeleton";
-import { ArrowLeft, ArrowRight, Circle } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
-type ChangeArtist = {
-  id: string;
-  name: string;
-  imageUrl: string | null;
-  currentValue: number;
-  changePercent: number;
-  hasData: boolean;
-  metric: string;
-};
-
-type Bubble = {
+type BubbleItem = {
   id: string;
   name: string;
   imageUrl: string | null;
   value: number;
   changePercent: number;
   hasData: boolean;
-  rank: number; // 1-based global rank (0 = unknown)
+  rank: number;
   isWatchlisted: boolean;
+};
+
+type Bubble = BubbleItem & {
   x: number;
   y: number;
   vx: number;
@@ -39,15 +32,8 @@ function formatCount(n: number): string {
 }
 
 const PAGE_SIZE = 100;
-const PERIOD_LABELS: Record<string, string> = {
-  hour: "1H",
-  day: "24H",
-  week: "7D",
-  month: "30D",
-  year: "1Y",
-};
 
-const METRICS = [
+const ARTIST_METRICS = [
   { key: "listeners", label: "Monthly Listeners" },
   { key: "followers", label: "Spotify Followers" },
   { key: "youtube", label: "YouTube Subs" },
@@ -55,12 +41,15 @@ const METRICS = [
   { key: "instagram", label: "Instagram Followers" },
 ];
 
-const MODES = [
-  { key: "change", label: "% Change" },
-  { key: "current", label: "Current" },
-];
+interface BubbleViewProps {
+  entity: "artists" | "songs";
+  metric: string;
+  mode: string;
+  period: string;
+  songMode?: string;
+}
 
-export default function BubblesPage() {
+export default function BubbleView({ entity, metric, mode, period, songMode }: BubbleViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const bubblesRef = useRef<Bubble[]>([]);
@@ -69,47 +58,75 @@ export default function BubblesPage() {
   const hoveredRef = useRef<Bubble | null>(null);
   const dragRef = useRef<{ bubble: Bubble; offsetX: number; offsetY: number } | null>(null);
 
-  const [artists, setArtists] = useState<ChangeArtist[]>([]);
+  const [items, setItems] = useState<BubbleItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
-  const [period, setPeriod] = useState("hour");
-  const [metric, setMetric] = useState("listeners");
-  const [mode, setMode] = useState("change");
-  const [availablePeriods, setAvailablePeriods] = useState<string[]>(["hour"]);
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Bubble | null>(null);
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // Load watchlist once
+  // Load watchlist
   useEffect(() => {
+    if (entity !== "artists") return;
     fetch("/api/watchlist")
       .then((r) => r.ok ? r.json() : [])
       .then((ids: string[]) => setWatchlist(new Set(ids)))
       .catch(() => {});
-  }, []);
+  }, [entity]);
 
-  // Load artist changes for current page, period, metric, mode
+  // Fetch data
   useEffect(() => {
     setLoading(true);
     const skip = page * PAGE_SIZE;
-    fetch(`/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`)
-      .then((r) => r.json())
-      .then((data) => {
-        setArtists(data.artists ?? []);
-        setTotalCount(data.totalCount ?? 0);
-        if (data.availablePeriods?.length) {
-          setAvailablePeriods(data.availablePeriods);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [page, period, metric, mode]);
 
-  // Init bubbles when artists change
+    if (entity === "artists") {
+      fetch(`/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`)
+        .then((r) => r.json())
+        .then((data) => {
+          const artists = (data.artists ?? []).map((a: { id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }, idx: number) => ({
+            id: a.id,
+            name: a.name,
+            imageUrl: a.imageUrl,
+            value: a.currentValue,
+            changePercent: a.changePercent,
+            hasData: a.hasData,
+            rank: skip + idx + 1,
+            isWatchlisted: false,
+          }));
+          setItems(artists);
+          setTotalCount(data.totalCount ?? 0);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else {
+      // Songs bubble mode
+      const sMode = songMode || "popularity";
+      fetch(`/api/songs?skip=${skip}&take=${PAGE_SIZE}&mode=${sMode}&collapseVersions=true`)
+        .then((r) => r.json())
+        .then((data) => {
+          const tracks = (data.tracks ?? []).map((t: { id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }, idx: number) => ({
+            id: t.id,
+            name: t.name,
+            imageUrl: t.albumImageUrl,
+            value: sMode === "popularity" ? t.popularity : Math.abs(t.metricValue),
+            changePercent: t.trendPercent,
+            hasData: t.hasTrendData,
+            rank: skip + idx + 1,
+            isWatchlisted: false,
+          }));
+          setItems(tracks);
+          setTotalCount(data.totalCount ?? 0);
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [entity, page, period, metric, mode, songMode]);
+
+  // Build bubbles from items
   useEffect(() => {
-    if (artists.length === 0) return;
+    if (items.length === 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -117,58 +134,38 @@ export default function BubblesPage() {
     const h = canvas.clientHeight;
     const canvasArea = w * h;
 
-    // In "current" mode, size = absolute value. In "change" mode, size = |changePercent|
-    const isCurrentMode = mode === "current";
-    const sizeValues = artists.map((a) =>
-      isCurrentMode ? a.currentValue : Math.abs(a.changePercent)
-    );
+    const isCurrentMode = mode === "current" || (entity === "songs" && songMode === "popularity");
+    const sizeValues = items.map((a) => isCurrentMode ? a.value : Math.abs(a.changePercent));
     const maxVal = Math.max(0.01, ...sizeValues);
 
-    // Compute radii so total bubble area fills ~55% of the canvas
-    // Each bubble area is proportional to sqrt(value/max) (area-proportional)
-    // total_area = sum(pi * r_i^2) = fillRatio * canvasArea
-    // r_i = scale * sqrt(val_i / maxVal)
-    // sum(pi * scale^2 * val_i / maxVal) = fillRatio * canvasArea
-    // scale = sqrt(fillRatio * canvasArea / (pi * sum(val_i / maxVal)))
     const fillRatio = 0.55;
     const normalizedSum = sizeValues.reduce((s, v) => s + v / maxVal, 0);
     const scale = Math.sqrt((fillRatio * canvasArea) / (Math.PI * Math.max(0.01, normalizedSum)));
 
-    // Clamp individual bubbles to reasonable min/max
     const minR = Math.max(12, Math.min(w, h) * 0.015);
-    const maxR = Math.min(w, h) * 0.4; // allow very large bubbles
+    const maxR = Math.min(w, h) * 0.4;
 
-    const newBubbles: Bubble[] = artists.map((artist) => {
-      const sizeVal = isCurrentMode ? artist.currentValue : Math.abs(artist.changePercent);
+    const newBubbles: Bubble[] = items.map((item) => {
+      const sizeVal = isCurrentMode ? item.value : Math.abs(item.changePercent);
       const rawR = scale * Math.sqrt(sizeVal / maxVal);
       const targetR = Math.max(minR, Math.min(maxR, rawR));
 
-      // Load image
       let img: HTMLImageElement | null = null;
       let imgLoaded = false;
-      if (artist.imageUrl) {
+      if (item.imageUrl) {
         img = new window.Image();
         img.crossOrigin = "anonymous";
         const imgSize = targetR > 60 ? 256 : 128;
-        img.src = `/_next/image?url=${encodeURIComponent(artist.imageUrl)}&w=${imgSize}&q=75`;
+        img.src = `/_next/image?url=${encodeURIComponent(item.imageUrl)}&w=${imgSize}&q=75`;
         img.onload = () => {
-          const b = bubblesRef.current.find((b) => b.id === artist.id);
+          const b = bubblesRef.current.find((b) => b.id === item.id);
           if (b) b.imgLoaded = true;
         };
       }
 
-      // Global rank: page offset + position in sorted list + 1
-      const globalRank = page * PAGE_SIZE + artists.indexOf(artist) + 1;
-
       return {
-        id: artist.id,
-        name: artist.name,
-        imageUrl: artist.imageUrl,
-        value: artist.currentValue,
-        changePercent: artist.changePercent,
-        hasData: artist.hasData,
-        rank: globalRank,
-        isWatchlisted: watchlist.has(artist.id),
+        ...item,
+        isWatchlisted: watchlist.has(item.id),
         x: minR + Math.random() * (w - 2 * minR),
         y: minR + Math.random() * (h - 2 * minR),
         vx: 0,
@@ -181,9 +178,9 @@ export default function BubblesPage() {
     });
 
     bubblesRef.current = newBubbles;
-  }, [artists, mode, page, watchlist]);
+  }, [items, mode, watchlist, entity, songMode]);
 
-  // Animation loop with repulsion physics
+  // Animation loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -211,66 +208,45 @@ export default function BubblesPage() {
       const bubbles = bubblesRef.current;
       const drag = dragRef.current;
 
-      // Animate radius
-      for (const b of bubbles) {
-        b.r += (b.targetR - b.r) * 0.08;
-      }
+      for (const b of bubbles) b.r += (b.targetR - b.r) * 0.08;
 
-      // Physics: repulsion between overlapping bubbles + spacing
+      // Physics
       for (let i = 0; i < bubbles.length; i++) {
         const a = bubbles[i];
         if (drag && a === drag.bubble) continue;
-
         for (let j = i + 1; j < bubbles.length; j++) {
           const b = bubbles[j];
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
           const desiredDist = a.r + b.r + 3;
-
           if (dist < desiredDist && dist > 0.1) {
-            // Strong repulsion force when overlapping
             const overlap = desiredDist - dist;
             const force = overlap / dist * 0.25;
             const nx = dx * force;
             const ny = dy * force;
-
-            if (!(drag && a === drag.bubble)) {
-              a.vx -= nx;
-              a.vy -= ny;
-            }
-            if (!(drag && b === drag.bubble)) {
-              b.vx += nx;
-              b.vy += ny;
-            }
+            if (!(drag && a === drag.bubble)) { a.vx -= nx; a.vy -= ny; }
+            if (!(drag && b === drag.bubble)) { b.vx += nx; b.vy += ny; }
           }
         }
       }
 
-      // Boundary: keep bubbles inside canvas, push away from edges
       for (const b of bubbles) {
         if (drag && b === drag.bubble) continue;
-
         const pad = b.r + 1;
         if (b.x < pad) b.vx += (pad - b.x) * 0.2;
         if (b.x > w - pad) b.vx += (w - pad - b.x) * 0.2;
         if (b.y < pad) b.vy += (pad - b.y) * 0.2;
         if (b.y > h - pad) b.vy += (h - pad - b.y) * 0.2;
-
-        // Damping
         b.vx *= 0.88;
         b.vy *= 0.88;
-
-        // Move
         b.x += b.vx;
         b.y += b.vy;
-
-        // Hard clamp
         b.x = Math.max(b.r, Math.min(w - b.r, b.x));
         b.y = Math.max(b.r, Math.min(h - b.r, b.y));
       }
 
-      // Check hover
+      // Hover detection
       const mouse = mouseRef.current;
       let newHovered: Bubble | null = null;
       if (mouse && !drag) {
@@ -278,10 +254,7 @@ export default function BubblesPage() {
           const b = bubbles[i];
           const dx = mouse.x - b.x;
           const dy = mouse.y - b.y;
-          if (dx * dx + dy * dy < b.r * b.r) {
-            newHovered = b;
-            break;
-          }
+          if (dx * dx + dy * dy < b.r * b.r) { newHovered = b; break; }
         }
       }
       if (newHovered !== hoveredRef.current) {
@@ -289,29 +262,24 @@ export default function BubblesPage() {
         setHovered(newHovered);
       }
 
-      // Sort: smaller on top for rendering
       const sorted = [...bubbles].sort((a, b) => b.r - a.r);
 
       // Draw
       for (const b of sorted) {
         const isHov = b === newHovered || (drag && b === drag.bubble);
         const drawR = isHov ? b.r * 1.06 : b.r;
-
-        // Size-based saturation: bigger bubbles are more vivid (0.3 to 1.0)
         const maxBubbleR = Math.max(1, ...bubbles.map((bb) => bb.targetR));
         const sizeRatio = Math.min(1, b.targetR / maxBubbleR);
         const saturation = 0.3 + sizeRatio * 0.7;
 
-        // Determine bubble style: podium > watchlist > change mode > default
         const isPodium = b.rank >= 1 && b.rank <= 3;
         const isChangeMode = b.hasData && b.changePercent !== 0;
         const isPositive = b.changePercent >= 0;
 
-        // Podium colors: gold (#FFD700), silver (#C0C0C0), bronze (#CD7F32)
         const podiumColors: Record<number, { r: number; g: number; b: number }> = {
-          1: { r: 255, g: 215, b: 0 },    // gold
-          2: { r: 192, g: 192, b: 192 },   // silver
-          3: { r: 205, g: 127, b: 50 },    // bronze
+          1: { r: 255, g: 215, b: 0 },
+          2: { r: 192, g: 192, b: 192 },
+          3: { r: 205, g: 127, b: 50 },
         };
 
         let borderColor: string;
@@ -342,8 +310,6 @@ export default function BubblesPage() {
         }
 
         ctx.save();
-
-        // Image fill with color overlay
         ctx.beginPath();
         ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
 
@@ -352,14 +318,11 @@ export default function BubblesPage() {
           ctx.clip();
           ctx.drawImage(b.img, b.x - drawR, b.y - drawR, drawR * 2, drawR * 2);
           ctx.restore();
-
-          // Color overlay — thinner for bigger bubbles so image shows through
           ctx.beginPath();
           ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
           ctx.fillStyle = overlayColor;
           ctx.fill();
         } else {
-          // Gradient fill
           const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, drawR);
           if (isPodium) {
             const pc = podiumColors[b.rank];
@@ -381,25 +344,22 @@ export default function BubblesPage() {
           ctx.fill();
         }
 
-        // Watchlist highlight: outer ring
         if (b.isWatchlisted) {
           ctx.beginPath();
           ctx.arc(b.x, b.y, drawR + 3, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(236, 72, 153, ${0.6 + saturation * 0.3})`; // pink
+          ctx.strokeStyle = `rgba(236, 72, 153, ${0.6 + saturation * 0.3})`;
           ctx.lineWidth = 2.5;
           ctx.setLineDash([4, 3]);
           ctx.stroke();
           ctx.setLineDash([]);
         }
 
-        // Border
         ctx.beginPath();
         ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
         ctx.strokeStyle = borderColor;
         ctx.lineWidth = isPodium ? (isHov ? 3.5 : 2.5) : (isHov ? 2.5 : 1.5);
         ctx.stroke();
 
-        // Glow on hover or podium
         if (isHov || isPodium) {
           ctx.shadowColor = glowColor;
           ctx.shadowBlur = isPodium ? 15 + saturation * 15 : 20;
@@ -411,24 +371,18 @@ export default function BubblesPage() {
           ctx.shadowBlur = 0;
         }
 
-        // Text: name + value or change %
         if (drawR > 14) {
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           const fontSize = Math.max(7, Math.min(22, drawR * 0.32));
-
-          // Name
           ctx.font = `bold ${fontSize}px sans-serif`;
           ctx.fillStyle = "#fff";
           const maxNameW = drawR * 1.6;
           let displayName = b.name;
-          while (ctx.measureText(displayName).width > maxNameW && displayName.length > 3) {
-            displayName = displayName.slice(0, -1);
-          }
+          while (ctx.measureText(displayName).width > maxNameW && displayName.length > 3) displayName = displayName.slice(0, -1);
           if (displayName !== b.name) displayName += "\u2026";
           ctx.fillText(displayName, b.x, b.y - fontSize * 0.6);
 
-          // Sub text: change % or absolute value
           const smallSize = Math.max(6, fontSize * 0.75);
           ctx.font = `bold ${smallSize}px sans-serif`;
           if (isChangeMode) {
@@ -452,7 +406,7 @@ export default function BubblesPage() {
       cancelAnimationFrame(animRef.current);
       window.removeEventListener("resize", resize);
     };
-  }, [artists]);
+  }, [items]);
 
   // Mouse handlers
   const getCanvasPos = useCallback((e: React.MouseEvent | MouseEvent) => {
@@ -466,7 +420,6 @@ export default function BubblesPage() {
     const pos = getCanvasPos(e);
     if (!pos) return;
     mouseRef.current = pos;
-
     const drag = dragRef.current;
     if (drag) {
       drag.bubble.x = pos.x - drag.offsetX;
@@ -479,8 +432,6 @@ export default function BubblesPage() {
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getCanvasPos(e);
     if (!pos) return;
-
-    // Find bubble under cursor (reverse order — smaller rendered on top)
     const bubbles = bubblesRef.current;
     for (let i = bubbles.length - 1; i >= 0; i--) {
       const b = bubbles[i];
@@ -494,9 +445,7 @@ export default function BubblesPage() {
   }, [getCanvasPos]);
 
   const handleMouseUp = useCallback(() => {
-    if (dragRef.current) {
-      dragRef.current = null;
-    }
+    dragRef.current = null;
   }, []);
 
   const handleMouseLeave = useCallback(() => {
@@ -507,7 +456,6 @@ export default function BubblesPage() {
   }, []);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Only navigate if we didn't just drag
     if (dragRef.current) return;
     const pos = getCanvasPos(e);
     if (!pos) return;
@@ -516,13 +464,14 @@ export default function BubblesPage() {
       const dx = pos.x - b.x;
       const dy = pos.y - b.y;
       if (dx * dx + dy * dy < b.r * b.r) {
-        window.location.href = `/artist/${b.id}`;
+        if (entity === "artists") {
+          window.location.href = `/artist/${b.id}`;
+        }
         return;
       }
     }
-  }, [getCanvasPos]);
+  }, [getCanvasPos, entity]);
 
-  // Track if mouse was dragged to distinguish click from drag
   const wasDragging = useRef(false);
   const handleMouseDownWrap = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     wasDragging.current = false;
@@ -535,131 +484,35 @@ export default function BubblesPage() {
   }, [handleMouseMove]);
 
   const handleClickWrap = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (wasDragging.current) {
-      handleMouseUp();
-      return;
-    }
+    if (wasDragging.current) { handleMouseUp(); return; }
     handleMouseUp();
     handleClick(e);
   }, [handleClick, handleMouseUp]);
 
+  const metricLabel = entity === "artists"
+    ? (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase()
+    : "popularity";
+
   return (
-    <main className="h-[calc(100vh-3.5rem)] bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="px-4 pt-4 pb-3 shrink-0">
-        <div className="max-w-[1400px] mx-auto">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-black tracking-tighter flex items-center gap-2">
-                <Circle className="w-7 h-7 text-[var(--accent)]" />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-[var(--accent)]">
-                  Artist Bubbles
-                </span>
-              </h1>
-              <p className="text-[var(--muted-foreground)] text-xs mt-0.5">
-                {mode === "change"
-                  ? "Bubble size = change magnitude. Green = growth, red = decline."
-                  : "Bubble size = absolute value. Bigger = more."}
-                {" "}Drag to rearrange. Click to explore.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 shrink-0 flex-wrap">
-              {/* Metric selector */}
-              <select
-                value={metric}
-                onChange={(e) => setMetric(e.target.value)}
-                className="bg-[var(--secondary)] border border-[var(--muted)] rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:ring-1 focus:ring-[var(--accent)] text-white"
-              >
-                {METRICS.map((m) => (
-                  <option key={m.key} value={m.key}>{m.label}</option>
-                ))}
-              </select>
-
-              {/* Mode selector */}
-              <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                {MODES.map((m) => (
-                  <button
-                    key={m.key}
-                    onClick={() => setMode(m.key)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
-                      mode === m.key
-                        ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]"
-                        : "text-[var(--muted-foreground)] hover:text-white"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Period selector (only in change mode) */}
-              {mode === "change" && (
-                <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                  {availablePeriods.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setPeriod(p)}
-                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
-                        period === p
-                          ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]"
-                          : "text-[var(--muted-foreground)] hover:text-white"
-                      }`}
-                    >
-                      {PERIOD_LABELS[p] ?? p}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Pagination */}
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={page === 0}
-                  className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                </button>
-                {Array.from({ length: totalPages }, (_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setPage(i)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                      page === i
-                        ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]"
-                        : "bg-[var(--secondary)] text-[var(--muted-foreground)] border border-[var(--muted)] hover:text-white"
-                    }`}
-                  >
-                    {i * PAGE_SIZE + 1}-{Math.min((i + 1) * PAGE_SIZE, totalCount)}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={page >= totalPages - 1}
-                  className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"
-                >
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+    <div className="flex flex-col h-full">
       {/* Canvas */}
-      <div ref={containerRef} className="flex-1 relative px-2 pb-2 min-h-0">
+      <div ref={containerRef} className="flex-1 relative px-2 pb-1 min-h-0">
         {loading && (
-          <div className="absolute inset-0 z-10 rounded-2xl border border-[var(--muted)] bg-[#050507]/80 backdrop-blur-sm p-6 flex flex-col justify-between">
-            <div className="grid grid-cols-3 gap-3">
-              <Skeleton className="h-24 rounded-full" />
-              <Skeleton className="h-16 rounded-full mt-10" />
-              <Skeleton className="h-20 rounded-full ml-auto" />
-            </div>
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-40 max-w-full" />
-              <Skeleton className="h-4 w-64 max-w-full" />
-              <Skeleton className="h-4 w-48 max-w-full" />
+          <div className="absolute inset-0 z-10 rounded-2xl border border-[var(--muted)] bg-[#050507]/80 backdrop-blur-sm flex items-center justify-center">
+            <div className="relative w-full h-full overflow-hidden">
+              {/* Fake bubble circles */}
+              <Skeleton className="absolute w-28 h-28 rounded-full top-[15%] left-[20%] opacity-40" />
+              <Skeleton className="absolute w-20 h-20 rounded-full top-[30%] left-[55%] opacity-30" />
+              <Skeleton className="absolute w-36 h-36 rounded-full top-[40%] left-[35%] opacity-50" />
+              <Skeleton className="absolute w-16 h-16 rounded-full top-[20%] left-[70%] opacity-25" />
+              <Skeleton className="absolute w-24 h-24 rounded-full top-[55%] left-[15%] opacity-35" />
+              <Skeleton className="absolute w-14 h-14 rounded-full top-[60%] left-[65%] opacity-20" />
+              <Skeleton className="absolute w-10 h-10 rounded-full top-[10%] left-[42%] opacity-20" />
+              <Skeleton className="absolute w-18 h-18 rounded-full top-[65%] left-[45%] opacity-30" />
+              {/* Centered loading text */}
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm text-[var(--muted-foreground)] animate-pulse">Loading bubbles...</span>
+              </div>
             </div>
           </div>
         )}
@@ -672,7 +525,7 @@ export default function BubblesPage() {
           onMouseUp={handleClickWrap}
           onMouseLeave={handleMouseLeave}
         />
-        {/* Hover tooltip */}
+        {/* Tooltip */}
         {hovered && !dragRef.current && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[var(--secondary)] border border-[var(--muted)] rounded-xl px-4 py-2.5 flex items-center gap-3 shadow-2xl pointer-events-none z-20">
             <div>
@@ -685,9 +538,7 @@ export default function BubblesPage() {
               </div>
               <div className="flex items-center gap-3 text-xs">
                 {hovered.value > 0 && (
-                  <span className="text-[var(--muted-foreground)] tabular-nums">
-                    {formatCount(hovered.value)} {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}
-                  </span>
+                  <span className="text-[var(--muted-foreground)] tabular-nums">{formatCount(hovered.value)} {metricLabel}</span>
                 )}
                 {hovered.hasData && hovered.changePercent !== 0 && (
                   <span className={`font-bold tabular-nums ${hovered.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -699,6 +550,37 @@ export default function BubblesPage() {
           </div>
         )}
       </div>
-    </main>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="px-4 py-2 shrink-0 flex justify-center">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => (
+              <button
+                key={i}
+                onClick={() => setPage(i)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${page === i ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] border border-[var(--muted)] hover:text-white"}`}
+              >
+                {i * PAGE_SIZE + 1}-{Math.min((i + 1) * PAGE_SIZE, totalCount)}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1}
+              className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"
+            >
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

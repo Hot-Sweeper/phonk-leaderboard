@@ -11,6 +11,15 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "api.deezer.com" },
     ],
   },
+  async redirects() {
+    return [
+      { source: "/leaderboard", destination: "/rankings", permanent: true },
+      { source: "/bubbles", destination: "/rankings?view=bubbles", permanent: true },
+      { source: "/songs", destination: "/rankings?entity=songs", permanent: true },
+      { source: "/review", destination: "/moderation", permanent: true },
+      { source: "/import", destination: "/moderation", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;
