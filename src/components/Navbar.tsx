@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, Upload, User, LogOut, LogIn, Settings } from "lucide-react";
+import { Flame, Trophy, Shield, Upload, User, LogOut, LogIn, Settings, Music, Package, Circle } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -20,19 +20,28 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--muted)] bg-[var(--background)]/80 backdrop-blur-md">
-      <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+      <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-black text-xl tracking-tighter">
           <Flame className="w-6 h-6 text-[var(--accent)]" />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-[var(--accent)]">
-            Phonk Ranks
+            Phonk Forum
           </span>
         </Link>
 
         {/* Nav links */}
         <div className="hidden sm:flex items-center gap-1">
-          <Link href="/" className={linkClass("/")}>
-            <Trophy className="w-4 h-4" /> Leaderboard
+          <Link href="/leaderboard" className={linkClass("/leaderboard")}>
+            <Trophy className="w-4 h-4" /> Phonk Ranks
+          </Link>
+          <Link href="/bubbles" className={linkClass("/bubbles")}>
+            <Circle className="w-4 h-4" /> Bubbles
+          </Link>
+          <Link href="/songs" className={linkClass("/songs")}>
+            <Music className="w-4 h-4" /> Songs
+          </Link>
+          <Link href="/samples" className={linkClass("/samples")}>
+            <Package className="w-4 h-4" /> Samples
           </Link>
           {session && (
             <Link href="/review" className={linkClass("/review")}>

@@ -15,8 +15,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Phonk Ranks - The Ultimate Funk/Phonk Leaderboard",
-  description: "Track the biggest and fastest growing Funk and Phonk YouTube channels.",
+  title: "Phonk Forum - The Home of Phonk",
+  description: "The ultimate community hub for Phonk artists — rankings, trending songs, sample packs, and more.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({

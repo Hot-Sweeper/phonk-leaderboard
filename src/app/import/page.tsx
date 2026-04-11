@@ -175,10 +175,10 @@ export default function ImportPage() {
 
       <div className="max-w-3xl mx-auto relative z-10">
         <Link
-          href="/"
+          href="/leaderboard"
           className="inline-flex items-center gap-2 text-[var(--muted-foreground)] hover:text-white text-sm mb-6 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" /> Back to leaderboard
+          <ArrowLeft className="w-4 h-4" /> Back to Phonk Ranks
         </Link>
 
         <h1 className="text-3xl md:text-4xl font-black tracking-tighter mb-2 flex items-center gap-3">
@@ -325,10 +325,10 @@ export default function ImportPage() {
               Import More
             </button>
             <Link
-              href="/"
+              href="/leaderboard"
               className="px-5 py-2.5 rounded-xl bg-[var(--accent)] text-white font-bold hover:bg-[#a21caf] transition-all"
             >
-              Back to Leaderboard
+              Back to Phonk Ranks
             </Link>
           </div>
         )}

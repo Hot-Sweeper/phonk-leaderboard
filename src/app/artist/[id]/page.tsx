@@ -314,10 +314,10 @@ export default function ArtistPage() {
         <User className="w-16 h-16 text-[var(--muted-foreground)]" />
         <p className="text-xl font-bold">Artist not found</p>
         <Link
-          href="/"
+          href="/leaderboard"
           className="text-[var(--accent)] hover:underline flex items-center gap-1"
         >
-          <ArrowLeft className="w-4 h-4" /> Back to leaderboard
+          <ArrowLeft className="w-4 h-4" /> Back to Phonk Ranks
         </Link>
       </div>
     );
@@ -336,10 +336,10 @@ export default function ArtistPage() {
       <div className="max-w-3xl mx-auto relative z-10">
         {/* Back link */}
         <Link
-          href="/"
+          href="/leaderboard"
           className="inline-flex items-center gap-2 text-[var(--muted-foreground)] hover:text-white text-sm mb-8 transition-colors"
         >
-          <ArrowLeft className="w-4 h-4" /> Back to leaderboard
+          <ArrowLeft className="w-4 h-4" /> Back to Phonk Ranks
         </Link>
 
         {/* Artist Header */}
