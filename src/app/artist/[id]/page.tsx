@@ -15,7 +15,12 @@ import {
   RefreshCw,
   Pencil,
   Save,
-  Trash2,  TrendingUp,} from "lucide-react";
+  Trash2,
+  TrendingUp,
+  Trophy,
+  ArrowUpRight,
+  ArrowDownRight,
+} from "lucide-react";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -127,6 +132,71 @@ type EditableLink = {
   url: string;
   handle: string;
 };
+
+/* ─── Podium Streak Component ─── */
+type RankData = {
+  currentRank: number | null;
+  previousRank: number | null;
+  rankChange: number;
+  podiumStreak: { current: number; best: number };
+};
+
+function PodiumStreak({ artistId }: { artistId: string }) {
+  const [data, setData] = useState<RankData | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/artists/${artistId}/rank`)
+      .then((r) => r.json())
+      .then((d) => setData(d))
+      .catch(() => {});
+  }, [artistId]);
+
+  if (!data || (data.currentRank === null && data.podiumStreak.best === 0)) return null;
+
+  return (
+    <div className="flex items-center gap-4 flex-wrap mb-8">
+      {/* Current Rank */}
+      {data.currentRank !== null && (
+        <div className="flex items-center gap-2 bg-[var(--secondary)]/80 border border-[var(--muted)] rounded-xl px-4 py-2.5">
+          <span className="text-xs font-bold uppercase text-[var(--muted-foreground)]">Rank</span>
+          <span className="text-lg font-black tabular-nums">#{data.currentRank}</span>
+          {data.rankChange !== 0 && (
+            <span className={`flex items-center gap-0.5 text-xs font-bold ${data.rankChange > 0 ? "text-green-400" : "text-red-400"}`}>
+              {data.rankChange > 0 ? (
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              ) : (
+                <ArrowDownRight className="w-3.5 h-3.5" />
+              )}
+              {Math.abs(data.rankChange)}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Podium Streak */}
+      {data.podiumStreak.current > 0 && (
+        <div className="flex items-center gap-2 bg-yellow-900/20 border border-yellow-700/30 rounded-xl px-4 py-2.5">
+          <Trophy className="w-4 h-4 text-yellow-400" />
+          <div>
+            <span className="text-xs font-bold uppercase text-yellow-400/80">Podium Streak</span>
+            <span className="text-lg font-black tabular-nums text-yellow-400 ml-2">{data.podiumStreak.current}d</span>
+          </div>
+        </div>
+      )}
+
+      {/* Best Streak */}
+      {data.podiumStreak.best > 0 && data.podiumStreak.best !== data.podiumStreak.current && (
+        <div className="flex items-center gap-2 bg-[var(--secondary)]/80 border border-[var(--muted)] rounded-xl px-4 py-2.5">
+          <Trophy className="w-4 h-4 text-[var(--muted-foreground)]" />
+          <div>
+            <span className="text-xs font-bold uppercase text-[var(--muted-foreground)]">Best Streak</span>
+            <span className="text-lg font-black tabular-nums ml-2">{data.podiumStreak.best}d</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ─── Growth Chart Component ─── */
 type Snapshot = {
@@ -622,6 +692,9 @@ export default function ArtistPage() {
             </div>
           </div>
         </div>
+
+        {/* Podium Streak & Rank */}
+        <PodiumStreak artistId={artist.id} />
 
         {/* Platform Links */}
         <h2 className="text-lg font-black mb-4 uppercase tracking-wider text-[var(--muted-foreground)]">

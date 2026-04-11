@@ -16,6 +16,9 @@ import {
   ExternalLink,
   Loader2,
   Check,
+  ArrowUpRight,
+  ArrowDownRight,
+  Minus,
 } from "lucide-react";
 
 
@@ -283,6 +286,7 @@ export default function LeaderboardPage() {
   ]);
   const [addError, setAddError] = useState<string | null>(null);
   const [addSubmitting, setAddSubmitting] = useState(false);
+  const [rankChanges, setRankChanges] = useState<Record<string, { currentRank: number; previousRank: number | null; rankChange: number }>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const isPrivileged =
@@ -329,10 +333,18 @@ export default function LeaderboardPage() {
     }
   }, []);
 
+  const loadRankChanges = useCallback(async () => {
+    const res = await fetch("/api/artists/ranks");
+    if (res.ok) {
+      setRankChanges(await res.json());
+    }
+  }, []);
+
   useEffect(() => {
     loadArtists();
     loadWatchlist();
-  }, [loadArtists, loadWatchlist]);
+    loadRankChanges();
+  }, [loadArtists, loadWatchlist, loadRankChanges]);
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -646,15 +658,31 @@ export default function LeaderboardPage() {
               return listArtists.map((artist, idx) => {
               const rank = showPodium ? idx + 3 : idx;
               const isWatched = watchlistedIds.has(artist.id);
+              const rc = rankChanges[artist.id];
               return (
                 <div
                   key={artist.id}
                   className="group flex items-center gap-4 px-5 py-3.5 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all"
                 >
-                  {/* Rank */}
-                  <span className="w-8 text-center font-black text-lg tabular-nums text-[var(--muted-foreground)]">
-                    {rank + 1}
-                  </span>
+                  {/* Rank + Change */}
+                  <div className="w-12 flex flex-col items-center shrink-0">
+                    <span className="font-black text-lg tabular-nums text-[var(--muted-foreground)]">
+                      {rank + 1}
+                    </span>
+                    {rc && rc.rankChange !== 0 && (
+                      <span className={`flex items-center gap-0.5 text-[10px] font-bold leading-none ${rc.rankChange > 0 ? "text-green-400" : "text-red-400"}`}>
+                        {rc.rankChange > 0 ? (
+                          <ArrowUpRight className="w-3 h-3" />
+                        ) : (
+                          <ArrowDownRight className="w-3 h-3" />
+                        )}
+                        {Math.abs(rc.rankChange)}
+                      </span>
+                    )}
+                    {rc && rc.rankChange === 0 && rc.previousRank !== null && (
+                      <Minus className="w-3 h-3 text-zinc-600" />
+                    )}
+                  </div>
 
                   {/* Avatar */}
                   <Link href={`/artist/${artist.id}`} className="shrink-0">

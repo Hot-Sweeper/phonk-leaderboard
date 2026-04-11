@@ -11,19 +11,53 @@ const PERIODS: Record<string, number> = {
 
 const PERIOD_ORDER = ["hour", "day", "week", "month", "year"];
 
+type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
+
+const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram"];
+
+function getMetricFromSnapshot(
+  snapshot: { monthlyListeners: number; followerCount: number; youtubeSubscribers: number; tiktokFollowers: number; instagramFollowers: number },
+  metric: MetricKey
+): number {
+  switch (metric) {
+    case "listeners": return snapshot.monthlyListeners;
+    case "followers": return snapshot.followerCount;
+    case "youtube": return snapshot.youtubeSubscribers;
+    case "tiktok": return snapshot.tiktokFollowers;
+    case "instagram": return snapshot.instagramFollowers;
+  }
+}
+
+function getMetricFromLinks(
+  links: { platform: string; monthlyListeners: number; followerCount: number }[],
+  metric: MetricKey
+): number {
+  switch (metric) {
+    case "listeners": return links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+    case "followers": return links.find((l) => l.platform === "SPOTIFY")?.followerCount ?? 0;
+    case "youtube": return links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
+    case "tiktok": return links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
+    case "instagram": return links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
+  }
+}
+
 /**
- * GET /api/artists/changes?period=hour&skip=0&take=100
+ * GET /api/artists/changes?period=hour&metric=listeners&mode=change&skip=0&take=100
  *
- * Returns:
- * - artists with % change in monthly listeners over the given period
- * - availablePeriods: which periods actually have data
- * - totalCount for pagination
+ * metric: listeners | followers | youtube | tiktok | instagram
+ * mode: change (% change over period) | current (absolute value, no change calc)
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const period = searchParams.get("period") ?? "hour";
+  const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
+  const mode = searchParams.get("mode") ?? "change";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "100", 10) || 100, 200);
+
+  if (!METRIC_KEYS.includes(metric)) {
+    return NextResponse.json({ error: "Invalid metric" }, { status: 400 });
+  }
 
   const periodMs = PERIODS[period];
   if (!periodMs) {
@@ -42,31 +76,53 @@ export async function GET(req: Request) {
   if (oldestSnapshot) {
     const dataAge = Date.now() - oldestSnapshot.createdAt.getTime();
     for (const p of PERIOD_ORDER) {
-      // Period is available if we have data spanning at least 50% of it
-      // (for "hour" we just need any data)
       if (p === "hour" || dataAge >= PERIODS[p] * 0.5) {
         availablePeriods.push(p);
       }
     }
   }
 
-  // Get all artists with their current Spotify stats
+  // Get all artists with their current stats
   const artists = await prisma.artist.findMany({
     include: {
       links: {
-        where: { platform: "SPOTIFY" },
-        select: { monthlyListeners: true, followerCount: true },
+        select: { platform: true, monthlyListeners: true, followerCount: true },
       },
     },
   });
 
   const totalCount = artists.length;
 
-  // Get oldest snapshots within the period for each artist (batch query)
+  if (mode === "current") {
+    // Current mode: just sort by absolute value, no change calculation
+    const result = artists.map((artist) => {
+      const currentValue = getMetricFromLinks(artist.links, metric);
+      return {
+        id: artist.id,
+        name: artist.name,
+        imageUrl: artist.imageUrl,
+        currentValue,
+        changePercent: 0,
+        hasData: false,
+        metric,
+      };
+    });
+
+    result.sort((a, b) => b.currentValue - a.currentValue);
+
+    return NextResponse.json({
+      artists: result.slice(skip, skip + take),
+      totalCount,
+      availablePeriods,
+      period,
+      metric,
+      mode,
+    });
+  }
+
+  // Change mode: calculate % change over period
   const artistIds = artists.map((a) => a.id);
 
-  // For each artist, find the snapshot closest to the cutoff time
-  // We get all snapshots before or near the cutoff and pick the closest
   const oldSnapshots = await prisma.artistSnapshot.findMany({
     where: {
       artistId: { in: artistIds },
@@ -78,33 +134,33 @@ export async function GET(req: Request) {
       artistId: true,
       monthlyListeners: true,
       followerCount: true,
+      youtubeSubscribers: true,
+      tiktokFollowers: true,
+      instagramFollowers: true,
       createdAt: true,
     },
   });
 
   const oldMap = new Map(oldSnapshots.map((s) => [s.artistId, s]));
 
-  // Build result with % changes
   const result = artists.map((artist) => {
-    const spotify = artist.links[0];
-    const currentListeners = spotify?.monthlyListeners ?? 0;
-    const currentFollowers = spotify?.followerCount ?? 0;
+    const currentValue = getMetricFromLinks(artist.links, metric);
     const old = oldMap.get(artist.id);
-    const oldListeners = old?.monthlyListeners ?? currentListeners;
+    const oldValue = old ? getMetricFromSnapshot(old, metric) : currentValue;
 
     let changePercent = 0;
-    if (oldListeners > 0 && old) {
-      changePercent = ((currentListeners - oldListeners) / oldListeners) * 100;
+    if (oldValue > 0 && old) {
+      changePercent = ((currentValue - oldValue) / oldValue) * 100;
     }
 
     return {
       id: artist.id,
       name: artist.name,
       imageUrl: artist.imageUrl,
-      monthlyListeners: currentListeners,
-      followerCount: currentFollowers,
+      currentValue,
       changePercent: Math.round(changePercent * 100) / 100,
       hasData: !!old,
+      metric,
     };
   });
 
@@ -116,5 +172,7 @@ export async function GET(req: Request) {
     totalCount,
     availablePeriods,
     period,
+    metric,
+    mode,
   });
 }

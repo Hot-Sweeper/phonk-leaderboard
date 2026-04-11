@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats, fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
-import { recordSnapshot } from "@/lib/snapshots";
+import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
 
 // GET — fetch site settings
 export async function GET() {
@@ -124,6 +124,9 @@ async function handleUpdateAll() {
     update: { value: new Date().toISOString() },
     create: { key: "lastFullUpdate", value: new Date().toISOString() },
   });
+
+  // Record rank snapshots after all stats are updated
+  await recordRankSnapshots();
 
   return NextResponse.json({ updated, failed, total: artists.length });
 }

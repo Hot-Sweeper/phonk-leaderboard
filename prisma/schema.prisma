@@ -83,6 +83,7 @@ model Artist {
   suggestions    LinkSuggestion[]
   requests       ArtistRequest[]
   snapshots      ArtistSnapshot[]
+  rankSnapshots  RankSnapshot[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -187,12 +188,27 @@ model SiteSetting {
 }
 
 model ArtistSnapshot {
-  id               String   @id @default(cuid())
-  artistId         String
-  monthlyListeners Int      @default(0)
-  followerCount    Int      @default(0)
-  artist           Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
-  createdAt        DateTime @default(now())
+  id                   String   @id @default(cuid())
+  artistId             String
+  monthlyListeners     Int      @default(0)
+  followerCount        Int      @default(0)
+  youtubeSubscribers   Int      @default(0)
+  tiktokFollowers      Int      @default(0)
+  instagramFollowers   Int      @default(0)
+  artist               Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt            DateTime @default(now())
 
   @@index([artistId, createdAt])
+}
+
+model RankSnapshot {
+  id        String   @id @default(cuid())
+  artistId  String
+  rank      Int
+  date      String
+  artist    Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([artistId, date])
+  @@index([date])
 }

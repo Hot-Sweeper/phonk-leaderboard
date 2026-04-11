@@ -6,16 +6,17 @@ type ChangeArtist = {
   id: string;
   name: string;
   imageUrl: string | null;
-  monthlyListeners: number;
+  currentValue: number;
   changePercent: number;
   hasData: boolean;
+  metric: string;
 };
 
 type Bubble = {
   id: string;
   name: string;
   imageUrl: string | null;
-  listeners: number;
+  value: number;
   changePercent: number;
   hasData: boolean;
   x: number;
@@ -43,6 +44,19 @@ const PERIOD_LABELS: Record<string, string> = {
   year: "1Y",
 };
 
+const METRICS = [
+  { key: "listeners", label: "Monthly Listeners" },
+  { key: "followers", label: "Spotify Followers" },
+  { key: "youtube", label: "YouTube Subs" },
+  { key: "tiktok", label: "TikTok Followers" },
+  { key: "instagram", label: "Instagram Followers" },
+];
+
+const MODES = [
+  { key: "change", label: "% Change" },
+  { key: "current", label: "Current" },
+];
+
 export default function BubblesPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,17 +70,19 @@ export default function BubblesPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [period, setPeriod] = useState("hour");
+  const [metric, setMetric] = useState("listeners");
+  const [mode, setMode] = useState("change");
   const [availablePeriods, setAvailablePeriods] = useState<string[]>(["hour"]);
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Bubble | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // Load artist changes for current page and period
+  // Load artist changes for current page, period, metric, mode
   useEffect(() => {
     setLoading(true);
     const skip = page * PAGE_SIZE;
-    fetch(`/api/artists/changes?period=${period}&skip=${skip}&take=${PAGE_SIZE}`)
+    fetch(`/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`)
       .then((r) => r.json())
       .then((data) => {
         setArtists(data.artists ?? []);
@@ -77,7 +93,7 @@ export default function BubblesPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [page, period]);
+  }, [page, period, metric, mode]);
 
   // Init bubbles when artists change
   useEffect(() => {
@@ -88,17 +104,20 @@ export default function BubblesPage() {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
 
-    // Size = absolute value of % change. Bigger change = bigger bubble.
-    const absChanges = artists.map((a) => Math.abs(a.changePercent));
-    const maxChange = Math.max(0.01, ...absChanges);
+    // In "current" mode, size = absolute value. In "change" mode, size = |changePercent|
+    const isCurrentMode = mode === "current";
+    const sizeValues = artists.map((a) =>
+      isCurrentMode ? a.currentValue : Math.abs(a.changePercent)
+    );
+    const maxVal = Math.max(0.01, ...sizeValues);
 
     const minR = Math.max(16, Math.min(w, h) * 0.02);
     const maxR = Math.min(65, Math.min(w, h) * 0.085);
 
     const newBubbles: Bubble[] = artists.map((artist) => {
-      const absChange = Math.abs(artist.changePercent);
+      const sizeVal = isCurrentMode ? artist.currentValue : Math.abs(artist.changePercent);
       // sqrt scale for area-proportional sizing
-      const ratio = Math.sqrt(absChange / maxChange);
+      const ratio = Math.sqrt(sizeVal / maxVal);
       const targetR = minR + ratio * (maxR - minR);
 
       // Load image
@@ -118,7 +137,7 @@ export default function BubblesPage() {
         id: artist.id,
         name: artist.name,
         imageUrl: artist.imageUrl,
-        listeners: artist.monthlyListeners,
+        value: artist.currentValue,
         changePercent: artist.changePercent,
         hasData: artist.hasData,
         x: targetR + Math.random() * (w - 2 * targetR),
@@ -133,7 +152,7 @@ export default function BubblesPage() {
     });
 
     bubblesRef.current = newBubbles;
-  }, [artists]);
+  }, [artists, mode]);
 
   // Animation loop with repulsion physics
   useEffect(() => {
@@ -252,18 +271,24 @@ export default function BubblesPage() {
         const isHov = b === newHovered || (drag && b === drag.bubble);
         const drawR = isHov ? b.r * 1.06 : b.r;
 
-        // Color based on change: green = growth, red = shrink
+        // Colors: change mode uses green/red, current mode uses purple/blue
+        const isChangeMode = b.hasData && b.changePercent !== 0;
         const isPositive = b.changePercent >= 0;
-        const intensity = Math.min(1, Math.abs(b.changePercent) / 20);
-        const baseColor = isPositive
-          ? `rgba(34, 197, 94, ${0.3 + intensity * 0.5})`
-          : `rgba(239, 68, 68, ${0.3 + intensity * 0.5})`;
-        const borderColor = isPositive
-          ? `rgba(34, 197, 94, ${0.4 + intensity * 0.4})`
-          : `rgba(239, 68, 68, ${0.4 + intensity * 0.4})`;
-        const glowColor = isPositive
-          ? `rgba(34, 197, 94, ${0.15 + intensity * 0.3})`
-          : `rgba(239, 68, 68, ${0.15 + intensity * 0.3})`;
+        const intensity = isChangeMode ? Math.min(1, Math.abs(b.changePercent) / 20) : 0.5;
+        let borderColor: string;
+        let glowColor: string;
+
+        if (isChangeMode) {
+          borderColor = isPositive
+            ? `rgba(34, 197, 94, ${0.4 + intensity * 0.4})`
+            : `rgba(239, 68, 68, ${0.4 + intensity * 0.4})`;
+          glowColor = isPositive
+            ? `rgba(34, 197, 94, ${0.15 + intensity * 0.3})`
+            : `rgba(239, 68, 68, ${0.15 + intensity * 0.3})`;
+        } else {
+          borderColor = `rgba(168, 85, 247, 0.5)`;
+          glowColor = `rgba(168, 85, 247, 0.3)`;
+        }
 
         ctx.save();
 
@@ -280,19 +305,28 @@ export default function BubblesPage() {
           // Color overlay
           ctx.beginPath();
           ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
-          ctx.fillStyle = isPositive
-            ? `rgba(0, 40, 0, ${0.5 + intensity * 0.2})`
-            : `rgba(40, 0, 0, ${0.5 + intensity * 0.2})`;
+          if (isChangeMode) {
+            ctx.fillStyle = isPositive
+              ? `rgba(0, 40, 0, ${0.5 + intensity * 0.2})`
+              : `rgba(40, 0, 0, ${0.5 + intensity * 0.2})`;
+          } else {
+            ctx.fillStyle = `rgba(20, 0, 40, 0.55)`;
+          }
           ctx.fill();
         } else {
           // Gradient fill
           const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, drawR);
-          if (isPositive) {
-            grad.addColorStop(0, `rgba(34, 197, 94, ${0.4 + intensity * 0.3})`);
-            grad.addColorStop(1, `rgba(20, 83, 45, ${0.6 + intensity * 0.2})`);
+          if (isChangeMode) {
+            if (isPositive) {
+              grad.addColorStop(0, `rgba(34, 197, 94, ${0.4 + intensity * 0.3})`);
+              grad.addColorStop(1, `rgba(20, 83, 45, ${0.6 + intensity * 0.2})`);
+            } else {
+              grad.addColorStop(0, `rgba(239, 68, 68, ${0.4 + intensity * 0.3})`);
+              grad.addColorStop(1, `rgba(127, 29, 29, ${0.6 + intensity * 0.2})`);
+            }
           } else {
-            grad.addColorStop(0, `rgba(239, 68, 68, ${0.4 + intensity * 0.3})`);
-            grad.addColorStop(1, `rgba(127, 29, 29, ${0.6 + intensity * 0.2})`);
+            grad.addColorStop(0, `rgba(168, 85, 247, 0.4)`);
+            grad.addColorStop(1, `rgba(88, 28, 135, 0.6)`);
           }
           ctx.fillStyle = grad;
           ctx.fill();
@@ -317,7 +351,7 @@ export default function BubblesPage() {
           ctx.shadowBlur = 0;
         }
 
-        // Text: name + change %
+        // Text: name + value or change %
         if (drawR > 18) {
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -334,16 +368,17 @@ export default function BubblesPage() {
           if (displayName !== b.name) displayName += "\u2026";
           ctx.fillText(displayName, b.x, b.y - fontSize * 0.6);
 
-          // Change %
-          const changeText = b.hasData
-            ? `${b.changePercent >= 0 ? "+" : ""}${b.changePercent.toFixed(1)}%`
-            : formatCount(b.listeners);
+          // Sub text: change % or absolute value
           const smallSize = Math.max(6, fontSize * 0.75);
           ctx.font = `bold ${smallSize}px sans-serif`;
-          ctx.fillStyle = b.hasData
-            ? isPositive ? "#4ade80" : "#f87171"
-            : "rgba(255,255,255,0.6)";
-          ctx.fillText(changeText, b.x, b.y + fontSize * 0.5);
+          if (isChangeMode) {
+            const changeText = `${b.changePercent >= 0 ? "+" : ""}${b.changePercent.toFixed(1)}%`;
+            ctx.fillStyle = isPositive ? "#4ade80" : "#f87171";
+            ctx.fillText(changeText, b.x, b.y + fontSize * 0.5);
+          } else {
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.fillText(formatCount(b.value), b.x, b.y + fontSize * 0.5);
+          }
         }
 
         ctx.restore();
@@ -462,27 +497,60 @@ export default function BubblesPage() {
                 </span>
               </h1>
               <p className="text-[var(--muted-foreground)] text-xs mt-0.5">
-                Bubble size = change magnitude. Green = growth, red = decline. Drag to rearrange. Click to explore.
+                {mode === "change"
+                  ? "Bubble size = change magnitude. Green = growth, red = decline."
+                  : "Bubble size = absolute value. Bigger = more."}
+                {" "}Drag to rearrange. Click to explore.
               </p>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
-              {/* Period selector */}
+            <div className="flex items-center gap-3 shrink-0 flex-wrap">
+              {/* Metric selector */}
+              <select
+                value={metric}
+                onChange={(e) => setMetric(e.target.value)}
+                className="bg-[var(--secondary)] border border-[var(--muted)] rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:ring-1 focus:ring-[var(--accent)] text-white"
+              >
+                {METRICS.map((m) => (
+                  <option key={m.key} value={m.key}>{m.label}</option>
+                ))}
+              </select>
+
+              {/* Mode selector */}
               <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                {availablePeriods.map((p) => (
+                {MODES.map((m) => (
                   <button
-                    key={p}
-                    onClick={() => setPeriod(p)}
+                    key={m.key}
+                    onClick={() => setMode(m.key)}
                     className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
-                      period === p
+                      mode === m.key
                         ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]"
                         : "text-[var(--muted-foreground)] hover:text-white"
                     }`}
                   >
-                    {PERIOD_LABELS[p] ?? p}
+                    {m.label}
                   </button>
                 ))}
               </div>
+
+              {/* Period selector (only in change mode) */}
+              {mode === "change" && (
+                <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                  {availablePeriods.map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setPeriod(p)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                        period === p
+                          ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]"
+                          : "text-[var(--muted-foreground)] hover:text-white"
+                      }`}
+                    >
+                      {PERIOD_LABELS[p] ?? p}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Pagination */}
               <div className="flex items-center gap-1">
@@ -541,12 +609,12 @@ export default function BubblesPage() {
             <div>
               <div className="font-bold text-sm">{hovered.name}</div>
               <div className="flex items-center gap-3 text-xs">
-                {hovered.listeners > 0 && (
+                {hovered.value > 0 && (
                   <span className="text-[var(--muted-foreground)] tabular-nums">
-                    {formatCount(hovered.listeners)} listeners
+                    {formatCount(hovered.value)} {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}
                   </span>
                 )}
-                {hovered.hasData && (
+                {hovered.hasData && hovered.changePercent !== 0 && (
                   <span className={`font-bold tabular-nums ${hovered.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
                     {hovered.changePercent >= 0 ? "+" : ""}{hovered.changePercent.toFixed(2)}%
                   </span>

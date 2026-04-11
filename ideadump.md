@@ -1,0 +1,1 @@
+labels can be there and you can like send demos to labels and they can have like discord bot of phonk forum that sends like submittions in tickets etc. also for artists there can be collab requests be sent and stuff like that yk.
