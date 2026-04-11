@@ -353,10 +353,10 @@ export async function fetchSpotifyArtist(
   ]);
 
   return {
-    imageUrl: apiData?.imageUrl ?? null,
+    imageUrl: scraped?.profileImage ?? apiData?.imageUrl ?? null,
     followerCount: scraped?.followers ?? apiData?.followerCount ?? 0,
     monthlyListeners: scraped?.monthlyListeners ?? 0,
-    name: apiData?.name ?? scraped?.name ?? null,
+    name: scraped?.name ?? apiData?.name ?? null,
     platformId: artistId,
   };
 }
@@ -395,7 +395,7 @@ const SCRAPE_HEADERS = {
 
 async function scrapeSpotifyListeners(
   artistId: string
-): Promise<{ monthlyListeners: number; followers: number | null; name: string | null } | null> {
+): Promise<{ monthlyListeners: number; followers: number | null; name: string | null; profileImage: string | null } | null> {
   try {
     const res = await fetch(`https://open.spotify.com/artist/${artistId}`, {
       headers: SCRAPE_HEADERS,
@@ -437,7 +437,14 @@ async function scrapeSpotifyListeners(
       }
     }
 
-    return { monthlyListeners, followers, name };
+    // Profile image from og:image meta tag
+    let profileImage: string | null = null;
+    const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+    if (ogImageMatch) {
+      profileImage = ogImageMatch[1];
+    }
+
+    return { monthlyListeners, followers, name, profileImage };
   } catch (err) {
     console.error("[Spotify] Scrape error:", err);
     return null;
