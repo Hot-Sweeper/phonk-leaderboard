@@ -185,25 +185,47 @@ type RankData = {
 function TrackPreview({ url }: { url: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [failed, setFailed] = useState(false);
 
-  function toggle() {
+  async function toggle() {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || failed) return;
+
     if (playing) {
       audio.pause();
       setPlaying(false);
     } else {
-      audio.play();
-      setPlaying(true);
+      try {
+        await audio.play();
+        setPlaying(true);
+      } catch {
+        setPlaying(false);
+        setFailed(true);
+      }
     }
   }
 
   return (
     <>
-      <audio ref={audioRef} src={url} onEnded={() => setPlaying(false)} preload="none" />
+      <audio
+        ref={audioRef}
+        src={url}
+        onEnded={() => setPlaying(false)}
+        onError={() => {
+          setPlaying(false);
+          setFailed(true);
+        }}
+        preload="none"
+      />
       <button
-        onClick={(e) => { e.stopPropagation(); toggle(); }}
-        className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-all shrink-0"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void toggle();
+        }}
+        disabled={failed}
+        title={failed ? "Preview unavailable" : playing ? "Pause preview" : "Play preview"}
+        className={`w-8 h-8 rounded-full flex items-center justify-center transition-all shrink-0 ${failed ? "bg-white/5 text-white/30 cursor-not-allowed" : "bg-white/10 hover:bg-white/20"}`}
       >
         {playing ? <Pause className="w-3.5 h-3.5 text-white" /> : <Play className="w-3.5 h-3.5 text-white ml-0.5" />}
       </button>

@@ -91,6 +91,10 @@ function getVersionLabel(versions: string[]) {
   return versions[0] ?? "Original";
 }
 
+function isValidPreviewUrl(previewUrl: string | null | undefined) {
+  return typeof previewUrl === "string" && /^https?:\/\//i.test(previewUrl.trim());
+}
+
 function contributorTextClass() {
   return "text-[var(--muted-foreground)] hover:text-white underline decoration-[var(--accent)]/45 underline-offset-2 transition-colors";
 }
@@ -99,11 +103,13 @@ function PodiumTrackCard({
   track,
   rank,
   isPlaying,
+  previewUnavailable,
   onTogglePreview,
 }: {
   track: Track;
   rank: number;
   isPlaying: boolean;
+  previewUnavailable: boolean;
   onTogglePreview: (trackId: string, previewUrl: string) => void;
 }) {
   const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
@@ -117,11 +123,12 @@ function PodiumTrackCard({
             <Trophy className="w-4 h-4" />
             <span className="text-xs font-black uppercase tracking-[0.2em]">#{rank}</span>
           </div>
-          {track.previewUrl ? (
+          {isValidPreviewUrl(track.previewUrl) ? (
             <button
               onClick={() => onTogglePreview(track.id, track.previewUrl!)}
-              className="w-10 h-10 rounded-full bg-black/35 hover:bg-green-600 text-white flex items-center justify-center transition-colors"
-              title={isPlaying ? "Pause preview" : "Play preview"}
+              disabled={previewUnavailable}
+              className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-colors ${previewUnavailable ? "bg-white/10 text-white/35 cursor-not-allowed" : "bg-black/35 hover:bg-green-600"}`}
+              title={previewUnavailable ? "Preview unavailable" : isPlaying ? "Pause preview" : "Play preview"}
             >
               {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
             </button>
@@ -164,8 +171,22 @@ export default function SongsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const [failedPreviewTrackIds, setFailedPreviewTrackIds] = useState<string[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopCurrentAudio = useCallback(() => {
+    if (!audioRef.current) return;
+    audioRef.current.pause();
+    audioRef.current.src = "";
+    audioRef.current.load();
+    audioRef.current = null;
+    setPlayingTrackId(null);
+  }, []);
+
+  const markPreviewFailed = useCallback((trackId: string) => {
+    setFailedPreviewTrackIds((current) => (current.includes(trackId) ? current : [...current, trackId]));
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -206,34 +227,53 @@ export default function SongsPage() {
   // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      stopCurrentAudio();
     };
-  }, []);
+  }, [stopCurrentAudio]);
 
-  function togglePreview(trackId: string, previewUrl: string) {
+  async function togglePreview(trackId: string, previewUrl: string) {
+    if (failedPreviewTrackIds.includes(trackId)) return;
+
     if (playingTrackId === trackId) {
-      // Stop playing
-      audioRef.current?.pause();
-      audioRef.current = null;
-      setPlayingTrackId(null);
+      stopCurrentAudio();
       return;
     }
-    // Stop any current playback
-    if (audioRef.current) {
-      audioRef.current.pause();
+
+    if (!isValidPreviewUrl(previewUrl)) {
+      markPreviewFailed(trackId);
+      return;
     }
-    const audio = new Audio(previewUrl);
+
+    stopCurrentAudio();
+
+    const audio = new Audio();
     audio.volume = 0.5;
-    audio.play();
+    audio.preload = "none";
+    audio.src = previewUrl.trim();
+
     audio.onended = () => {
-      setPlayingTrackId(null);
-      audioRef.current = null;
+      if (audioRef.current === audio) {
+        stopCurrentAudio();
+      }
     };
+    audio.onerror = () => {
+      if (audioRef.current === audio) {
+        stopCurrentAudio();
+      }
+      markPreviewFailed(trackId);
+    };
+
     audioRef.current = audio;
-    setPlayingTrackId(trackId);
+
+    try {
+      await audio.play();
+      setPlayingTrackId(trackId);
+    } catch {
+      if (audioRef.current === audio) {
+        stopCurrentAudio();
+      }
+      markPreviewFailed(trackId);
+    }
   }
 
   function loadMore() {
@@ -278,9 +318,9 @@ export default function SongsPage() {
 
         {!loading && podiumTracks.length === 3 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
-            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[1].id)} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[0].id)} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} previewUnavailable={failedPreviewTrackIds.includes(podiumTracks[2].id)} onTogglePreview={togglePreview} />
           </div>
         )}
 
@@ -330,15 +370,18 @@ export default function SongsPage() {
                 >
                   {/* Preview button */}
                   <div className="flex justify-center">
-                    {track.previewUrl ? (
+                    {isValidPreviewUrl(track.previewUrl) ? (
                       <button
                         onClick={() => togglePreview(track.id, track.previewUrl!)}
+                        disabled={failedPreviewTrackIds.includes(track.id)}
                         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
-                          isPlaying
-                            ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
-                            : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"
+                          failedPreviewTrackIds.includes(track.id)
+                            ? "bg-[var(--muted)] text-[var(--muted-foreground)]/40 cursor-not-allowed"
+                            : isPlaying
+                              ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
+                              : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"
                         }`}
-                        title={isPlaying ? "Pause preview" : "Play 30s preview"}
+                        title={failedPreviewTrackIds.includes(track.id) ? "Preview unavailable" : isPlaying ? "Pause preview" : "Play 30s preview"}
                       >
                         {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
                       </button>
