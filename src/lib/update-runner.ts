@@ -147,6 +147,7 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
         updatedCount: updated,
         failedCount: failed,
         durationMs: totalDuration,
+        error: String(err),
         details: JSON.stringify([...details, { name: "CRASH", status: "failed", durationMs: 0, error: String(err) }]),
         completedAt: new Date(),
       },
@@ -288,6 +289,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         updatedCount: updated,
         failedCount: failed,
         durationMs: totalDuration,
+        error: String(err),
         details: JSON.stringify([...details, { name: "CRASH", status: "failed", durationMs: 0, error: String(err) }]),
         completedAt: new Date(),
       },
@@ -320,6 +322,12 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
       didRun = true;
     } catch (err) {
       console.error("[Scheduler] Stats update failed:", err);
+      // Still record lastFullUpdate so we don't retry every 5 minutes
+      await prisma.siteSetting.upsert({
+        where: { key: "lastFullUpdate" },
+        update: { value: new Date().toISOString() },
+        create: { key: "lastFullUpdate", value: new Date().toISOString() },
+      }).catch(() => {});
     }
   }
 
@@ -337,6 +345,12 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
       didRun = true;
     } catch (err) {
       console.error("[Scheduler] Song update failed:", err);
+      // Still record lastSongUpdate so we don't retry every 5 minutes
+      await prisma.siteSetting.upsert({
+        where: { key: "lastSongUpdate" },
+        update: { value: new Date().toISOString() },
+        create: { key: "lastSongUpdate", value: new Date().toISOString() },
+      }).catch(() => {});
     }
   }
 

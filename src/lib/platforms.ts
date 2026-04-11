@@ -420,7 +420,7 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
 
   try {
     const res = await fetch(
-      `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks`,
+      `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks?market=US`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     if (!res.ok) return null;

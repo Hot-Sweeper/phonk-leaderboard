@@ -1036,16 +1036,24 @@ export default function AdminPage() {
                               </thead>
                               <tbody>
                                 {details.map((d, i) => (
-                                  <tr key={i} className="border-t border-[var(--muted)]/30">
+                                  <tr key={i} className="border-t border-[var(--muted)]/30" title={d.error || undefined}>
                                     <td className="py-1 truncate max-w-[180px]">{d.name}</td>
-                                    <td className={`py-1 ${d.status === "ok" ? "text-green-400" : "text-red-400"}`}>
-                                      {d.status === "ok" ? "OK" : "Failed"}
+                                    <td className={`py-1 ${d.status === "ok" ? "text-green-400" : d.status === "skipped" || d.status === "no-tracks" ? "text-yellow-400" : "text-red-400"}`}>
+                                      {d.status === "ok" ? "OK" : d.status === "skipped" ? "Skipped" : d.status === "no-tracks" ? "No tracks" : "Failed"}
                                     </td>
                                     <td className="py-1 text-right text-[var(--muted-foreground)]">
                                       {(d.durationMs / 1000).toFixed(1)}s
                                     </td>
                                   </tr>
                                 ))}
+                                {/* Show CRASH error if present */}
+                                {log.error && (
+                                  <tr className="border-t border-red-800/40">
+                                    <td colSpan={3} className="py-2 text-red-400 text-xs break-all">
+                                      {log.error}
+                                    </td>
+                                  </tr>
+                                )}
                               </tbody>
                             </table>
                           </div>
