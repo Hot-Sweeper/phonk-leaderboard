@@ -14,6 +14,8 @@ import {
   CheckCircle,
   XCircle,
   Key,
+  Crown,
+  UserMinus,
 } from "lucide-react";
 
 type ModInvite = {
@@ -37,26 +39,39 @@ type ModRequest = {
   invite: { code: string };
 };
 
+type StaffMember = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  role: "ADMIN" | "MODERATOR";
+  createdAt: string;
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const [invites, setInvites] = useState<ModInvite[]>([]);
   const [modRequests, setModRequests] = useState<ModRequest[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [maxUses, setMaxUses] = useState(1);
   const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState<"invites" | "staff">("staff");
 
   const isAdmin = session?.user?.role === "ADMIN";
 
   const load = useCallback(async () => {
-    const [invRes, reqRes] = await Promise.all([
+    const [invRes, reqRes, staffRes] = await Promise.all([
       fetch("/api/mod-invites"),
       fetch("/api/mod-requests"),
+      fetch("/api/staff"),
     ]);
     if (invRes.ok) setInvites(await invRes.json());
     if (reqRes.ok) setModRequests(await reqRes.json());
+    if (staffRes.ok) setStaff(await staffRes.json());
     setLoading(false);
   }, []);
 
@@ -104,6 +119,19 @@ export default function AdminPage() {
     load();
   }
 
+  async function demoteModerator(userId: string, name: string | null) {
+    const confirmed = window.confirm(
+      `Remove moderator role from ${name ?? "this user"}?`
+    );
+    if (!confirmed) return;
+    const res = await fetch("/api/staff", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    });
+    if (res.ok) load();
+  }
+
   function copyInviteLink(code: string, id: string) {
     const url = `${window.location.origin}/join?code=${code}`;
     navigator.clipboard.writeText(url);
@@ -144,6 +172,97 @@ export default function AdminPage() {
             </span>
           </h1>
         </div>
+
+        {/* ── Tabs ── */}
+        <div className="flex gap-1.5 mb-8">
+          {[
+            { key: "staff" as const, label: "Staff Management", icon: Crown },
+            { key: "invites" as const, label: "Mod Invites", icon: Key },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
+                activeTab === tab.key
+                  ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]"
+                  : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"
+              }`}
+            >
+              <tab.icon className="w-4 h-4" /> {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Staff Management Tab ── */}
+        {activeTab === "staff" && (
+          <>
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Crown className="w-5 h-5 text-yellow-400" />
+                Admins & Moderators ({staff.length})
+              </h2>
+              <div className="flex flex-col gap-3">
+                {staff.map((member) => (
+                  <div
+                    key={member.id}
+                    className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-4 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      {member.image ? (
+                        <img
+                          src={member.image}
+                          alt=""
+                          className="w-10 h-10 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-[var(--muted)] flex items-center justify-center">
+                          <User className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-bold text-sm truncate">
+                          {member.name ?? "Unknown"}
+                        </div>
+                        <div className="text-[var(--muted-foreground)] text-xs truncate">
+                          {member.email}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span
+                        className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-full ${
+                          member.role === "ADMIN"
+                            ? "bg-yellow-900/50 text-yellow-300"
+                            : "bg-blue-900/50 text-blue-300"
+                        }`}
+                      >
+                        {member.role === "ADMIN" ? "Admin" : "Moderator"}
+                      </span>
+                      {member.role === "MODERATOR" && member.id !== session?.user?.id && (
+                        <button
+                          onClick={() => demoteModerator(member.id, member.name)}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-red-900/50 text-red-300 hover:bg-red-900/80 transition-all"
+                          title="Remove moderator"
+                        >
+                          <UserMinus className="w-3.5 h-3.5" /> Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {staff.length === 0 && (
+                  <div className="text-center text-[var(--muted-foreground)] py-10">
+                    No staff members found.
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Invites Tab ── */}
+        {activeTab === "invites" && (
+          <>
 
         {/* ── Create Mod Invite ── */}
         <div className="mb-10">
@@ -398,6 +517,9 @@ export default function AdminPage() {
           <div className="text-center text-[var(--muted-foreground)] py-20">
             No invite codes or mod requests yet. Create one above.
           </div>
+        )}
+
+          </>
         )}
       </div>
     </main>

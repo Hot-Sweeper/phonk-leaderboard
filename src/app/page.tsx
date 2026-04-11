@@ -16,11 +16,7 @@ import {
   Loader2,
   Check,
 } from "lucide-react";
-import {
-  connectSpotify,
-  fetchSpotifyArtistInBrowser,
-  hasSpotifyConnection,
-} from "@/lib/spotify-browser";
+
 
 type ArtistLink = {
   id: string;
@@ -271,12 +267,13 @@ export default function LeaderboardPage() {
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [showRequest, setShowRequest] = useState(false);
   const [reqName, setReqName] = useState("");
-  const [reqLinks, setReqLinks] = useState("");
+  const [reqLinks, setReqLinks] = useState<{ platform: string; url: string }[]>([
+    { platform: "YOUTUBE", url: "" },
+  ]);
   const [reqReason, setReqReason] = useState("");
   const [requestSent, setRequestSent] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState("");
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const [addLinks, setAddLinks] = useState<AddLinkInput[]>([
     { platform: "YOUTUBE", url: "", handle: "" },
   ]);
@@ -284,10 +281,6 @@ export default function LeaderboardPage() {
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
-
-  useEffect(() => {
-    setSpotifyConnected(hasSpotifyConnection());
-  }, [showAdd]);
 
   const loadArtists = useCallback(
     async (q = "", plat = "") => {
@@ -321,10 +314,6 @@ export default function LeaderboardPage() {
     addLinks.forEach((link, index) => {
       const trimmedUrl = link.url.trim();
       if (link.platform !== "SPOTIFY" || !isValidSpotifyArtistUrl(trimmedUrl)) {
-        return;
-      }
-
-      if (!hasSpotifyConnection()) {
         return;
       }
 
@@ -396,10 +385,13 @@ export default function LeaderboardPage() {
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
     if (!session) return signIn("google");
+    const validLinks = reqLinks.filter((l) => l.url.trim());
+    const linksStr = validLinks.map((l) => l.url.trim()).join("\n");
+    if (!linksStr) return;
     const res = await fetch("/api/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: reqName, links: reqLinks, reason: reqReason }),
+      body: JSON.stringify({ name: reqName, links: linksStr, reason: reqReason }),
     });
     if (res.ok) {
       setRequestSent(true);
@@ -407,7 +399,7 @@ export default function LeaderboardPage() {
         setShowRequest(false);
         setRequestSent(false);
         setReqName("");
-        setReqLinks("");
+        setReqLinks([{ platform: "YOUTUBE", url: "" }]);
         setReqReason("");
       }, 2000);
     }
@@ -455,67 +447,23 @@ export default function LeaderboardPage() {
       )
     );
 
-    try {
-      if (!hasSpotifyConnection()) {
-        // No browser connection — extract artist ID and accept the URL
-        const artistIdMatch = url.match(/\/artist\/([a-zA-Z0-9]+)/);
-        setAddLinks((prev) =>
-          prev.map((link, currentIndex) =>
-            currentIndex === index && link.url.trim() === url
-              ? {
-                  ...link,
-                  spotifyPreviewUrl: url,
-                  spotifyPreviewLoading: false,
-                  spotifyPreviewName: null,
-                  spotifyPreviewImageUrl: null,
-                  spotifyPreviewPlatformId: artistIdMatch?.[1] ?? null,
-                  spotifyPreviewFollowerCount: 0,
-                  spotifyPreviewError: null,
-                }
-              : link
-          )
-        );
-        return;
-      }
-
-      const artist = await fetchSpotifyArtistInBrowser(url);
-      setSpotifyConnected(true);
-
-      setAddLinks((prev) =>
-        prev.map((link, currentIndex) => {
-          if (currentIndex !== index || link.url.trim() !== url) return link;
-
-          return {
-            ...link,
-            spotifyPreviewUrl: url,
-            spotifyPreviewLoading: false,
-            spotifyPreviewError: null,
-            spotifyPreviewName: artist.name ?? null,
-            spotifyPreviewImageUrl: artist.imageUrl ?? null,
-            spotifyPreviewPlatformId: artist.platformId ?? null,
-            spotifyPreviewFollowerCount: artist.followerCount ?? 0,
-          };
-        })
-      );
-    } catch (err) {
-      setAddLinks((prev) =>
-        prev.map((link, currentIndex) =>
-          currentIndex === index && link.url.trim() === url
-            ? {
-                ...link,
-                spotifyPreviewUrl: undefined,
-                spotifyPreviewLoading: false,
-                spotifyPreviewName: null,
-                spotifyPreviewImageUrl: null,
-                spotifyPreviewPlatformId: null,
-                spotifyPreviewFollowerCount: 0,
-                spotifyPreviewError:
-                  err instanceof Error ? err.message : "Could not fetch Spotify preview.",
-              }
-            : link
-        )
-      );
-    }
+    const artistIdMatch = url.match(/\/artist\/([a-zA-Z0-9]+)/);
+    setAddLinks((prev) =>
+      prev.map((link, currentIndex) =>
+        currentIndex === index && link.url.trim() === url
+          ? {
+              ...link,
+              spotifyPreviewUrl: url,
+              spotifyPreviewLoading: false,
+              spotifyPreviewName: null,
+              spotifyPreviewImageUrl: null,
+              spotifyPreviewPlatformId: artistIdMatch?.[1] ?? null,
+              spotifyPreviewFollowerCount: 0,
+              spotifyPreviewError: null,
+            }
+          : link
+      )
+    );
   }
 
   const top3 = artists.slice(0, 3);
@@ -814,14 +762,68 @@ export default function LeaderboardPage() {
                   onChange={(e) => setReqName(e.target.value)}
                   className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
                 />
-                <textarea
-                  required
-                  placeholder={"Paste links (one per line):\nhttps://youtube.com/@...\nhttps://open.spotify.com/artist/...\nhttps://tiktok.com/@...\nhttps://instagram.com/..."}
-                  value={reqLinks}
-                  onChange={(e) => setReqLinks(e.target.value)}
-                  rows={4}
-                  className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm resize-none outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
-                />
+
+                <div className="text-xs font-bold uppercase text-[var(--muted-foreground)] mt-2">
+                  Platform Links
+                </div>
+                {reqLinks.map((link, i) => (
+                  <div key={i} className="flex gap-2">
+                    <select
+                      value={link.platform}
+                      onChange={(e) =>
+                        setReqLinks((prev) =>
+                          prev.map((l, j) =>
+                            j === i ? { ...l, platform: e.target.value } : l
+                          )
+                        )
+                      }
+                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
+                    >
+                      {ALL_PLATFORMS.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      required
+                      placeholder="URL"
+                      value={link.url}
+                      onChange={(e) =>
+                        setReqLinks((prev) =>
+                          prev.map((l, j) =>
+                            j === i ? { ...l, url: e.target.value } : l
+                          )
+                        )
+                      }
+                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+                    />
+                    {reqLinks.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setReqLinks((prev) => prev.filter((_, j) => j !== i))
+                        }
+                        className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setReqLinks((prev) => [
+                      ...prev,
+                      { platform: "YOUTUBE", url: "" },
+                    ])
+                  }
+                  className="text-[var(--accent)] text-sm font-bold flex items-center gap-1 hover:underline w-max"
+                >
+                  <PlusCircle className="w-4 h-4" /> Add another link
+                </button>
+
                 <textarea
                   placeholder="Why should they be added? (optional)"
                   value={reqReason}
@@ -853,20 +855,6 @@ export default function LeaderboardPage() {
             </button>
             <h2 className="text-xl font-black mb-4">Add Artist</h2>
             <form onSubmit={addArtist} className="flex flex-col gap-3">
-              <div className="flex items-center gap-3 rounded-xl border border-[var(--muted)] bg-[var(--muted)]/40 px-4 py-3 text-sm">
-                <button
-                  type="button"
-                  onClick={() => void connectSpotify()}
-                  className="px-3 py-2 rounded-lg bg-green-700 hover:bg-green-600 text-white font-bold transition-colors"
-                >
-                  {spotifyConnected ? "Reconnect Spotify" : "Connect Spotify"}
-                </button>
-                <span className="text-[var(--muted-foreground)]">
-                  {spotifyConnected
-                    ? "Official Spotify follower preview is connected."
-                    : "Connect Spotify to fetch official follower counts in this form."}
-                </span>
-              </div>
               <input
                 required
                 placeholder="Artist name"

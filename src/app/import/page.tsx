@@ -15,11 +15,6 @@ import {
   AlertCircle,
   ExternalLink,
 } from "lucide-react";
-import {
-  connectSpotify,
-  fetchSpotifyArtistInBrowser,
-  hasSpotifyConnection,
-} from "@/lib/spotify-browser";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -81,12 +76,7 @@ export default function ImportPage() {
   const [ytSearchQuery, setYtSearchQuery] = useState("");
   const [ytSearching, setYtSearching] = useState(false);
   const [ytSearchResults, setYtSearchResults] = useState<YouTubeInfo[]>([]);
-  const [spotifyConnected, setSpotifyConnected] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  useEffect(() => {
-    setSpotifyConnected(hasSpotifyConnection());
-  }, []);
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
@@ -169,7 +159,7 @@ export default function ImportPage() {
           spotifySearchQuery: data.spotifyMatch?.url ?? data.spotifyUrl ?? data.youtube?.name ?? "",
           showSpotifySearch: !data.spotifyMatch,
         });
-        if (!data.spotifyMatch && data.spotifyUrl && hasSpotifyConnection()) {
+        if (!data.spotifyMatch && data.spotifyUrl) {
           void searchSpotify(entry.id, data.spotifyUrl);
         }
       } catch {
@@ -218,7 +208,7 @@ export default function ImportPage() {
           spotifySearchQuery: data.spotifyMatch?.url ?? data.spotifyUrl ?? channel.name,
           showSpotifySearch: !data.spotifyMatch,
         });
-        if (!data.spotifyMatch && data.spotifyUrl && hasSpotifyConnection()) {
+        if (!data.spotifyMatch && data.spotifyUrl) {
           void searchSpotify(entry.id, data.spotifyUrl);
         }
       } catch {
@@ -281,30 +271,6 @@ export default function ImportPage() {
         spotifyError: "Paste a valid Spotify artist URL.",
       });
       return;
-    }
-
-    // If Spotify browser connection is available, fetch a preview
-    if (hasSpotifyConnection()) {
-      updateEntry(entryId, {
-        spotifySearching: true,
-        spotifyError: undefined,
-      });
-
-      try {
-        const artist = await fetchSpotifyArtistInBrowser(trimmedQuery);
-
-        updateEntry(entryId, {
-          selectedSpotify: artist,
-          spotifyConfirmed: true,
-          showSpotifySearch: false,
-          spotifySearching: false,
-          spotifyError: undefined,
-        });
-        setSpotifyConnected(true);
-        return;
-      } catch {
-        // Fall through to accept URL without preview
-      }
     }
 
     // Accept the URL directly — server will scrape stats on import
@@ -415,19 +381,6 @@ export default function ImportPage() {
         <p className="text-[var(--muted-foreground)] mb-8">
           Paste YouTube links to auto-discover artist info and Spotify profiles.
         </p>
-        <div className="mb-6 flex items-center gap-3">
-          <button
-            onClick={() => void connectSpotify()}
-            className="px-4 py-2 rounded-xl bg-green-700 hover:bg-green-600 text-white text-sm font-bold transition-colors"
-          >
-            {spotifyConnected ? "Reconnect Spotify" : "Connect Spotify"}
-          </button>
-          <span className="text-sm text-[var(--muted-foreground)]">
-            {spotifyConnected
-              ? "Spotify is connected for official follower previews."
-              : "Connect Spotify once to fetch official follower counts in your browser."}
-          </span>
-        </div>
 
         {/* Result toast */}
         {result && (
