@@ -149,7 +149,7 @@ type Artist = {
 
 type Track = {
   id: string;
-  spotifyId: string;
+  spotifyId: string | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
@@ -159,8 +159,13 @@ type Track = {
   explicit: boolean;
   releaseDate: string | null;
   spotifyUrl: string | null;
+  deezerUrl?: string | null;
   featuredArtists: string[];
 };
+
+function normalizeTrackPopularity(p: number): number {
+  return p > 100 ? Math.min(100, p / 10000) : p;
+}
 
 type EditableLink = {
   platform: string;
@@ -916,7 +921,7 @@ export default function ArtistPage() {
               {tracks.map((track, i) => (
                 <a
                   key={track.id}
-                  href={track.spotifyUrl ?? "#"}
+                  href={track.deezerUrl ?? track.spotifyUrl ?? "#"}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-3 md:gap-4 px-4 py-3 hover:bg-white/[0.03] transition-colors group border-b border-[var(--muted)] last:border-0"
@@ -979,7 +984,7 @@ export default function ArtistPage() {
                   {/* Popularity bar */}
                   <div className="hidden sm:flex items-center gap-2 shrink-0 w-24">
                     <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
-                      <div className="h-full rounded-full bg-green-400/60" style={{ width: `${track.popularity}%` }} />
+                      <div className="h-full rounded-full bg-green-400/60" style={{ width: `${normalizeTrackPopularity(track.popularity)}%` }} />
                     </div>
                     <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums w-6 text-right">{track.popularity}</span>
                   </div>

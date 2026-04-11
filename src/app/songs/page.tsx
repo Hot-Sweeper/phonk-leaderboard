@@ -12,6 +12,7 @@ import {
   Play,
   Pause,
   Activity,
+  Trophy,
 } from "lucide-react";
 
 type Contributor = {
@@ -82,6 +83,37 @@ function formatPopularity(p: number) {
     return String(p);
   }
   return String(p);
+}
+
+function contributorTextClass() {
+  return "text-[var(--muted-foreground)] hover:text-white underline decoration-[var(--accent)]/45 underline-offset-2 transition-colors";
+}
+
+function PodiumTrackCard({ track, rank }: { track: Track; rank: number }) {
+  const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
+
+  return (
+    <div className={`rounded-2xl border bg-[var(--secondary)]/50 p-4 ${rank === 1 ? "md:-translate-y-4" : ""} ${accent}`}>
+      <div className="flex items-center gap-2 mb-3">
+        <Trophy className="w-4 h-4" />
+        <span className="text-xs font-black uppercase tracking-[0.2em]">#{rank}</span>
+      </div>
+      <div className="flex items-center gap-3 min-w-0">
+        {track.albumImageUrl ? (
+          <Image src={track.albumImageUrl} alt={track.albumName ?? ""} width={56} height={56} className="w-14 h-14 rounded-xl object-cover shadow-md shrink-0" />
+        ) : (
+          <div className="w-14 h-14 rounded-xl bg-[var(--muted)] flex items-center justify-center shrink-0">
+            <Music className="w-5 h-5 text-[var(--muted-foreground)]" />
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="font-black text-sm text-white truncate">{track.name}</div>
+          <div className="text-xs text-[var(--muted-foreground)] truncate">{track.artist.name}</div>
+          <div className="text-xs mt-1 font-bold text-green-400">{formatPopularity(track.popularity)}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function SongsPage() {
@@ -202,6 +234,14 @@ export default function SongsPage() {
           </div>
         </div>
 
+        {!loading && tracks.length >= 3 && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
+            <PodiumTrackCard track={tracks[1]} rank={2} />
+            <PodiumTrackCard track={tracks[0]} rank={1} />
+            <PodiumTrackCard track={tracks[2]} rank={3} />
+          </div>
+        )}
+
         {/* Table header */}
         <div className="hidden md:grid grid-cols-[2rem_3rem_1fr_1fr_3.5rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
           <span />
@@ -314,7 +354,7 @@ export default function SongsPage() {
                                     {ci > 0 && ", "}
                                     <Link
                                       href={`/artist/${c.id}`}
-                                      className="text-[var(--accent)] hover:text-white transition-colors"
+                                      className={contributorTextClass()}
                                     >
                                       {c.name}
                                     </Link>
@@ -331,7 +371,7 @@ export default function SongsPage() {
                                     href={`https://open.spotify.com/search/${encodeURIComponent(name)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="hover:text-white transition-colors"
+                                    className={contributorTextClass()}
                                   >
                                     {name}
                                   </a>

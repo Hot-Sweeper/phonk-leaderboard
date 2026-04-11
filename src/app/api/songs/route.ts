@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { dedupeFeedTracks, dedupeNames } from "@/lib/track-dedupe";
 
 /**
  * GET /api/songs?skip=0&take=50&search=...
@@ -21,20 +22,19 @@ export async function GET(req: Request) {
       }
     : {};
 
-  const [tracks, totalCount] = await Promise.all([
-    prisma.track.findMany({
-      where,
-      orderBy: { popularity: "desc" },
-      skip,
-      take,
-      include: {
-        artist: {
-          select: { id: true, name: true, imageUrl: true },
-        },
+  const allTracks = await prisma.track.findMany({
+    where,
+    orderBy: { popularity: "desc" },
+    include: {
+      artist: {
+        select: { id: true, name: true, imageUrl: true },
       },
-    }),
-    prisma.track.count({ where }),
-  ]);
+    },
+  });
+
+  const dedupedTracks = dedupeFeedTracks(allTracks);
+  const tracks = dedupedTracks.slice(skip, skip + take);
+  const totalCount = dedupedTracks.length;
 
   // Resolve contributorIds to actual artist info
   const allContributorIds = [...new Set(tracks.flatMap(t => t.contributorIds))];
@@ -48,6 +48,7 @@ export async function GET(req: Request) {
 
   const enrichedTracks = tracks.map(t => ({
     ...t,
+    featuredArtists: dedupeNames(t.featuredArtists),
     contributors: t.contributorIds
       .map(id => contributorMap.get(id))
       .filter((c): c is { id: string; name: string; imageUrl: string | null } => !!c),

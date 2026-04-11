@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
+import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 
 export type UpdateResult = {
   updated: number;
@@ -190,6 +191,23 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
   let failed = 0;
   const details: { name: string; status: string; durationMs: number; tracks?: number; error?: string }[] = [];
 
+  async function deduplicateStoredTracksForArtist(artistId: string) {
+    const existingTracks = await prisma.track.findMany({
+      where: { artistId },
+      orderBy: [{ popularity: "desc" }, { updatedAt: "desc" }],
+    });
+
+    if (existingTracks.length <= 1) return;
+
+    const keptTracks = dedupeArtistTracks(existingTracks);
+    const keepIds = new Set(keptTracks.map((track) => track.id));
+    const deleteIds = existingTracks.filter((track) => !keepIds.has(track.id)).map((track) => track.id);
+
+    if (deleteIds.length > 0) {
+      await prisma.track.deleteMany({ where: { id: { in: deleteIds } } });
+    }
+  }
+
   try {
     for (const artist of artists) {
       const artistStart = Date.now();
@@ -237,16 +255,17 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         let trackCount = 0;
         if (deezerId) {
           const deezerTracks = await fetchDeezerTopTracks(deezerId);
-          if (deezerTracks && deezerTracks.length > 0) {
-            for (const t of deezerTracks) {
+          const dedupedDeezerTracks = deezerTracks ? dedupeArtistTracks(deezerTracks) : null;
+          if (dedupedDeezerTracks && dedupedDeezerTracks.length > 0) {
+            for (const t of dedupedDeezerTracks) {
               const deezerTrackId = String(t.deezerId);
 
               // Map contributors to forum artist IDs
-              const featured = t.artists.filter(a => a.deezerId !== deezerId).map(a => a.name);
-              const contributorIds = t.artists
+              const featured = dedupeNames(t.artists.filter(a => a.deezerId !== deezerId).map(a => a.name));
+              const contributorIds = [...new Set(t.artists
                 .filter(a => a.deezerId !== deezerId)
                 .map(a => deezerIdToArtistId.get(a.deezerId))
-                .filter((id): id is string => !!id);
+                .filter((id): id is string => !!id))];
 
               await prisma.track.upsert({
                 where: { deezerId: deezerTrackId },
@@ -270,13 +289,16 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
               });
               trackCount++;
             }
+
+            await deduplicateStoredTracksForArtist(artist.id);
           }
         } else if (spotifyId) {
           // No Deezer ID found — try Spotify as fallback
           const topTracks = await fetchSpotifyTopTracks(spotifyId);
-          if (topTracks && topTracks.length > 0) {
-            for (const t of topTracks) {
-              const featured = t.artists.filter(a => a.id !== spotifyId).map(a => a.name);
+          const dedupedSpotifyTracks = topTracks ? dedupeArtistTracks(topTracks) : null;
+          if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
+            for (const t of dedupedSpotifyTracks) {
+              const featured = dedupeNames(t.artists.filter(a => a.id !== spotifyId).map(a => a.name));
               await prisma.track.upsert({
                 where: { spotifyId: t.id },
                 update: {
@@ -295,6 +317,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
               });
               trackCount++;
             }
+
+            await deduplicateStoredTracksForArtist(artist.id);
           }
         }
 

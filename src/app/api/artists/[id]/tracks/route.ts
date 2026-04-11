@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl } from "@/lib/platforms";
+import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 
-// GET — fetch and cache artist's top tracks from Spotify
+// GET — return cached artist tracks from the database, deduplicated for display
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -21,108 +21,16 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // If we have recent tracks (updated within last 6 hours), return cached
-  const recentTrack = artist.tracks[0];
-  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-  if (recentTrack && recentTrack.updatedAt > sixHoursAgo) {
-    return NextResponse.json({
-      tracks: artist.tracks,
-      genres: artist.genres,
-      spotifyPopularity: artist.spotifyPopularity,
-    });
-  }
-
-  // Get Spotify ID — try multiple sources
-  let spotifyId = artist.spotifyId ?? artist.links[0]?.platformId;
-  if (!spotifyId && artist.links[0]?.url) {
-    spotifyId = parseSpotifyUrl(artist.links[0].url);
-  }
-  if (!spotifyId) {
-    return NextResponse.json({
-      tracks: artist.tracks,
-      genres: artist.genres,
-      spotifyPopularity: artist.spotifyPopularity,
-    });
-  }
-
-  // Persist spotifyId on the Artist if missing
-  if (!artist.spotifyId && spotifyId) {
-    await prisma.artist.update({
-      where: { id },
-      data: { spotifyId },
-    }).catch(() => {}); // ignore unique constraint conflicts
-  }
-
-  // Fetch fresh data from Spotify API
-  const [topTracks, details] = await Promise.all([
-    fetchSpotifyTopTracks(spotifyId),
-    fetchSpotifyArtistDetails(spotifyId),
-  ]);
-
-  // Update artist details if available
-  if (details) {
-    await prisma.artist.update({
-      where: { id },
-      data: {
-        genres: details.genres,
-        spotifyPopularity: details.popularity,
-      },
-    });
-  }
-
-  // Upsert tracks
-  if (topTracks && topTracks.length > 0) {
-    for (const t of topTracks) {
-      // Featured artists = all artists except the main one
-      const featured = t.artists
-        .filter((a) => a.id !== spotifyId)
-        .map((a) => a.name);
-
-      await prisma.track.upsert({
-        where: { spotifyId: t.id },
-        update: {
-          name: t.name,
-          albumName: t.album.name,
-          albumImageUrl: t.album.imageUrl,
-          previewUrl: t.previewUrl,
-          durationMs: t.durationMs,
-          popularity: t.popularity,
-          trackNumber: t.trackNumber,
-          discNumber: t.discNumber,
-          explicit: t.explicit,
-          releaseDate: t.album.releaseDate,
-          spotifyUrl: t.spotifyUrl,
-          featuredArtists: featured,
-        },
-        create: {
-          spotifyId: t.id,
-          artistId: id,
-          name: t.name,
-          albumName: t.album.name,
-          albumImageUrl: t.album.imageUrl,
-          previewUrl: t.previewUrl,
-          durationMs: t.durationMs,
-          popularity: t.popularity,
-          trackNumber: t.trackNumber,
-          discNumber: t.discNumber,
-          explicit: t.explicit,
-          releaseDate: t.album.releaseDate,
-          spotifyUrl: t.spotifyUrl,
-          featuredArtists: featured,
-        },
-      });
-    }
-  }
-
-  // Re-fetch updated data
-  const updatedArtist = await prisma.artist.findUnique({
-    where: { id },
-    include: { tracks: { orderBy: { popularity: "desc" }, take: 10 } },
-  });
+  const tracks = dedupeArtistTracks(artist.tracks)
+    .slice(0, 10)
+    .map((track) => ({
+      ...track,
+      featuredArtists: dedupeNames(track.featuredArtists),
+    }));
 
   return NextResponse.json({
-    tracks: updatedArtist?.tracks ?? [],
-    genres: updatedArtist?.genres ?? [],
-    spotifyPopularity: updatedArtist?.spotifyPopularity ?? 0,
+    tracks,
+    genres: artist.genres,
+    spotifyPopularity: artist.spotifyPopularity,
   });
 }
