@@ -351,7 +351,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { action } = await req.json();
+  const { action, limit } = await req.json();
 
   if (action === "testSettingWrite") {
     const testKey = "_debug_test";
@@ -437,10 +437,11 @@ export async function POST(req: Request) {
 
   if (action === "backfillDeezerIds") {
     try {
+      const batchSize = Math.max(1, Math.min(Number(limit) || 100, 100));
       const artists = await prisma.artist.findMany({
         where: { deezerId: null },
         include: { links: { where: { platform: "SPOTIFY" } } },
-        take: 25,
+        take: batchSize,
       });
 
       let matched = 0;
@@ -471,6 +472,10 @@ export async function POST(req: Request) {
         status: matched > 0 ? "ok" : "warn",
         message: `Processed ${artists.length} artists: ${matched} matched, ${unresolved} unresolved, ${remaining} remaining without Deezer IDs`,
         detail: details.slice(0, 25).join("\n"),
+        processed: artists.length,
+        matched,
+        unresolved,
+        remaining,
       });
     } catch (err) {
       return NextResponse.json({ status: "error", message: (err as Error).message });

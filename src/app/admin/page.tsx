@@ -92,7 +92,15 @@ export default function AdminPage() {
   const [debugChecks, setDebugChecks] = useState<{ name: string; status: "ok" | "warn" | "error"; message: string; detail?: string }[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugTimestamp, setDebugTimestamp] = useState<string | null>(null);
-  const [debugActionResult, setDebugActionResult] = useState<{ status: string; message: string; detail?: string } | null>(null);
+  const [debugActionResult, setDebugActionResult] = useState<{
+    status: string;
+    message: string;
+    detail?: string;
+    processed?: number;
+    matched?: number;
+    unresolved?: number;
+    remaining?: number;
+  } | null>(null);
   const [debugActionLoading, setDebugActionLoading] = useState<string | null>(null);
 
   // Settings state
@@ -137,6 +145,72 @@ export default function AdminPage() {
   useEffect(() => {
     if (isAdmin) load();
   }, [isAdmin, load]);
+
+  async function runDebugAction(action: string, extraBody?: Record<string, unknown>) {
+    const res = await fetch("/api/admin/debug", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...extraBody }),
+    });
+    return res.json();
+  }
+
+  async function runDiagnostics() {
+    const res = await fetch("/api/admin/debug");
+    const data = await res.json();
+    setDebugChecks(data.checks ?? []);
+    setDebugTimestamp(data.timestamp ?? null);
+  }
+
+  async function autoBackfillDeezerIds() {
+    setDebugActionLoading("autoBackfillDeezerIds");
+    setDebugActionResult(null);
+
+    let totalProcessed = 0;
+    let totalMatched = 0;
+    let totalUnresolved = 0;
+    let remaining = 0;
+    const detailLines: string[] = [];
+
+    try {
+      for (let round = 0; round < 10; round++) {
+        const data = await runDebugAction("backfillDeezerIds", { limit: 100 });
+
+        if (!data || data.status === "error") {
+          setDebugActionResult(data ?? { status: "error", message: "Request failed" });
+          return;
+        }
+
+        totalProcessed += data.processed ?? 0;
+        totalMatched += data.matched ?? 0;
+        totalUnresolved += data.unresolved ?? 0;
+        remaining = data.remaining ?? 0;
+
+        if (data.detail) {
+          detailLines.push(`Round ${round + 1}:`);
+          detailLines.push(data.detail);
+        }
+
+        if ((data.processed ?? 0) === 0 || remaining === 0) break;
+      }
+
+      setDebugActionResult({
+        status: totalMatched > 0 ? "ok" : "warn",
+        message: `Auto-backfill processed ${totalProcessed} artists: ${totalMatched} matched, ${totalUnresolved} unresolved, ${remaining} remaining without Deezer IDs`,
+        detail: detailLines.slice(0, 80).join("\n"),
+        processed: totalProcessed,
+        matched: totalMatched,
+        unresolved: totalUnresolved,
+        remaining,
+      });
+
+      await runDiagnostics();
+    } catch {
+      setDebugActionResult({ status: "error", message: "Auto-backfill request failed" });
+    } finally {
+      setDebugActionLoading(null);
+    }
+  }
 
   async function createInvite() {
     setCreating(true);
@@ -1114,10 +1188,7 @@ export default function AdminPage() {
                   setDebugLoading(true);
                   setDebugActionResult(null);
                   try {
-                    const res = await fetch("/api/admin/debug");
-                    const data = await res.json();
-                    setDebugChecks(data.checks ?? []);
-                    setDebugTimestamp(data.timestamp ?? null);
+                    await runDiagnostics();
                   } catch {
                     setDebugChecks([{ name: "Fetch Error", status: "error", message: "Failed to reach debug endpoint" }]);
                   } finally {
@@ -1174,11 +1245,27 @@ export default function AdminPage() {
             {/* Debug Actions */}
             <h3 className="text-sm font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-3">Debug Actions</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+              <button
+                onClick={autoBackfillDeezerIds}
+                disabled={debugActionLoading !== null}
+                className="bg-[var(--secondary)] border border-[var(--muted)] rounded-xl p-4 text-left hover:border-[var(--accent)]/50 transition-all disabled:opacity-50"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  {debugActionLoading === "autoBackfillDeezerIds" ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)]" />
+                  ) : (
+                    <Zap className="w-4 h-4 text-[var(--accent)]" />
+                  )}
+                  <span className="font-bold text-white text-sm">Auto Backfill All</span>
+                </div>
+                <p className="text-xs text-[var(--muted-foreground)]">Resolve Deezer IDs in repeated 100-artist batches until complete or capped</p>
+              </button>
+
               {[
                 { action: "testSettingWrite", label: "Test Settings Write", icon: Database, desc: "Write, read, delete a test setting" },
                 { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks via Spotify API" },
                 { action: "testDeezerResolve", label: "Test Deezer Pipeline", icon: Play, desc: "Resolve Spotify -> Deezer + fetch tracks" },
-                { action: "backfillDeezerIds", label: "Backfill Deezer IDs", icon: Zap, desc: "Resolve and save 25 artist Deezer IDs per run" },
+                { action: "backfillDeezerIds", label: "Backfill Deezer IDs", icon: Zap, desc: "Resolve and save up to 100 artist Deezer IDs per run" },
                 { action: "clearStaleRunning", label: "Clear Stale Running", icon: StopCircle, desc: "Mark all running logs as failed" },
               ].map((btn) => (
                 <button
@@ -1187,13 +1274,14 @@ export default function AdminPage() {
                     setDebugActionLoading(btn.action);
                     setDebugActionResult(null);
                     try {
-                      const res = await fetch("/api/admin/debug", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: btn.action }),
-                      });
-                      const data = await res.json();
+                      const data = await runDebugAction(
+                        btn.action,
+                        btn.action === "backfillDeezerIds" ? { limit: 100 } : undefined
+                      );
                       setDebugActionResult(data);
+                      if (btn.action === "backfillDeezerIds") {
+                        await runDiagnostics();
+                      }
                     } catch {
                       setDebugActionResult({ status: "error", message: "Request failed" });
                     } finally {
