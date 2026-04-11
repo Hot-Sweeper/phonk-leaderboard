@@ -136,7 +136,12 @@ function PodiumTrackCard({
             </div>
           )}
           <div className="font-black text-lg text-white leading-tight line-clamp-2">{track.name}</div>
-          <div className="text-sm text-[var(--muted-foreground)] mt-1 truncate max-w-full">{track.artist.name}</div>
+          <Link
+            href={`/artist/${track.artist.id}`}
+            className="text-sm text-[var(--muted-foreground)] mt-1 truncate max-w-full hover:text-white transition-colors"
+          >
+            {track.artist.name}
+          </Link>
           <div className="flex items-center justify-center gap-2 mt-3 text-[11px] font-bold">
             {track.releaseDate ? (
               <span className="text-[var(--muted-foreground)]">{track.releaseDate}</span>
