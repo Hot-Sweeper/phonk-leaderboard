@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Pencil,
   Save,
+  Trash2,
 } from "lucide-react";
 
 function formatCount(n: number): string {
@@ -197,6 +198,8 @@ export default function ArtistPage() {
   async function submitSuggestion(e: React.FormEvent) {
     e.preventDefault();
     if (!session) return signIn("google");
+    const isPrivileged =
+      session.user?.role === "ADMIN" || session.user?.role === "MODERATOR";
     const res = await fetch(`/api/artists/${id}/suggest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -207,13 +210,53 @@ export default function ArtistPage() {
       }),
     });
     if (res.ok) {
-      setSuggestSent(true);
-      setTimeout(() => {
+      if (isPrivileged) {
+        // Admin/mod: link applied directly, reload artist data
+        setArtist(await res.json());
         setShowSuggest(false);
-        setSuggestSent(false);
         setSuggestUrl("");
         setSuggestNote("");
-      }, 2000);
+      } else {
+        setSuggestSent(true);
+        setTimeout(() => {
+          setShowSuggest(false);
+          setSuggestSent(false);
+          setSuggestUrl("");
+          setSuggestNote("");
+        }, 2000);
+      }
+    }
+  }
+
+  async function requestRemoval() {
+    if (!artist) return;
+    const confirmed = window.confirm(
+      session?.user?.role === "ADMIN"
+        ? `Delete "${artist.name}" permanently? This cannot be undone.`
+        : `Request removal of "${artist.name}"? An admin will review this.`
+    );
+    if (!confirmed) return;
+
+    const res = await fetch("/api/requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "REMOVAL",
+        artistId: artist.id,
+        reason: "Requested from artist page",
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.directDelete) {
+        window.location.href = "/";
+      } else {
+        alert("Removal request submitted. An admin will review it.");
+      }
+    } else {
+      const data = await res.json();
+      alert(data.error ?? "Failed to submit removal request.");
     }
   }
 
@@ -371,6 +414,15 @@ export default function ArtistPage() {
                     Refresh Stats
                   </button>
                 )}
+                {(session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR") && (
+                  <button
+                    onClick={requestRemoval}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-900/50 text-red-300 hover:bg-red-900/80 transition-all"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {session?.user?.role === "ADMIN" ? "Delete Artist" : "Request Removal"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -493,10 +545,15 @@ export default function ArtistPage() {
             >
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-xl font-black mb-2">Suggest a Link</h2>
+            <h2 className="text-xl font-black mb-2">
+              {session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR"
+                ? "Add / Update Link"
+                : "Suggest a Link"}
+            </h2>
             <p className="text-[var(--muted-foreground)] text-sm mb-4">
-              Help complete {artist.name}&apos;s profile. A moderator will
-              review your suggestion.
+              {session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR"
+                ? `Update ${artist.name}'s profile directly.`
+                : `Help complete ${artist.name}'s profile. A moderator will review your suggestion.`}
             </p>
             {suggestSent ? (
               <div className="text-green-400 font-bold text-center py-8">
@@ -536,7 +593,10 @@ export default function ArtistPage() {
                   type="submit"
                   className="mt-1 py-2.5 rounded-full bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all flex items-center justify-center gap-2"
                 >
-                  <Send className="w-4 h-4" /> Submit Suggestion
+                  <Send className="w-4 h-4" />
+                  {session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR"
+                    ? "Apply Link"
+                    : "Submit Suggestion"}
                 </button>
               </form>
             )}

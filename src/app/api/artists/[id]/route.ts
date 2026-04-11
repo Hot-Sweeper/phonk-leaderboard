@@ -190,3 +190,23 @@ export async function PATCH(
 
   return NextResponse.json(updatedArtist);
 }
+
+// DELETE — remove an artist (admin only)
+export async function DELETE(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session || session.user.role !== "ADMIN") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const existing = await prisma.artist.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  await prisma.artist.delete({ where: { id } });
+  return NextResponse.json({ success: true });
+}

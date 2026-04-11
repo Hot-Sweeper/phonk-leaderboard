@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { fetchPlatformStats } from "@/lib/platforms";
 
 // POST — suggest a link change for an artist
 export async function POST(
@@ -26,7 +27,50 @@ export async function POST(
     return NextResponse.json({ error: "Invalid platform." }, { status: 400 });
   }
 
-  // Check for existing pending suggestion
+  const isPrivileged =
+    session.user.role === "ADMIN" || session.user.role === "MODERATOR";
+
+  // Admins/mods: apply directly without review
+  if (isPrivileged) {
+    const stats = await fetchPlatformStats(platform, url.trim());
+
+    await prisma.artistLink.upsert({
+      where: {
+        artistId_platform: { artistId, platform },
+      },
+      update: {
+        url: url.trim(),
+        handle: stats?.handle ?? null,
+        followerCount: stats?.followerCount ?? 0,
+        monthlyListeners: stats?.monthlyListeners ?? 0,
+        platformId: stats?.platformId ?? null,
+      },
+      create: {
+        artistId,
+        platform,
+        url: url.trim(),
+        handle: stats?.handle ?? null,
+        followerCount: stats?.followerCount ?? 0,
+        monthlyListeners: stats?.monthlyListeners ?? 0,
+        platformId: stats?.platformId ?? null,
+      },
+    });
+
+    const updated = await prisma.artist.findUnique({
+      where: { id: artistId },
+      include: {
+        links: { orderBy: { platform: "asc" } },
+        suggestions: {
+          where: { status: "PENDING" },
+          select: { id: true, platform: true, url: true, note: true, createdAt: true },
+        },
+      },
+    });
+
+    return NextResponse.json(updated);
+  }
+
+  // Regular users: create a suggestion for review
   const existing = await prisma.linkSuggestion.findFirst({
     where: { artistId, platform, userId: session.user.id, status: "PENDING" },
   });

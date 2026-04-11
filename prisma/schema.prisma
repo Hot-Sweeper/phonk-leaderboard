@@ -52,6 +52,8 @@ model User {
   watchlist       Watchlist[]
   artistRequests  ArtistRequest[]
   linkSuggestions LinkSuggestion[]
+  modInvites      ModInvite[]
+  modRequests     ModRequest[]
   createdAt       DateTime         @default(now())
 }
 
@@ -78,6 +80,7 @@ model Artist {
   links          ArtistLink[]
   watchlistedBy  Watchlist[]
   suggestions    LinkSuggestion[]
+  requests       ArtistRequest[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -117,13 +120,16 @@ enum RequestStatus {
 
 model ArtistRequest {
   id         String        @id @default(cuid())
+  type       String        @default("ADD") // ADD or REMOVAL
   name       String
-  links      String
+  links      String        @default("")
+  artistId   String?
   reason     String?
   status     RequestStatus @default(PENDING)
   reviewedBy String?
   reviewNote String?
   userId     String
+  artist     Artist?       @relation(fields: [artistId], references: [id], onDelete: Cascade)
   user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
@@ -142,4 +148,32 @@ model LinkSuggestion {
   user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt  DateTime      @default(now())
   updatedAt  DateTime      @updatedAt
+}
+
+model ModInvite {
+  id          String       @id @default(cuid())
+  code        String       @unique
+  createdById String
+  createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  maxUses     Int          @default(1)
+  usedCount   Int          @default(0)
+  expiresAt   DateTime?
+  active      Boolean      @default(true)
+  requests    ModRequest[]
+  createdAt   DateTime     @default(now())
+}
+
+model ModRequest {
+  id         String        @id @default(cuid())
+  userId     String
+  inviteId   String
+  status     RequestStatus @default(PENDING)
+  reviewedBy String?
+  reviewNote String?
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invite     ModInvite     @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@unique([userId, inviteId])
 }

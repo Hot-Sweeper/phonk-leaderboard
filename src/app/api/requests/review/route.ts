@@ -91,7 +91,27 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: true });
   }
 
-  // Approve: parse links and create artist
+  // Handle removal request approval
+  if (artistRequest.type === "REMOVAL") {
+    if (artistRequest.artistId) {
+      await prisma.artist.delete({
+        where: { id: artistRequest.artistId },
+      }).catch(() => {
+        // Artist may already be deleted
+      });
+    }
+    await prisma.artistRequest.update({
+      where: { id: requestId },
+      data: {
+        status: "APPROVED",
+        reviewedBy: session.user.id,
+        reviewNote: reviewNote?.trim() || null,
+      },
+    });
+    return NextResponse.json({ success: true });
+  }
+
+  // Approve ADD request: parse links and create artist
   const linkLines = artistRequest.links
     .split(/[\n,]+/)
     .map((l) => l.trim())

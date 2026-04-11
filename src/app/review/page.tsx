@@ -11,12 +11,15 @@ import {
   XCircle,
   User,
   Link2,
+  Trash2,
 } from "lucide-react";
 
 type ArtistRequest = {
   id: string;
+  type: string;
   name: string;
   links: string;
+  artistId: string | null;
   reason: string | null;
   status: "PENDING" | "APPROVED" | "REJECTED";
   reviewNote: string | null;
@@ -313,15 +316,24 @@ function pendingereqs(
             </div>
           </div>
         </div>
-        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-yellow-900/50 text-yellow-300">
-          Pending
+        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+          req.type === "REMOVAL"
+            ? "bg-red-900/50 text-red-300"
+            : "bg-yellow-900/50 text-yellow-300"
+        }`}>
+          {req.type === "REMOVAL" ? "Removal" : "Pending"}
         </span>
       </div>
 
-      <div className="font-bold mb-1">{req.name}</div>
-      <div className="text-[var(--muted-foreground)] text-sm whitespace-pre-line mb-2">
-        {req.links}
+      <div className="font-bold mb-1 flex items-center gap-2">
+        {req.type === "REMOVAL" && <Trash2 className="w-4 h-4 text-red-400" />}
+        {req.name}
       </div>
+      {req.type !== "REMOVAL" && (
+        <div className="text-[var(--muted-foreground)] text-sm whitespace-pre-line mb-2">
+          {req.links}
+        </div>
+      )}
       {req.reason && (
         <p className="text-[var(--muted-foreground)] text-sm italic mb-2">
           &ldquo;{req.reason}&rdquo;
