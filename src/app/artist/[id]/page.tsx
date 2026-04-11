@@ -396,6 +396,9 @@ export default function ArtistPage() {
   const [suggestUrl, setSuggestUrl] = useState("");
   const [suggestNote, setSuggestNote] = useState("");
   const [suggestSent, setSuggestSent] = useState(false);
+  const [ytSearchQuery, setYtSearchQuery] = useState("");
+  const [ytSearchResults, setYtSearchResults] = useState<Array<{ name: string; imageUrl: string | null; subscriberCount: number; handle: string | null; platformId: string | null }>>([]);
+  const [ytSearching, setYtSearching] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editName, setEditName] = useState("");
@@ -438,6 +441,28 @@ export default function ArtistPage() {
       })
       .catch(() => {});
   }, [loadArtist, checkWatchlist, id]);
+
+  // Debounced YouTube channel search for admin modal
+  useEffect(() => {
+    if (suggestPlatform !== "YOUTUBE" || !ytSearchQuery.trim()) {
+      setYtSearchResults([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      setYtSearching(true);
+      try {
+        const res = await fetch("/api/artists/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "search", q: ytSearchQuery.trim() }),
+        });
+        if (res.ok) setYtSearchResults(await res.json());
+      } finally {
+        setYtSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [ytSearchQuery, suggestPlatform]);
 
   async function refreshStats() {
     setRefreshing(true);
@@ -649,22 +674,38 @@ export default function ArtistPage() {
 
               {/* Platform icons row */}
               <div className="flex items-center gap-2 mt-1">
-                {artist.links.map((link) => {
-                  const Icon = PLATFORM_ICONS[link.platform];
-                  const meta = PLATFORM_META[link.platform];
+                {Object.keys(PLATFORM_META).map((platform) => {
+                  const Icon = PLATFORM_ICONS[platform];
+                  const meta = PLATFORM_META[platform];
                   if (!Icon) return null;
+                  const link = artist.links.find((l) => l.platform === platform);
+                  if (link) {
+                    return (
+                      <a
+                        key={platform}
+                        href={link.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                        style={{ backgroundColor: `${meta.color}20`, color: meta.color }}
+                        title={meta.label}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </a>
+                    );
+                  }
+                  if (!isPrivileged) return null;
                   return (
-                    <a
-                      key={link.id}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
-                      style={{ backgroundColor: `${meta.color}20`, color: meta.color }}
-                      title={meta.label}
+                    <button
+                      key={platform}
+                      onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); setShowSuggest(true); }}
+                      className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110 relative group"
+                      style={{ backgroundColor: `${meta.color}10` }}
+                      title={`Add ${meta.label}`}
                     >
-                      <Icon className="w-4 h-4" />
-                    </a>
+                      <Icon className={`w-4 h-4 opacity-30 ${meta.textColor}`} />
+                      <X className="w-3 h-3 absolute -top-0.5 -right-0.5 text-red-400 bg-[var(--background)] rounded-full" />
+                    </button>
                   );
                 })}
               </div>
@@ -843,7 +884,7 @@ export default function ArtistPage() {
             return (
               <button
                 key={platform}
-                onClick={() => { setSuggestPlatform(platform); session ? setShowSuggest(true) : signIn("google"); }}
+                onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); session ? setShowSuggest(true) : signIn("google"); }}
                 className="rounded-xl border border-dashed border-[var(--muted)] p-4 transition-all hover:border-[var(--accent)] group text-left"
               >
                 <div className="flex items-center gap-3">
@@ -994,12 +1035,53 @@ export default function ArtistPage() {
               <div className="text-green-400 font-bold text-center py-8">Suggestion submitted!</div>
             ) : (
               <form onSubmit={submitSuggestion} className="flex flex-col gap-3">
-                <select value={suggestPlatform} onChange={(e) => setSuggestPlatform(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
+                <select value={suggestPlatform} onChange={(e) => { setSuggestPlatform(e.target.value); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
                   {Object.entries(PLATFORM_META).map(([val, meta]) => <option key={val} value={val}>{meta.label}</option>)}
                 </select>
-                <input required type="url" placeholder="https://..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                {isPrivileged && suggestPlatform === "YOUTUBE" ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="relative">
+                      <input
+                        placeholder="Search YouTube channel..."
+                        value={ytSearchQuery}
+                        onChange={(e) => setYtSearchQuery(e.target.value)}
+                        className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500 w-full"
+                      />
+                      {ytSearching && (
+                        <RefreshCw className="w-4 h-4 animate-spin absolute right-3 top-2.5 text-[var(--muted-foreground)]" />
+                      )}
+                    </div>
+                    {ytSearchResults.length > 0 && (
+                      <div className="max-h-52 overflow-y-auto flex flex-col gap-1 rounded-lg border border-[var(--muted)] bg-[var(--background)] p-1">
+                        {ytSearchResults.map((ch) => (
+                          <button
+                            key={ch.platformId}
+                            type="button"
+                            onClick={() => {
+                              setSuggestUrl(`https://www.youtube.com/${ch.handle ? `@${ch.handle}` : `channel/${ch.platformId}`}`);
+                              setYtSearchQuery(ch.name);
+                              setYtSearchResults([]);
+                            }}
+                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+                          >
+                            {ch.imageUrl && (
+                              <img src={ch.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-bold truncate">{ch.name}</div>
+                              <div className="text-xs text-[var(--muted-foreground)]">{formatCount(ch.subscriberCount)} subscribers</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input type="url" placeholder="https://youtube.com/..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                  </div>
+                ) : (
+                  <input required type="url" placeholder="https://..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                )}
                 <input placeholder="Note (optional)" value={suggestNote} onChange={(e) => setSuggestNote(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
-                <button type="submit" className="mt-1 py-2.5 rounded-full bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all flex items-center justify-center gap-2">
+                <button type="submit" disabled={!suggestUrl.trim()} className="mt-1 py-2.5 rounded-full bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50">
                   <Send className="w-4 h-4" /> {isPrivileged ? "Apply Link" : "Submit Suggestion"}
                 </button>
               </form>
