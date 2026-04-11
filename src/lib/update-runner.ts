@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl } from "@/lib/platforms";
+import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
 
 export type UpdateResult = {
@@ -163,6 +163,12 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
     throw new Error("A song update is already running.");
   }
 
+  // Pre-check: ensure Spotify credentials work
+  const token = await getSpotifyToken();
+  if (!token) {
+    throw new Error("Cannot start song update: Spotify token unavailable. Check SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET.");
+  }
+
   const startTime = Date.now();
 
   const artists = await prisma.artist.findMany({
@@ -235,8 +241,12 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
           }
         }
 
-        updated++;
-        details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart, tracks: trackCount });
+        if (trackCount > 0) {
+          updated++;
+          details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart, tracks: trackCount });
+        } else {
+          details.push({ name: artist.name, status: "no-tracks", durationMs: Date.now() - artistStart, tracks: 0 });
+        }
       } catch (err) {
         failed++;
         details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });

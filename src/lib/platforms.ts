@@ -253,15 +253,19 @@ export async function searchYouTubeChannels(
 
 let spotifyToken: string | null = null;
 let spotifyTokenExpiry = 0;
+let spotifyTokenFailedUntil = 0;
 
 /** Get a Spotify access token via Client Credentials flow */
-async function getSpotifyToken(): Promise<string | null> {
+export async function getSpotifyToken(): Promise<string | null> {
   if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
+  // Don't retry if we recently failed (cache failures for 60s)
+  if (Date.now() < spotifyTokenFailedUntil) return null;
 
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
   if (!clientId || !clientSecret) {
     console.error("[Spotify] Missing SPOTIFY_CLIENT_ID or SPOTIFY_CLIENT_SECRET");
+    spotifyTokenFailedUntil = Date.now() + 60_000;
     return null;
   }
 
@@ -277,6 +281,7 @@ async function getSpotifyToken(): Promise<string | null> {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       console.error(`[Spotify] Token request failed: ${res.status} ${text}`);
+      spotifyTokenFailedUntil = Date.now() + 60_000;
       return null;
     }
     const data = await res.json();
@@ -285,6 +290,7 @@ async function getSpotifyToken(): Promise<string | null> {
     return spotifyToken;
   } catch (err) {
     console.error("[Spotify] Token request error:", err);
+    spotifyTokenFailedUntil = Date.now() + 60_000;
     return null;
   }
 }
