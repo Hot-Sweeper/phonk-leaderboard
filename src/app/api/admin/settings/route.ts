@@ -177,7 +177,7 @@ async function handleMigrateToSpotify() {
 async function handleDeduplicate() {
   // Find artists grouped by name (case-insensitive) to detect duplicates
   const artists = await prisma.artist.findMany({
-    include: { links: true, _count: { select: { watchlist: true } } },
+    include: { links: true, _count: { select: { watchlistedBy: true } } },
     orderBy: { name: "asc" },
   });
 
@@ -198,7 +198,7 @@ async function handleDeduplicate() {
     group.sort((a, b) => {
       const linkDiff = b.links.length - a.links.length;
       if (linkDiff !== 0) return linkDiff;
-      const watchDiff = b._count.watchlist - a._count.watchlist;
+      const watchDiff = b._count.watchlistedBy - a._count.watchlistedBy;
       if (watchDiff !== 0) return watchDiff;
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
