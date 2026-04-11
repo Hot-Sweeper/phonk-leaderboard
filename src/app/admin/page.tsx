@@ -22,6 +22,7 @@ import {
   ArrowRightLeft,
   FileText,
   AlertCircle,
+  Music,
 } from "lucide-react";
 
 type ModInvite = {
@@ -57,6 +58,7 @@ type StaffMember = {
 type UpdateLogEntry = {
   id: string;
   trigger: string;
+  updateType: string;
   status: string;
   totalArtists: number;
   updatedCount: number;
@@ -86,6 +88,10 @@ export default function AdminPage() {
   const [lastFullUpdate, setLastFullUpdate] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<{ current: number; total: number } | null>(null);
+  const [songUpdateIntervalHours, setSongUpdateIntervalHours] = useState(6);
+  const [lastSongUpdate, setLastSongUpdate] = useState<string | null>(null);
+  const [updatingSongs, setUpdatingSongs] = useState(false);
+  const [songProgress, setSongProgress] = useState<{ current: number; total: number } | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [deduplicating, setDeduplicating] = useState(false);
   const [settingsResult, setSettingsResult] = useState<string | null>(null);
@@ -108,6 +114,8 @@ export default function AdminPage() {
       const s = await settingsRes.json();
       setUpdateIntervalHours(s.updateIntervalHours ?? 1);
       setLastFullUpdate(s.lastFullUpdate ?? null);
+      setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
+      setLastSongUpdate(s.lastSongUpdate ?? null);
       setUpdateLogs(s.logs ?? []);
     }
     setLoading(false);
@@ -179,6 +187,15 @@ export default function AdminPage() {
     });
   }
 
+  async function saveSongInterval(hours: number) {
+    setSongUpdateIntervalHours(hours);
+    await fetch("/api/admin/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "songUpdateIntervalHours", value: String(hours) }),
+    });
+  }
+
   async function updateAllArtists() {
     setUpdatingAll(true);
     setSettingsResult(null);
@@ -221,6 +238,49 @@ export default function AdminPage() {
       clearInterval(pollInterval);
       setUpdatingAll(false);
       setUpdateProgress(null);
+    }
+  }
+
+  async function updateAllSongs() {
+    setUpdatingSongs(true);
+    setSettingsResult(null);
+    setSongProgress({ current: 0, total: 0 });
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/admin/update-progress");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "running") {
+            setSongProgress({ current: data.updatedCount + data.failedCount, total: data.totalArtists });
+          }
+        }
+      } catch { /* ignore */ }
+    }, 1500);
+
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateSongs" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const secs = (data.durationMs / 1000).toFixed(1);
+        setSettingsResult(
+          `Songs updated for ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
+        );
+        setLastSongUpdate(new Date().toISOString());
+        const logsRes = await fetch("/api/admin/settings");
+        if (logsRes.ok) {
+          const s = await logsRes.json();
+          setUpdateLogs(s.logs ?? []);
+        }
+      }
+    } finally {
+      clearInterval(pollInterval);
+      setUpdatingSongs(false);
+      setSongProgress(null);
     }
   }
 
@@ -733,6 +793,73 @@ export default function AdminPage() {
               </div>
             </div>
 
+            {/* Song Update Settings */}
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Music className="w-5 h-5 text-green-400" />
+                Song Update Settings
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 flex flex-col gap-4">
+                <div>
+                  <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] mb-1 block">
+                    Song Update Interval
+                  </label>
+                  <select
+                    value={songUpdateIntervalHours}
+                    onChange={(e) => saveSongInterval(Number(e.target.value))}
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] w-48"
+                  >
+                    <option value={1}>Every hour</option>
+                    <option value={6}>Every 6 hours</option>
+                    <option value={12}>Every 12 hours</option>
+                    <option value={24}>Every 24 hours</option>
+                    <option value={48}>Every 48 hours</option>
+                    <option value={168}>Every week</option>
+                  </select>
+                  {lastSongUpdate && (
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      Last song update: {new Date(lastSongUpdate).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={updateAllSongs}
+                      disabled={updatingSongs}
+                      className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {updatingSongs ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Music className="w-4 h-4" />
+                      )}
+                      {updatingSongs ? "Updating Songs..." : "Update All Songs Now"}
+                    </button>
+                  </div>
+
+                  {updatingSongs && songProgress && songProgress.total > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
+                        <span>Fetching tracks...</span>
+                        <span>{songProgress.current}/{songProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-[var(--muted)] rounded-full h-2.5 overflow-hidden">
+                        <div
+                          className="bg-green-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((songProgress.current / songProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {Math.round((songProgress.current / songProgress.total) * 100)}% complete
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Migrate to Spotify */}
             <div className="mb-10">
               <h2 className="text-lg font-black mb-3 flex items-center gap-2">
@@ -837,6 +964,11 @@ export default function AdminPage() {
                               </span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--muted)] text-[var(--muted-foreground)] uppercase font-bold">
                                 {log.trigger}
+                              </span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase font-bold ${
+                                log.updateType === "songs" ? "bg-green-900/50 text-green-300" : "bg-blue-900/50 text-blue-300"
+                              }`}>
+                                {log.updateType === "songs" ? "Songs" : "Stats"}
                               </span>
                             </div>
                             <div className="text-xs text-[var(--muted-foreground)] mt-0.5 flex gap-3">

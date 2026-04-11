@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
-import { runFullUpdate } from "@/lib/update-runner";
+import { runFullUpdate, runSongUpdate } from "@/lib/update-runner";
 
 // GET — fetch site settings + recent update logs
 export async function GET() {
@@ -23,6 +23,8 @@ export async function GET() {
   return NextResponse.json({
     updateIntervalHours: parseInt(map["updateIntervalHours"] ?? "1", 10),
     lastFullUpdate: map["lastFullUpdate"] ?? null,
+    songUpdateIntervalHours: parseInt(map["songUpdateIntervalHours"] ?? "6", 10),
+    lastSongUpdate: map["lastSongUpdate"] ?? null,
     logs,
   });
 }
@@ -39,7 +41,7 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "key and value required" }, { status: 400 });
   }
 
-  const allowed = ["updateIntervalHours"];
+  const allowed = ["updateIntervalHours", "songUpdateIntervalHours"];
   if (!allowed.includes(key)) {
     return NextResponse.json({ error: "Invalid setting key" }, { status: 400 });
   }
@@ -64,6 +66,11 @@ export async function POST(req: Request) {
 
   if (action === "updateAll") {
     return handleUpdateAll();
+  }
+
+  if (action === "updateSongs") {
+    const result = await runSongUpdate("manual");
+    return NextResponse.json(result);
   }
 
   if (action === "migrateToSpotify") {

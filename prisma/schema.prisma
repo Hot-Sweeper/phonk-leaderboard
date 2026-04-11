@@ -243,6 +243,7 @@ model Track {
 model UpdateLog {
   id             String   @id @default(cuid())
   trigger        String   @default("manual") // manual | cron
+  updateType     String   @default("stats") // stats | songs
   status         String   @default("running") // running | completed | failed
   totalArtists   Int      @default(0)
   updatedCount   Int      @default(0)
