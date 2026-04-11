@@ -196,19 +196,19 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
       try {
         const spotifyLink = artist.links[0];
         const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
+        let deezerId = artist.deezerId;
 
-        if (!spotifyId) {
+        if (!spotifyId && !deezerId) {
           details.push({ name: artist.name, status: "skipped", durationMs: Date.now() - artistStart });
           continue;
         }
 
         // Persist spotifyId if missing
-        if (!artist.spotifyId) {
+        if (spotifyId && !artist.spotifyId) {
           await prisma.artist.update({ where: { id: artist.id }, data: { spotifyId } }).catch(() => {});
         }
 
         // ── Resolve Deezer ID (one-time per artist) ──
-        let deezerId = artist.deezerId;
         if (!deezerId) {
           const resolved = await resolveArtistToDeezer(artist.name, spotifyId);
           deezerId = resolved.deezerId;
@@ -222,8 +222,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         }
 
         // ── Fetch Spotify artist details (genres, popularity) — still works without Premium ──
-        const token = await getSpotifyToken();
-        if (token) {
+        const token = spotifyId ? await getSpotifyToken() : null;
+        if (token && spotifyId) {
           const artistDetails = await fetchSpotifyArtistDetails(spotifyId);
           if (artistDetails) {
             await prisma.artist.update({
@@ -269,7 +269,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
               trackCount++;
             }
           }
-        } else {
+        } else if (spotifyId) {
           // No Deezer ID found — try Spotify as fallback
           const topTracks = await fetchSpotifyTopTracks(spotifyId);
           if (topTracks && topTracks.length > 0) {
