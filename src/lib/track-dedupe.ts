@@ -25,6 +25,14 @@ const VERSION_HINTS = [
   "version",
 ];
 
+const GENERIC_VERSION_LABELS = new Set([
+  "edit",
+  "edit version",
+  "version",
+  "versions",
+  "remixes",
+]);
+
 function normalizeText(value: string) {
   return value
     .toLowerCase()
@@ -40,6 +48,19 @@ function toDisplayLabel(value: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function sanitizeVersionLabel(value: string) {
+  const normalized = normalizeText(value)
+    .replace(/\bversions?\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized || GENERIC_VERSION_LABELS.has(normalized)) {
+    return null;
+  }
+
+  return toDisplayLabel(normalized);
 }
 
 export function getCanonicalTrackTitle(title: string) {
@@ -69,9 +90,15 @@ export function extractTrackVersions(title: string, albumName?: string | null) {
     const dashedSegment = candidate.match(/\s+-\s+(.+)$/)?.[1];
 
     for (const rawSegment of [...bracketSegments, dashedSegment].filter(Boolean) as string[]) {
-      const normalized = normalizeText(rawSegment);
-      if (!VERSION_HINTS.some((hint) => normalized.includes(hint))) continue;
-      labels.push(toDisplayLabel(normalized));
+      for (const part of rawSegment.split(/[\/|,]+/)) {
+        const normalized = normalizeText(part);
+        if (!VERSION_HINTS.some((hint) => normalized.includes(hint))) continue;
+
+        const label = sanitizeVersionLabel(part);
+        if (label) {
+          labels.push(label);
+        }
+      }
     }
   }
 
@@ -79,7 +106,10 @@ export function extractTrackVersions(title: string, albumName?: string | null) {
   if (labels.length === 0) {
     for (const hint of VERSION_HINTS) {
       if (normalizedTitle.includes(hint)) {
-        labels.push(toDisplayLabel(hint));
+        const label = sanitizeVersionLabel(hint);
+        if (label) {
+          labels.push(label);
+        }
       }
     }
   }

@@ -4,6 +4,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { toPreviewProxyUrl } from "@/lib/preview";
 import {
   ArrowLeft,
   Star,
@@ -150,6 +151,7 @@ type Artist = {
 type Track = {
   id: string;
   spotifyId: string | null;
+  deezerId?: string | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
@@ -182,7 +184,7 @@ type RankData = {
 };
 
 /* ─── Track Preview Player ─── */
-function TrackPreview({ url }: { url: string }) {
+function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -209,7 +211,7 @@ function TrackPreview({ url }: { url: string }) {
     <>
       <audio
         ref={audioRef}
-        src={url}
+        src={toPreviewProxyUrl(url, deezerId)}
         onEnded={() => setPlaying(false)}
         onError={() => {
           setPlaying(false);
@@ -972,7 +974,7 @@ export default function ArtistPage() {
                   {/* Preview button */}
                   <div className="shrink-0">
                     {track.previewUrl ? (
-                      <TrackPreview url={track.previewUrl} />
+                      <TrackPreview url={track.previewUrl} deezerId={track.deezerId} />
                     ) : (
                       <div className="w-8 h-8" />
                     )}

@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { isValidPreviewUrl, toPreviewProxyUrl } from "@/lib/preview";
 import {
   Music,
   Search,
@@ -95,8 +96,39 @@ function getVersionLabel(versions: string[]) {
   return `${variantVersions[0]} +${variantVersions.length - 1}`;
 }
 
-function isValidPreviewUrl(previewUrl: string | null | undefined) {
-  return typeof previewUrl === "string" && /^https?:\/\//i.test(previewUrl.trim());
+function normalizeArtistName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getSupportingArtists(track: Track) {
+  const seen = new Set([normalizeArtistName(track.artist.name)]);
+  const artists: Array<{ key: string; name: string; href: string; external: boolean }> = [];
+
+  for (const contributor of track.contributors) {
+    const normalized = normalizeArtistName(contributor.name);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    artists.push({
+      key: contributor.id,
+      name: contributor.name,
+      href: `/artist/${contributor.id}`,
+      external: false,
+    });
+  }
+
+  for (const featuredArtist of track.featuredArtists) {
+    const normalized = normalizeArtistName(featuredArtist);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    artists.push({
+      key: `search:${featuredArtist}`,
+      name: featuredArtist,
+      href: `https://open.spotify.com/search/${encodeURIComponent(featuredArtist)}`,
+      external: true,
+    });
+  }
+
+  return artists;
 }
 
 function contributorTextClass() {
@@ -114,7 +146,7 @@ function PodiumTrackCard({
   rank: number;
   isPlaying: boolean;
   previewUnavailable: boolean;
-  onTogglePreview: (trackId: string, previewUrl: string) => void;
+  onTogglePreview: (trackId: string, previewUrl: string, deezerId?: string | null) => void;
 }) {
   const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
 
@@ -129,7 +161,7 @@ function PodiumTrackCard({
           </div>
           {isValidPreviewUrl(track.previewUrl) ? (
             <button
-              onClick={() => onTogglePreview(track.id, track.previewUrl!)}
+              onClick={() => onTogglePreview(track.id, track.previewUrl!, track.deezerId)}
               disabled={previewUnavailable}
               className={`w-10 h-10 rounded-full text-white flex items-center justify-center transition-colors ${previewUnavailable ? "bg-white/10 text-white/35 cursor-not-allowed" : "bg-black/35 hover:bg-green-600"}`}
               title={previewUnavailable ? "Preview unavailable" : isPlaying ? "Pause preview" : "Play preview"}
@@ -235,7 +267,7 @@ export default function SongsPage() {
     };
   }, [stopCurrentAudio]);
 
-  async function togglePreview(trackId: string, previewUrl: string) {
+  async function togglePreview(trackId: string, previewUrl: string, deezerId?: string | null) {
     if (failedPreviewTrackIds.includes(trackId)) return;
 
     if (playingTrackId === trackId) {
@@ -253,7 +285,7 @@ export default function SongsPage() {
     const audio = new Audio();
     audio.volume = 0.5;
     audio.preload = "none";
-    audio.src = previewUrl.trim();
+    audio.src = toPreviewProxyUrl(previewUrl, deezerId);
 
     audio.onended = () => {
       if (audioRef.current === audio) {
@@ -366,6 +398,7 @@ export default function SongsPage() {
               const rank = i + (podiumTracks.length === 3 ? 4 : 1);
               const rankColor = "text-[var(--muted-foreground)]";
               const isPlaying = playingTrackId === track.id;
+              const supportingArtists = getSupportingArtists(track);
 
               return (
                 <div
@@ -376,7 +409,7 @@ export default function SongsPage() {
                   <div className="flex justify-center">
                     {isValidPreviewUrl(track.previewUrl) ? (
                       <button
-                        onClick={() => togglePreview(track.id, track.previewUrl!)}
+                        onClick={() => togglePreview(track.id, track.previewUrl!, track.deezerId)}
                         disabled={failedPreviewTrackIds.includes(track.id)}
                         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
                           failedPreviewTrackIds.includes(track.id)
@@ -432,41 +465,25 @@ export default function SongsPage() {
                         >
                           {track.artist.name}
                         </Link>
-                        {/* Contributors: forum artists get links, others show as text */}
-                        {(track.contributors.length > 0 || track.featuredArtists.length > 0) && (
-                          <span className="opacity-60">
-                            {" "}feat.{" "}
-                            {track.contributors.length > 0
-                              ? track.contributors.map((c, ci) => (
-                                  <span key={c.id}>
-                                    {ci > 0 && ", "}
-                                    <Link
-                                      href={`/artist/${c.id}`}
-                                      className={contributorTextClass()}
-                                    >
-                                      {c.name}
-                                    </Link>
-                                  </span>
-                                ))
-                              : null}
-                            {/* Non-forum featured artists */}
-                            {track.featuredArtists
-                              .filter(name => !track.contributors.some(c => c.name === name))
-                              .map((name, fi) => (
-                                <span key={name}>
-                                  {(fi > 0 || track.contributors.length > 0) && ", "}
-                                  <a
-                                    href={`https://open.spotify.com/search/${encodeURIComponent(name)}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className={contributorTextClass()}
-                                  >
-                                    {name}
-                                  </a>
-                                </span>
-                              ))}
+                        {supportingArtists.map((artist) => (
+                          <span key={artist.key} className="opacity-60">
+                            {", "}
+                            {artist.external ? (
+                              <a
+                                href={artist.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={contributorTextClass()}
+                              >
+                                {artist.name}
+                              </a>
+                            ) : (
+                              <Link href={artist.href} className={contributorTextClass()}>
+                                {artist.name}
+                              </Link>
+                            )}
                           </span>
-                        )}
+                        ))}
                       </div>
                       <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
                         {getVersionLabel(track.versions)}
