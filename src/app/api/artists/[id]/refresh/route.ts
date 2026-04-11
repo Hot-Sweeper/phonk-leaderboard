@@ -29,6 +29,7 @@ export async function POST(
   }
 
   let newImageUrl = artist.imageUrl;
+  let spotifyImage: string | null = null;
 
   // Fetch stats for each link in parallel
   await Promise.all(
@@ -46,16 +47,17 @@ export async function POST(
         },
       });
 
-      // Update artist image from YouTube (priority) or Spotify
-      if (stats.imageUrl) {
-        if (link.platform === "YOUTUBE") {
-          newImageUrl = stats.imageUrl;
-        } else if (link.platform === "SPOTIFY" && !newImageUrl) {
-          newImageUrl = stats.imageUrl;
-        }
+      // Spotify is the primary source for name and image
+      if (link.platform === "SPOTIFY" && stats.imageUrl) {
+        spotifyImage = stats.imageUrl;
       }
     })
   );
+
+  // Always prefer Spotify image
+  if (spotifyImage) {
+    newImageUrl = spotifyImage;
+  }
 
   // Update artist image if changed
   if (newImageUrl !== artist.imageUrl) {

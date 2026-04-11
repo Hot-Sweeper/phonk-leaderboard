@@ -1,120 +1,130 @@
-import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { Platform } from "@prisma/client";
-import { fetchPlatformStats } from "@/lib/platforms";
+import { fetchSpotifyArtist, parseSpotifyUrl, fetchPlatformStats } from "@/lib/platforms";
 
-type BulkArtistInput = {
-  name: string;
-  imageUrl?: string | null;
-  links: {
-    platform: string;
-    url: string;
-    handle?: string | null;
-    followerCount?: number;
-    platformId?: string | null;
-    imageUrl?: string | null;
-  }[];
-};
-
-// POST — bulk create artists (admin/mod only)
+// POST — bulk create artists from Spotify URLs (admin/mod only)
+// Streams NDJSON progress events so the client can track each artist
 export async function POST(req: Request) {
   const session = await auth();
   if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
   const isPrivileged =
     session.user.role === "ADMIN" || session.user.role === "MODERATOR";
   if (!isPrivileged) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return new Response(JSON.stringify({ error: "Forbidden" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  const { artists } = (await req.json()) as { artists: BulkArtistInput[] };
-  if (!Array.isArray(artists) || artists.length === 0) {
-    return NextResponse.json(
-      { error: "No artists provided" },
-      { status: 400 }
-    );
+  const { urls } = await req.json() as {
+    urls: string[];
+  };
+
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return new Response(JSON.stringify({ error: "No URLs provided" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  if (artists.length > 50) {
-    return NextResponse.json(
-      { error: "Maximum 50 artists at a time" },
-      { status: 400 }
-    );
+  if (urls.length > 100) {
+    return new Response(JSON.stringify({ error: "Maximum 100 URLs at a time" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  const created = [];
-  const errors = [];
+  const userId = session.user.id;
+  const total = urls.length;
 
-  for (const input of artists) {
-    if (!input.name?.trim()) {
-      errors.push({ name: input.name, error: "Name required" });
-      continue;
-    }
-    if (!input.links?.length) {
-      errors.push({ name: input.name, error: "At least one link required" });
-      continue;
-    }
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      function send(data: Record<string, unknown>) {
+        controller.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+      }
 
-    try {
-      const linkEntries: {
-        platform: Platform;
-        url: string;
-        handle: string | null;
-        followerCount: number;
-        platformId: string | null;
-      }[] = [];
+      let created = 0;
+      let skipped = 0;
+      let failed = 0;
 
-      let artistImageUrl = input.imageUrl || null;
+      for (let i = 0; i < urls.length; i++) {
+        const rawUrl = urls[i].trim();
+        const spotifyId = parseSpotifyUrl(rawUrl);
 
-      await Promise.all(
-        input.links.map(async (link) => {
-          const stats = await fetchPlatformStats(link.platform, link.url);
-          const shouldUseProvidedSpotifyStats =
-            link.platform === "SPOTIFY" &&
-            typeof link.followerCount === "number" &&
-            Boolean(link.platformId) &&
-            (!stats || stats.followerCount === 0);
+        if (!spotifyId) {
+          failed++;
+          send({ type: "error", index: i, url: rawUrl, error: "Invalid Spotify URL" });
+          send({ type: "progress", done: created + skipped + failed, total, created, skipped, failed });
+          continue;
+        }
 
-          linkEntries.push({
-            platform: link.platform as Platform,
-            url: link.url.trim(),
-            handle: stats?.handle ?? link.handle ?? null,
-            followerCount: shouldUseProvidedSpotifyStats
-              ? link.followerCount ?? 0
-              : (stats?.followerCount ?? link.followerCount ?? 0),
-            platformId: stats?.platformId ?? link.platformId ?? null,
+        // Check duplicate
+        const existing = await prisma.artist.findUnique({
+          where: { spotifyId },
+        });
+        if (existing) {
+          skipped++;
+          send({ type: "skip", index: i, url: rawUrl, name: existing.name, reason: "Already exists" });
+          send({ type: "progress", done: created + skipped + failed, total, created, skipped, failed });
+          continue;
+        }
+
+        try {
+          // Fetch Spotify data
+          const spotifyData = await fetchSpotifyArtist(rawUrl);
+          const artistName = spotifyData?.name ?? "Unknown Artist";
+          const artistImage = spotifyData?.imageUrl ?? null;
+
+          await prisma.artist.create({
+            data: {
+              spotifyId,
+              name: artistName,
+              imageUrl: artistImage,
+              addedById: userId,
+              links: {
+                create: [{
+                  platform: "SPOTIFY",
+                  url: rawUrl,
+                  handle: null,
+                  followerCount: spotifyData?.followerCount ?? 0,
+                  monthlyListeners: spotifyData?.monthlyListeners ?? 0,
+                  platformId: spotifyId,
+                }],
+              },
+            },
           });
 
-          if (!artistImageUrl && stats?.imageUrl && link.platform === "YOUTUBE") {
-            artistImageUrl = stats.imageUrl;
-          }
-          if (!artistImageUrl && link.platform === "SPOTIFY") {
-            artistImageUrl = stats?.imageUrl ?? link.imageUrl ?? artistImageUrl;
-          }
-        })
-      );
+          created++;
+          send({ type: "created", index: i, url: rawUrl, name: artistName });
+        } catch (e) {
+          failed++;
+          send({
+            type: "error",
+            index: i,
+            url: rawUrl,
+            error: e instanceof Error ? e.message : "Unknown error",
+          });
+        }
 
-      const artist = await prisma.artist.create({
-        data: {
-          name: input.name.trim(),
-          imageUrl: artistImageUrl,
-          addedById: session.user.id,
-          links: {
-            create: linkEntries,
-          },
-        },
-        include: { links: true },
-      });
-      created.push(artist);
-    } catch (e) {
-      errors.push({
-        name: input.name,
-        error: e instanceof Error ? e.message : "Unknown error",
-      });
-    }
-  }
+        send({ type: "progress", done: created + skipped + failed, total, created, skipped, failed });
+      }
 
-  return NextResponse.json({ created: created.length, errors }, { status: 201 });
+      send({ type: "done", total, created, skipped, failed });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson",
+      "Cache-Control": "no-cache",
+      "Transfer-Encoding": "chunked",
+    },
+  });
 }

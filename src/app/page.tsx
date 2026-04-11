@@ -273,10 +273,11 @@ export default function LeaderboardPage() {
   const [reqReason, setReqReason] = useState("");
   const [requestSent, setRequestSent] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [addName, setAddName] = useState("");
   const [addLinks, setAddLinks] = useState<AddLinkInput[]>([
-    { platform: "YOUTUBE", url: "", handle: "" },
+    { platform: "SPOTIFY", url: "", handle: "" },
   ]);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSubmitting, setAddSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const isPrivileged =
@@ -407,30 +408,42 @@ export default function LeaderboardPage() {
 
   async function addArtist(e: React.FormEvent) {
     e.preventDefault();
+    setAddError(null);
+
+    // Require Spotify link
+    const hasSpotify = addLinks.some(
+      (l) => l.platform === "SPOTIFY" && l.url.trim()
+    );
+    if (!hasSpotify) {
+      setAddError("A Spotify link is required.");
+      return;
+    }
+
+    setAddSubmitting(true);
     const validLinks = addLinks.filter((l) => l.url.trim());
-    const res = await fetch("/api/artists", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: addName,
-        links: validLinks.map((l) => ({
-          platform: l.platform,
-          url: l.url,
-          handle: l.handle || extractHandleFromUrl(l.platform, l.url) || undefined,
-          followerCount:
-            l.platform === "SPOTIFY" ? l.spotifyPreviewFollowerCount ?? 0 : undefined,
-          platformId:
-            l.platform === "SPOTIFY" ? l.spotifyPreviewPlatformId ?? null : undefined,
-          imageUrl:
-            l.platform === "SPOTIFY" ? l.spotifyPreviewImageUrl ?? null : undefined,
-        })),
-      }),
-    });
-    if (res.ok) {
-      setShowAdd(false);
-      setAddName("");
-      setAddLinks([{ platform: "YOUTUBE", url: "", handle: "" }]);
-      loadArtists(search, platform);
+    try {
+      const res = await fetch("/api/artists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          links: validLinks.map((l) => ({
+            platform: l.platform,
+            url: l.url,
+            handle: l.handle || extractHandleFromUrl(l.platform, l.url) || undefined,
+          })),
+        }),
+      });
+      if (res.ok) {
+        setShowAdd(false);
+        setAddLinks([{ platform: "SPOTIFY", url: "", handle: "" }]);
+        setAddError(null);
+        loadArtists(search, platform);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setAddError(data.error || "Failed to add artist.");
+      }
+    } finally {
+      setAddSubmitting(false);
     }
   }
 
@@ -855,127 +868,107 @@ export default function LeaderboardPage() {
             </button>
             <h2 className="text-xl font-black mb-4">Add Artist</h2>
             <form onSubmit={addArtist} className="flex flex-col gap-3">
+              {addError && (
+                <div className="text-red-400 text-sm bg-red-950/40 border border-red-800/40 rounded-lg px-3 py-2">
+                  {addError}
+                </div>
+              )}
+
+              <div className="text-xs font-bold uppercase text-[var(--muted-foreground)]">
+                Spotify Link (required)
+              </div>
               <input
                 required
-                placeholder="Artist name"
-                value={addName}
-                onChange={(e) => setAddName(e.target.value)}
+                placeholder="https://open.spotify.com/artist/..."
+                value={addLinks[0]?.url ?? ""}
+                onChange={(e) =>
+                  setAddLinks((prev) =>
+                    prev.map((l, j) =>
+                      j === 0
+                        ? {
+                            ...l,
+                            url: e.target.value,
+                            spotifyPreviewUrl: undefined,
+                            spotifyPreviewName: null,
+                            spotifyPreviewImageUrl: null,
+                            spotifyPreviewPlatformId: null,
+                            spotifyPreviewFollowerCount: 0,
+                            spotifyPreviewLoading: false,
+                            spotifyPreviewError: null,
+                          }
+                        : l
+                    )
+                  )
+                }
                 className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
               />
-
-              <div className="text-xs font-bold uppercase text-[var(--muted-foreground)] mt-2">
-                Platform Links
-              </div>
-              {addLinks.map((link, i) => (
-                <div key={i} className="flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <select
-                      value={link.platform}
-                      onChange={(e) =>
-                        setAddLinks((prev) =>
-                          prev.map((l, j) =>
-                            j === i
-                              ? {
-                                  ...l,
-                                  platform: e.target.value,
-                                  spotifyPreviewUrl: undefined,
-                                  spotifyPreviewName: null,
-                                  spotifyPreviewImageUrl: null,
-                                  spotifyPreviewPlatformId: null,
-                                  spotifyPreviewFollowerCount: 0,
-                                  spotifyPreviewLoading: false,
-                                  spotifyPreviewError: null,
-                                }
-                              : l
-                          )
-                        )
-                      }
-                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
-                    >
-                      {ALL_PLATFORMS.map((p) => (
-                        <option key={p.key} value={p.key}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      required
-                      placeholder="URL"
-                      value={link.url}
-                      onChange={(e) =>
-                        setAddLinks((prev) =>
-                          prev.map((l, j) =>
-                            j === i
-                              ? {
-                                  ...l,
-                                  url: e.target.value,
-                                  spotifyPreviewUrl: undefined,
-                                  spotifyPreviewName: null,
-                                  spotifyPreviewImageUrl: null,
-                                  spotifyPreviewPlatformId: null,
-                                  spotifyPreviewFollowerCount: 0,
-                                  spotifyPreviewLoading: false,
-                                  spotifyPreviewError: null,
-                                }
-                              : l
-                          )
-                        )
-                      }
-                      className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
-                    />
-                    {addLinks.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAddLinks((prev) => prev.filter((_, j) => j !== i))
-                        }
-                        className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                  {link.platform === "SPOTIFY" && link.url.trim() && (
-                    <div className="rounded-xl border border-[var(--muted)] bg-[var(--muted)]/50 px-3 py-2.5 text-sm">
-                      {link.spotifyPreviewLoading ? (
-                        <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Looking up Spotify artist...
-                        </div>
-                      ) : link.spotifyPreviewName ? (
-                        <div className="flex items-center gap-3">
-                          {link.spotifyPreviewImageUrl ? (
-                            <img
-                              src={link.spotifyPreviewImageUrl}
-                              alt={link.spotifyPreviewName}
-                              className="w-10 h-10 rounded-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-green-950/60" />
-                          )}
-                          <div>
-                            <div className="font-bold text-white">{link.spotifyPreviewName}</div>
-                            <div className="text-[var(--muted-foreground)] tabular-nums">
-                              {formatCount(link.spotifyPreviewFollowerCount ?? 0)} followers
-                            </div>
-                          </div>
-                        </div>
-                      ) : link.spotifyPreviewError ? (
-                        <div className="text-red-400">{link.spotifyPreviewError}</div>
-                      ) : link.spotifyPreviewUrl && isValidSpotifyArtistUrl(link.url) ? (
-                        <div className="text-green-400 flex items-center gap-2">
-                          <Check className="w-4 h-4" />
-                          URL accepted — stats will be fetched automatically
-                        </div>
-                      ) : isValidSpotifyArtistUrl(link.url) ? (
-                        <div className="text-[var(--muted-foreground)]">Fetching Spotify preview...</div>
-                      ) : (
-                        <div className="text-[var(--muted-foreground)]">Paste a Spotify artist URL to preview name and followers.</div>
-                      )}
+              {addLinks[0]?.url.trim() && (
+                <div className="rounded-xl border border-[var(--muted)] bg-[var(--muted)]/50 px-3 py-2.5 text-sm">
+                  {addLinks[0].spotifyPreviewLoading ? (
+                    <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Looking up Spotify artist...
                     </div>
+                  ) : isValidSpotifyArtistUrl(addLinks[0].url) ? (
+                    <div className="text-green-400 flex items-center gap-2">
+                      <Check className="w-4 h-4" />
+                      URL accepted — name and image will be fetched from Spotify
+                    </div>
+                  ) : (
+                    <div className="text-[var(--muted-foreground)]">Paste a valid Spotify artist URL</div>
                   )}
                 </div>
-              ))}
+              )}
+
+              <div className="text-xs font-bold uppercase text-[var(--muted-foreground)] mt-2">
+                Additional Links (optional)
+              </div>
+              {addLinks.slice(1).map((link, idx) => {
+                const i = idx + 1;
+                return (
+                <div key={i} className="flex gap-2">
+                  <select
+                    value={link.platform}
+                    onChange={(e) =>
+                      setAddLinks((prev) =>
+                        prev.map((l, j) =>
+                          j === i ? { ...l, platform: e.target.value } : l
+                        )
+                      )
+                    }
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none w-32"
+                  >
+                    {ALL_PLATFORMS.filter((p) => p.key !== "SPOTIFY").map((p) => (
+                      <option key={p.key} value={p.key}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    required
+                    placeholder="URL"
+                    value={link.url}
+                    onChange={(e) =>
+                      setAddLinks((prev) =>
+                        prev.map((l, j) =>
+                          j === i ? { ...l, url: e.target.value } : l
+                        )
+                      )
+                    }
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none flex-1 focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAddLinks((prev) => prev.filter((_, j) => j !== i))
+                    }
+                    className="text-[var(--muted-foreground)] hover:text-red-400 p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                );
+              })}
               <button
                 type="button"
                 onClick={() =>
@@ -991,8 +984,12 @@ export default function LeaderboardPage() {
 
               <button
                 type="submit"
-                className="mt-2 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all"
+                disabled={addSubmitting}
+                className="mt-2 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
+                {addSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                Add to Leaderboard
+              </button>
                 Add to Leaderboard
               </button>
             </form>

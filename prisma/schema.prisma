@@ -72,6 +72,7 @@ enum Platform {
 
 model Artist {
   id             String           @id @default(cuid())
+  spotifyId      String?          @unique
   name           String
   imageUrl       String?
   bio            String?
@@ -176,4 +177,10 @@ model ModRequest {
   updatedAt  DateTime      @updatedAt
 
   @@unique([userId, inviteId])
+}
+
+model SiteSetting {
+  id    String @id @default("singleton")
+  key   String @unique
+  value String
 }

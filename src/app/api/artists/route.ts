@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
-import { fetchPlatformStats } from "@/lib/platforms";
+import { fetchPlatformStats, parseSpotifyUrl, fetchSpotifyArtist } from "@/lib/platforms";
 
 async function enrichLink<T extends {
   id: string;
@@ -130,14 +130,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { name, imageUrl, bio, links } = await req.json();
-  if (!name?.trim()) {
-    return NextResponse.json({ error: "Name is required." }, { status: 400 });
-  }
+  const { links } = await req.json();
 
   if (!Array.isArray(links) || links.length === 0) {
     return NextResponse.json(
       { error: "At least one platform link is required." },
+      { status: 400 }
+    );
+  }
+
+  // Spotify link is REQUIRED
+  const spotifyLink = links.find(
+    (l: { platform: string }) => l.platform === "SPOTIFY"
+  );
+  if (!spotifyLink) {
+    return NextResponse.json(
+      { error: "A Spotify link is required." },
       { status: 400 }
     );
   }
@@ -152,16 +160,39 @@ export async function POST(req: Request) {
     );
   }
 
-  // Fetch stats from YouTube + Spotify APIs in parallel
+  // Extract Spotify artist ID and check for duplicates
+  const spotifyId = parseSpotifyUrl(spotifyLink.url);
+  if (!spotifyId) {
+    return NextResponse.json(
+      { error: "Invalid Spotify artist URL." },
+      { status: 400 }
+    );
+  }
+
+  const existing = await prisma.artist.findUnique({
+    where: { spotifyId },
+  });
+  if (existing) {
+    return NextResponse.json(
+      { error: `Artist already exists: ${existing.name}` },
+      { status: 409 }
+    );
+  }
+
+  // Get artist name and image from Spotify
+  const spotifyData = await fetchSpotifyArtist(spotifyLink.url);
+  const artistName = spotifyData?.name ?? "Unknown Artist";
+  const artistImageUrl = spotifyData?.imageUrl ?? null;
+
+  // Fetch stats for all links in parallel
   const linkEntries: {
     platform: Platform;
     url: string;
     handle: string | null;
     followerCount: number;
+    monthlyListeners: number;
     platformId: string | null;
   }[] = [];
-
-  let artistImageUrl = imageUrl?.trim() || null;
 
   await Promise.all(
     links.map(
@@ -169,45 +200,25 @@ export async function POST(req: Request) {
         platform: string;
         url: string;
         handle?: string;
-        followerCount?: number;
-        platformId?: string | null;
-        imageUrl?: string | null;
       }) => {
         const stats = await fetchPlatformStats(l.platform, l.url);
-        const shouldUseProvidedSpotifyStats =
-          l.platform === "SPOTIFY" &&
-          typeof l.followerCount === "number" &&
-          Boolean(l.platformId) &&
-          (!stats || stats.followerCount === 0);
-
-        const entry = {
+        linkEntries.push({
           platform: l.platform as Platform,
           url: l.url.trim(),
           handle: stats?.handle ?? l.handle?.trim() ?? null,
-          followerCount: shouldUseProvidedSpotifyStats
-            ? l.followerCount ?? 0
-            : (stats?.followerCount ?? 0),
-          platformId: stats?.platformId ?? l.platformId ?? null,
-        };
-        linkEntries.push(entry);
-
-        // Use YouTube profile pic as artist image if none provided
-        if (!artistImageUrl && stats?.imageUrl && l.platform === "YOUTUBE") {
-          artistImageUrl = stats.imageUrl;
-        }
-        // Fallback to Spotify image
-        if (!artistImageUrl && l.platform === "SPOTIFY") {
-          artistImageUrl = stats?.imageUrl ?? l.imageUrl ?? artistImageUrl;
-        }
+          followerCount: stats?.followerCount ?? 0,
+          monthlyListeners: stats?.monthlyListeners ?? 0,
+          platformId: stats?.platformId ?? null,
+        });
       }
     )
   );
 
   const artist = await prisma.artist.create({
     data: {
-      name: name.trim(),
+      spotifyId,
+      name: artistName,
       imageUrl: artistImageUrl,
-      bio: bio?.trim() || null,
       addedById: session.user.id,
       links: {
         create: linkEntries,

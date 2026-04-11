@@ -16,6 +16,10 @@ import {
   Key,
   Crown,
   UserMinus,
+  Settings,
+  RefreshCw,
+  Loader2,
+  ArrowRightLeft,
 } from "lucide-react";
 
 type ModInvite = {
@@ -59,19 +63,32 @@ export default function AdminPage() {
   const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"invites" | "staff">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings">("staff");
+
+  // Settings state
+  const [updateIntervalHours, setUpdateIntervalHours] = useState(24);
+  const [lastFullUpdate, setLastFullUpdate] = useState<string | null>(null);
+  const [updatingAll, setUpdatingAll] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [settingsResult, setSettingsResult] = useState<string | null>(null);
 
   const isAdmin = session?.user?.role === "ADMIN";
 
   const load = useCallback(async () => {
-    const [invRes, reqRes, staffRes] = await Promise.all([
+    const [invRes, reqRes, staffRes, settingsRes] = await Promise.all([
       fetch("/api/mod-invites"),
       fetch("/api/mod-requests"),
       fetch("/api/staff"),
+      fetch("/api/admin/settings"),
     ]);
     if (invRes.ok) setInvites(await invRes.json());
     if (reqRes.ok) setModRequests(await reqRes.json());
     if (staffRes.ok) setStaff(await staffRes.json());
+    if (settingsRes.ok) {
+      const s = await settingsRes.json();
+      setUpdateIntervalHours(s.updateIntervalHours ?? 24);
+      setLastFullUpdate(s.lastFullUpdate ?? null);
+    }
     setLoading(false);
   }, []);
 
@@ -132,6 +149,60 @@ export default function AdminPage() {
     if (res.ok) load();
   }
 
+  async function saveInterval(hours: number) {
+    setUpdateIntervalHours(hours);
+    await fetch("/api/admin/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "updateIntervalHours", value: String(hours) }),
+    });
+  }
+
+  async function updateAllArtists() {
+    setUpdatingAll(true);
+    setSettingsResult(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "updateAll" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettingsResult(
+          `Updated ${data.updated}/${data.total} artists. ${data.failed} failed.`
+        );
+        setLastFullUpdate(new Date().toISOString());
+      }
+    } finally {
+      setUpdatingAll(false);
+    }
+  }
+
+  async function migrateToSpotify() {
+    const confirmed = window.confirm(
+      "This will update ALL artist names and profile pictures to match their Spotify profile. Continue?"
+    );
+    if (!confirmed) return;
+    setMigrating(true);
+    setSettingsResult(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "migrateToSpotify" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettingsResult(
+          `Migrated ${data.migrated}/${data.total} artists to Spotify names/images. ${data.failed} failed.`
+        );
+      }
+    } finally {
+      setMigrating(false);
+    }
+  }
+
   function copyInviteLink(code: string, id: string) {
     const url = `${window.location.origin}/join?code=${code}`;
     navigator.clipboard.writeText(url);
@@ -178,6 +249,7 @@ export default function AdminPage() {
           {[
             { key: "staff" as const, label: "Staff Management", icon: Crown },
             { key: "invites" as const, label: "Mod Invites", icon: Key },
+            { key: "settings" as const, label: "Settings", icon: Settings },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -519,6 +591,93 @@ export default function AdminPage() {
           </div>
         )}
 
+          </>
+        )}
+
+        {/* ── Settings Tab ── */}
+        {activeTab === "settings" && (
+          <>
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Settings className="w-5 h-5 text-zinc-400" />
+                Update Settings
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 flex flex-col gap-4">
+                {/* Update interval */}
+                <div>
+                  <label className="text-xs font-bold uppercase text-[var(--muted-foreground)] mb-1 block">
+                    Stats Update Interval
+                  </label>
+                  <select
+                    value={updateIntervalHours}
+                    onChange={(e) => saveInterval(Number(e.target.value))}
+                    className="bg-[var(--muted)] rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] w-48"
+                  >
+                    <option value={1}>Every hour</option>
+                    <option value={6}>Every 6 hours</option>
+                    <option value={12}>Every 12 hours</option>
+                    <option value={24}>Every 24 hours</option>
+                    <option value={48}>Every 48 hours</option>
+                    <option value={168}>Every week</option>
+                  </select>
+                  {lastFullUpdate && (
+                    <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                      Last full update: {new Date(lastFullUpdate).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+
+                {/* Update All */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={updateAllArtists}
+                    disabled={updatingAll}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                  >
+                    {updatingAll ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4" />
+                    )}
+                    {updatingAll ? "Updating..." : "Update All Stats Now"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Migrate to Spotify */}
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <ArrowRightLeft className="w-5 h-5 text-green-400" />
+                Spotify Migration
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5">
+                <p className="text-sm text-[var(--muted-foreground)] mb-3">
+                  Switch all artist names and profile pictures from YouTube to
+                  Spotify data. This will update every artist that has a Spotify
+                  link.
+                </p>
+                <button
+                  onClick={migrateToSpotify}
+                  disabled={migrating}
+                  className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                >
+                  {migrating ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowRightLeft className="w-4 h-4" />
+                  )}
+                  {migrating ? "Migrating..." : "Switch to Spotify Names & Images"}
+                </button>
+              </div>
+            </div>
+
+            {/* Settings result */}
+            {settingsResult && (
+              <div className="bg-green-950/40 border border-green-800/40 rounded-2xl p-4 text-green-300 text-sm font-bold">
+                {settingsResult}
+              </div>
+            )}
           </>
         )}
       </div>
