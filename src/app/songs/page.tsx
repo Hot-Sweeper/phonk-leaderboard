@@ -87,8 +87,12 @@ function formatPopularity(p: number) {
 }
 
 function getVersionLabel(versions: string[]) {
-  if (versions.includes("Original")) return "Original";
-  return versions[0] ?? "Original";
+  const variantVersions = versions.filter((version) => version.toLowerCase() !== "original");
+
+  if (variantVersions.length === 0) return "Original";
+  if (variantVersions.length === 1) return variantVersions[0];
+  if (variantVersions.length === 2) return variantVersions.join(" / ");
+  return `${variantVersions[0]} +${variantVersions.length - 1}`;
 }
 
 function isValidPreviewUrl(previewUrl: string | null | undefined) {
