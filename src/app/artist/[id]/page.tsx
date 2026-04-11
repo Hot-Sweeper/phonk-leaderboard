@@ -849,7 +849,7 @@ export default function ArtistPage() {
                 <div className="flex items-center gap-3">
                   {Icon && (
                     <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-white/5 opacity-40 group-hover:opacity-100 transition-opacity">
-                      <Icon className="w-5 h-5" style={{ color: meta.color }} />
+                      <Icon className={`w-5 h-5 ${meta.textColor}`} />
                     </div>
                   )}
                   <div>
