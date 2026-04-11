@@ -23,7 +23,7 @@ type Contributor = {
 type Track = {
   id: string;
   spotifyId: string | null;
-  deezerId: number | null;
+  deezerId: string | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;

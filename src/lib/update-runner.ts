@@ -239,6 +239,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
           const deezerTracks = await fetchDeezerTopTracks(deezerId);
           if (deezerTracks && deezerTracks.length > 0) {
             for (const t of deezerTracks) {
+              const deezerTrackId = String(t.deezerId);
+
               // Map contributors to forum artist IDs
               const featured = t.artists.filter(a => a.deezerId !== deezerId).map(a => a.name);
               const contributorIds = t.artists
@@ -247,7 +249,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
                 .filter((id): id is string => !!id);
 
               await prisma.track.upsert({
-                where: { deezerId: t.deezerId },
+                where: { deezerId: deezerTrackId },
                 update: {
                   name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
                   previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
@@ -257,7 +259,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
                   featuredArtists: featured, contributorIds,
                 },
                 create: {
-                  deezerId: t.deezerId, artistId: artist.id,
+                  deezerId: deezerTrackId, artistId: artist.id,
                   name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
                   previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
                   trackNumber: t.trackNumber, explicit: t.explicit,

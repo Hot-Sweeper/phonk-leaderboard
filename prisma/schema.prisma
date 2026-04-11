@@ -221,7 +221,7 @@ model RankSnapshot {
 model Track {
   id              String   @id @default(cuid())
   spotifyId       String?  @unique
-  deezerId        Int?     @unique
+  deezerId        String?  @unique
   artistId        String
   name            String
   albumName       String?
