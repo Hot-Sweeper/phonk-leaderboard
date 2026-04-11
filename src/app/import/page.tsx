@@ -283,37 +283,45 @@ export default function ImportPage() {
       return;
     }
 
-    if (!hasSpotifyConnection()) {
+    // If Spotify browser connection is available, fetch a preview
+    if (hasSpotifyConnection()) {
       updateEntry(entryId, {
-        spotifyError: "Connect Spotify first to fetch official follower counts.",
-      });
-      setSpotifyConnected(false);
-      return;
-    }
-
-    updateEntry(entryId, {
-      spotifySearching: true,
-      spotifyError: undefined,
-    });
-
-    try {
-      const artist = await fetchSpotifyArtistInBrowser(trimmedQuery);
-
-      updateEntry(entryId, {
-        selectedSpotify: artist,
-        spotifyConfirmed: true,
-        showSpotifySearch: false,
-        spotifySearching: false,
+        spotifySearching: true,
         spotifyError: undefined,
       });
-      setSpotifyConnected(true);
-    } catch (err) {
-      updateEntry(entryId, {
-        spotifySearching: false,
-        spotifyError:
-          err instanceof Error ? err.message : "Could not fetch Spotify preview.",
-      });
+
+      try {
+        const artist = await fetchSpotifyArtistInBrowser(trimmedQuery);
+
+        updateEntry(entryId, {
+          selectedSpotify: artist,
+          spotifyConfirmed: true,
+          showSpotifySearch: false,
+          spotifySearching: false,
+          spotifyError: undefined,
+        });
+        setSpotifyConnected(true);
+        return;
+      } catch {
+        // Fall through to accept URL without preview
+      }
     }
+
+    // Accept the URL directly — server will scrape stats on import
+    const artistIdMatch = trimmedQuery.match(/\/artist\/([a-zA-Z0-9]+)/);
+    updateEntry(entryId, {
+      selectedSpotify: {
+        name: null,
+        imageUrl: null,
+        followerCount: 0,
+        platformId: artistIdMatch?.[1] ?? null,
+        url: trimmedQuery,
+      },
+      spotifyConfirmed: true,
+      showSpotifySearch: false,
+      spotifySearching: false,
+      spotifyError: undefined,
+    });
   }
 
   function rejectSpotify(entryId: string) {

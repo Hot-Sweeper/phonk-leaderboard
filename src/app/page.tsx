@@ -14,6 +14,7 @@ import {
   Send,
   ExternalLink,
   Loader2,
+  Check,
 } from "lucide-react";
 import {
   connectSpotify,
@@ -456,23 +457,24 @@ export default function LeaderboardPage() {
 
     try {
       if (!hasSpotifyConnection()) {
+        // No browser connection — extract artist ID and accept the URL
+        const artistIdMatch = url.match(/\/artist\/([a-zA-Z0-9]+)/);
         setAddLinks((prev) =>
           prev.map((link, currentIndex) =>
             currentIndex === index && link.url.trim() === url
               ? {
                   ...link,
-                  spotifyPreviewUrl: undefined,
+                  spotifyPreviewUrl: url,
                   spotifyPreviewLoading: false,
                   spotifyPreviewName: null,
                   spotifyPreviewImageUrl: null,
-                  spotifyPreviewPlatformId: null,
+                  spotifyPreviewPlatformId: artistIdMatch?.[1] ?? null,
                   spotifyPreviewFollowerCount: 0,
-                  spotifyPreviewError: "Connect Spotify first to fetch official follower counts.",
+                  spotifyPreviewError: null,
                 }
               : link
           )
         );
-        setSpotifyConnected(false);
         return;
       }
 
@@ -972,16 +974,10 @@ export default function LeaderboardPage() {
                         </div>
                       ) : link.spotifyPreviewError ? (
                         <div className="text-red-400">{link.spotifyPreviewError}</div>
-                      ) : !spotifyConnected && isValidSpotifyArtistUrl(link.url) ? (
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-[var(--muted-foreground)]">Connect Spotify to fetch official followers.</div>
-                          <button
-                            type="button"
-                            onClick={() => void connectSpotify()}
-                            className="px-3 py-1.5 rounded-lg bg-green-700 hover:bg-green-600 text-white text-xs font-bold transition-colors"
-                          >
-                            Connect Spotify
-                          </button>
+                      ) : link.spotifyPreviewUrl && isValidSpotifyArtistUrl(link.url) ? (
+                        <div className="text-green-400 flex items-center gap-2">
+                          <Check className="w-4 h-4" />
+                          URL accepted — stats will be fetched automatically
                         </div>
                       ) : isValidSpotifyArtistUrl(link.url) ? (
                         <div className="text-[var(--muted-foreground)]">Fetching Spotify preview...</div>
