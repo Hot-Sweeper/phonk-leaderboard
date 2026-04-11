@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { dedupeFeedTracks, dedupeNames } from "@/lib/track-dedupe";
+import { collapseFeedTracks, dedupeNames } from "@/lib/track-dedupe";
 
 /**
  * GET /api/songs?skip=0&take=50&search=...
@@ -32,12 +32,12 @@ export async function GET(req: Request) {
     },
   });
 
-  const dedupedTracks = dedupeFeedTracks(allTracks);
-  const tracks = dedupedTracks.slice(skip, skip + take);
-  const totalCount = dedupedTracks.length;
+  const collapsedTracks = collapseFeedTracks(allTracks);
+  const tracks = collapsedTracks.slice(skip, skip + take);
+  const totalCount = collapsedTracks.length;
 
   // Resolve contributorIds to actual artist info
-  const allContributorIds = [...new Set(tracks.flatMap(t => t.contributorIds))];
+  const allContributorIds = [...new Set(tracks.flatMap(({ track }) => track.contributorIds))];
   const contributors = allContributorIds.length > 0
     ? await prisma.artist.findMany({
         where: { id: { in: allContributorIds } },
@@ -46,10 +46,11 @@ export async function GET(req: Request) {
     : [];
   const contributorMap = new Map(contributors.map(c => [c.id, c]));
 
-  const enrichedTracks = tracks.map(t => ({
-    ...t,
-    featuredArtists: dedupeNames(t.featuredArtists),
-    contributors: t.contributorIds
+  const enrichedTracks = tracks.map(({ track, versions }) => ({
+    ...track,
+    versions,
+    featuredArtists: dedupeNames(track.featuredArtists),
+    contributors: track.contributorIds
       .map(id => contributorMap.get(id))
       .filter((c): c is { id: string; name: string; imageUrl: string | null } => !!c),
   }));

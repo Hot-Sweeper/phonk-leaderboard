@@ -160,6 +160,7 @@ type Track = {
   releaseDate: string | null;
   spotifyUrl: string | null;
   deezerUrl?: string | null;
+  versions?: string[];
   featuredArtists: string[];
 };
 
@@ -964,16 +965,22 @@ export default function ArtistPage() {
                       )}
                     </div>
                     <div className="text-xs text-[var(--muted-foreground)] truncate">
-                      {track.albumName}
                       {track.featuredArtists.length > 0 && (
-                        <span className="text-white/40"> feat. {track.featuredArtists.join(", ")}</span>
+                        <span className="text-white/40">feat. {track.featuredArtists.join(", ")}</span>
                       )}
                     </div>
-                  </div>
-
-                  {/* Release date */}
-                  <div className="hidden md:block text-xs text-[var(--muted-foreground)] tabular-nums shrink-0 w-24 text-right">
-                    {track.releaseDate ?? ""}
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {track.releaseDate && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/5 text-[var(--muted-foreground)]">
+                          {track.releaseDate}
+                        </span>
+                      )}
+                      {(track.versions ?? []).slice(0, 3).map((version) => (
+                        <span key={version} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-white/75">
+                          {version}
+                        </span>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Duration */}

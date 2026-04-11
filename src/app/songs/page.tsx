@@ -11,8 +11,8 @@ import {
   ChevronUp,
   Play,
   Pause,
-  Activity,
   Trophy,
+  CalendarDays,
 } from "lucide-react";
 
 type Contributor = {
@@ -37,6 +37,7 @@ type Track = {
   previewUrl: string | null;
   bpm: number | null;
   gain: number | null;
+  versions: string[];
   featuredArtists: string[];
   contributorIds: string[];
   contributors: Contributor[];
@@ -89,27 +90,61 @@ function contributorTextClass() {
   return "text-[var(--muted-foreground)] hover:text-white underline decoration-[var(--accent)]/45 underline-offset-2 transition-colors";
 }
 
-function PodiumTrackCard({ track, rank }: { track: Track; rank: number }) {
+function PodiumTrackCard({
+  track,
+  rank,
+  isPlaying,
+  onTogglePreview,
+}: {
+  track: Track;
+  rank: number;
+  isPlaying: boolean;
+  onTogglePreview: (trackId: string, previewUrl: string) => void;
+}) {
   const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
 
   return (
-    <div className={`rounded-2xl border bg-[var(--secondary)]/50 p-4 ${rank === 1 ? "md:-translate-y-4" : ""} ${accent}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <Trophy className="w-4 h-4" />
-        <span className="text-xs font-black uppercase tracking-[0.2em]">#{rank}</span>
-      </div>
-      <div className="flex items-center gap-3 min-w-0">
-        {track.albumImageUrl ? (
-          <Image src={track.albumImageUrl} alt={track.albumName ?? ""} width={56} height={56} className="w-14 h-14 rounded-xl object-cover shadow-md shrink-0" />
-        ) : (
-          <div className="w-14 h-14 rounded-xl bg-[var(--muted)] flex items-center justify-center shrink-0">
-            <Music className="w-5 h-5 text-[var(--muted-foreground)]" />
+    <div className={`rounded-[28px] overflow-hidden border bg-[var(--secondary)]/70 relative ${rank === 1 ? "md:-translate-y-6" : ""} ${accent}`}>
+      <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent pointer-events-none" />
+      <div className="p-5 relative">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4" />
+            <span className="text-xs font-black uppercase tracking-[0.2em]">#{rank}</span>
           </div>
-        )}
-        <div className="min-w-0">
-          <div className="font-black text-sm text-white truncate">{track.name}</div>
-          <div className="text-xs text-[var(--muted-foreground)] truncate">{track.artist.name}</div>
-          <div className="text-xs mt-1 font-bold text-green-400">{formatPopularity(track.popularity)}</div>
+          {track.previewUrl ? (
+            <button
+              onClick={() => onTogglePreview(track.id, track.previewUrl!)}
+              className="w-10 h-10 rounded-full bg-black/35 hover:bg-green-600 text-white flex items-center justify-center transition-colors"
+              title={isPlaying ? "Pause preview" : "Play preview"}
+            >
+              {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
+            </button>
+          ) : null}
+        </div>
+        <div className="flex flex-col items-center text-center">
+          {track.albumImageUrl ? (
+            <Image src={track.albumImageUrl} alt={track.name} width={rank === 1 ? 180 : 140} height={rank === 1 ? 180 : 140} className="rounded-2xl object-cover shadow-2xl mb-4" />
+          ) : (
+            <div className="rounded-2xl bg-[var(--muted)] flex items-center justify-center mb-4" style={{ width: rank === 1 ? 180 : 140, height: rank === 1 ? 180 : 140 }}>
+              <Music className="w-8 h-8 text-[var(--muted-foreground)]" />
+            </div>
+          )}
+          <div className="font-black text-lg text-white leading-tight line-clamp-2">{track.name}</div>
+          <div className="text-sm text-[var(--muted-foreground)] mt-1 truncate max-w-full">{track.artist.name}</div>
+          <div className="flex flex-wrap justify-center gap-2 mt-3">
+            {track.releaseDate && (
+              <span className="px-2.5 py-1 rounded-full bg-black/25 text-[11px] font-bold text-[var(--muted-foreground)]">
+                {track.releaseDate}
+              </span>
+            )}
+            {track.versions.slice(0, 3).map((version) => (
+              <span key={version} className="px-2.5 py-1 rounded-full bg-[var(--accent)]/12 text-[11px] font-bold text-white/85 border border-[var(--accent)]/20">
+                {version}
+              </span>
+            ))}
+          </div>
+          <div className="mt-4 text-xl font-black text-green-400">{formatPopularity(track.popularity)}</div>
         </div>
       </div>
     </div>
@@ -236,19 +271,18 @@ export default function SongsPage() {
 
         {!loading && tracks.length >= 3 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
-            <PodiumTrackCard track={tracks[1]} rank={2} />
-            <PodiumTrackCard track={tracks[0]} rank={1} />
-            <PodiumTrackCard track={tracks[2]} rank={3} />
+            <PodiumTrackCard track={tracks[1]} rank={2} isPlaying={playingTrackId === tracks[1].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={tracks[0]} rank={1} isPlaying={playingTrackId === tracks[0].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={tracks[2]} rank={3} isPlaying={playingTrackId === tracks[2].id} onTogglePreview={togglePreview} />
           </div>
         )}
 
         {/* Table header */}
-        <div className="hidden md:grid grid-cols-[2rem_3rem_1fr_1fr_3.5rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+        <div className="hidden md:grid grid-cols-[2rem_3rem_1fr_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
           <span />
           <span>#</span>
           <span>Title</span>
-          <span>Album</span>
-          <span className="text-right">BPM</span>
+          <span className="text-right">Released</span>
           <span className="text-right">
             <Clock className="w-3 h-3 inline" />
           </span>
@@ -285,7 +319,7 @@ export default function SongsPage() {
               return (
                 <div
                   key={track.id}
-                  className={`group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_1fr_1fr_3.5rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors ${isTop3 ? "bg-[var(--secondary)]/30" : ""}`}
+                  className={`group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_1fr_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors ${isTop3 ? "bg-[var(--secondary)]/30" : ""}`}
                 >
                   {/* Preview button */}
                   <div className="flex justify-center">
@@ -311,7 +345,7 @@ export default function SongsPage() {
                     {rank}
                   </span>
 
-                  {/* Title + Artist + Album art */}
+                  {/* Title + Artist + Cover art */}
                   <div className="flex items-center gap-3 min-w-0">
                     {track.albumImageUrl ? (
                       <Image
@@ -380,34 +414,23 @@ export default function SongsPage() {
                           </span>
                         )}
                       </div>
-                      {/* Mobile: album + BPM inline */}
-                      <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-0.5">
-                        {track.albumName}
-                        {track.bpm && <span className="ml-2">{Math.round(track.bpm)} BPM</span>}
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {track.versions.slice(0, 3).map((version) => (
+                          <span key={version} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-white/75 font-bold">
+                            {version}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Mobile: release date inline */}
+                      <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
+                        {track.releaseDate ?? "Unknown date"}
                       </div>
                     </div>
                   </div>
 
-                  {/* Album - desktop only */}
-                  <div className="hidden md:block text-xs text-[var(--muted-foreground)] truncate">
-                    {track.albumName}
-                    {track.releaseDate && (
-                      <span className="opacity-50 ml-1">
-                        ({track.releaseDate.slice(0, 4)})
-                      </span>
-                    )}
-                  </div>
-
-                  {/* BPM - desktop only */}
-                  <span className="hidden md:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">
-                    {track.bpm ? (
-                      <span className="flex items-center justify-end gap-1">
-                        <Activity className="w-3 h-3 opacity-50" />
-                        {Math.round(track.bpm)}
-                      </span>
-                    ) : (
-                      <span className="opacity-30">--</span>
-                    )}
+                  <span className="hidden md:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
+                    <CalendarDays className="w-3 h-3 opacity-50" />
+                    {track.releaseDate ?? "--"}
                   </span>
 
                   {/* Duration */}

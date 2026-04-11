@@ -2,6 +2,7 @@ type TrackLike = {
   id?: string;
   artistId?: string;
   name: string;
+  albumName?: string | null;
   popularity: number;
   previewUrl?: string | null;
   durationMs?: number;
@@ -33,6 +34,14 @@ function normalizeText(value: string) {
     .trim();
 }
 
+function toDisplayLabel(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function getCanonicalTrackTitle(title: string) {
   let normalized = normalizeText(title);
 
@@ -49,6 +58,33 @@ export function getCanonicalTrackTitle(title: string) {
   normalized = normalized.replace(/\s+-\s+(slowed|sped up|speed up|nightcore|remix|edit|extended|instrumental|reverb).*$/g, "");
   normalized = normalized.replace(/[^a-z0-9]+/g, " ");
   return normalized.trim();
+}
+
+export function extractTrackVersions(title: string, albumName?: string | null) {
+  const labels: string[] = [];
+  const candidates = [title, albumName ?? ""];
+
+  for (const candidate of candidates) {
+    const bracketSegments = [...candidate.matchAll(/[\[(]([^\])]+)[\])]/g)].map((match) => match[1]);
+    const dashedSegment = candidate.match(/\s+-\s+(.+)$/)?.[1];
+
+    for (const rawSegment of [...bracketSegments, dashedSegment].filter(Boolean) as string[]) {
+      const normalized = normalizeText(rawSegment);
+      if (!VERSION_HINTS.some((hint) => normalized.includes(hint))) continue;
+      labels.push(toDisplayLabel(normalized));
+    }
+  }
+
+  const normalizedTitle = normalizeText(title);
+  if (labels.length === 0) {
+    for (const hint of VERSION_HINTS) {
+      if (normalizedTitle.includes(hint)) {
+        labels.push(toDisplayLabel(hint));
+      }
+    }
+  }
+
+  return dedupeNames(labels);
 }
 
 function getVariantPenalty(title: string) {
@@ -107,6 +143,46 @@ export function dedupeFeedTracks<T extends TrackLike & { artistId: string }>(tra
   }
 
   return [...byCanonical.values()].sort((a, b) => b.popularity - a.popularity);
+}
+
+type CollapsedTrack<T> = {
+  track: T;
+  versions: string[];
+};
+
+function collapseTracks<T extends TrackLike>(tracks: T[], keyBuilder: (track: T) => string): CollapsedTrack<T>[] {
+  const grouped = new Map<string, T[]>();
+
+  for (const track of tracks) {
+    const key = keyBuilder(track);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(track);
+  }
+
+  return [...grouped.values()]
+    .map((group) => {
+      const chosen = group.reduce((best, current) => preferTrack(best, current));
+      const versionLabels = dedupeNames(group.flatMap((track) => extractTrackVersions(track.name, track.albumName)));
+      const versions = group.length > 1 && versionLabels.length === 0
+        ? ["Original"]
+        : group.some((track) => extractTrackVersions(track.name, track.albumName).length === 0) && versionLabels.length > 0
+          ? ["Original", ...versionLabels]
+          : versionLabels;
+
+      return {
+        track: chosen,
+        versions: dedupeNames(versions),
+      };
+    })
+    .sort((left, right) => right.track.popularity - left.track.popularity);
+}
+
+export function collapseArtistTracks<T extends TrackLike>(tracks: T[]) {
+  return collapseTracks(tracks, (track) => getCanonicalTrackTitle(track.name));
+}
+
+export function collapseFeedTracks<T extends TrackLike & { artistId: string }>(tracks: T[]) {
+  return collapseTracks(tracks, (track) => `${track.artistId}::${getCanonicalTrackTitle(track.name)}`);
 }
 
 export function dedupeNames(names: string[]) {

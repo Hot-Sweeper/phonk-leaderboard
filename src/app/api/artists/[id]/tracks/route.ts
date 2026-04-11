@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
+import { collapseArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 
 // GET — return cached artist tracks from the database, deduplicated for display
 export async function GET(
@@ -12,7 +12,7 @@ export async function GET(
   const artist = await prisma.artist.findUnique({
     where: { id },
     include: {
-      tracks: { orderBy: { popularity: "desc" }, take: 10 },
+      tracks: { orderBy: { popularity: "desc" }, take: 50 },
       links: { where: { platform: "SPOTIFY" } },
     },
   });
@@ -21,10 +21,11 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const tracks = dedupeArtistTracks(artist.tracks)
+  const tracks = collapseArtistTracks(artist.tracks)
     .slice(0, 10)
-    .map((track) => ({
+    .map(({ track, versions }) => ({
       ...track,
+      versions,
       featuredArtists: dedupeNames(track.featuredArtists),
     }));
 
