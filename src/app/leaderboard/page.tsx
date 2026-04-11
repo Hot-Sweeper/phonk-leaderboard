@@ -401,8 +401,16 @@ export default function LeaderboardPage() {
         body: JSON.stringify({ platform: linkModalPlatform, url: linkModalUrl.trim(), note: "" }),
       });
       if (res.ok) {
+        const updated = await res.json();
+        if (updated?.links) {
+          // Patch artist in-place without reloading the whole list
+          setArtists((prev) =>
+            prev.map((a) =>
+              a.id === linkModalArtistId ? { ...a, links: updated.links } : a
+            )
+          );
+        }
         setShowLinkModal(false);
-        loadArtists(search, platform);
       }
     } finally {
       setLinkModalSubmitting(false);
