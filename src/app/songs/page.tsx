@@ -86,6 +86,11 @@ function formatPopularity(p: number) {
   return String(p);
 }
 
+function getVersionLabel(versions: string[]) {
+  if (versions.includes("Original")) return "Original";
+  return versions[0] ?? "Original";
+}
+
 function contributorTextClass() {
   return "text-[var(--muted-foreground)] hover:text-white underline decoration-[var(--accent)]/45 underline-offset-2 transition-colors";
 }
@@ -132,17 +137,11 @@ function PodiumTrackCard({
           )}
           <div className="font-black text-lg text-white leading-tight line-clamp-2">{track.name}</div>
           <div className="text-sm text-[var(--muted-foreground)] mt-1 truncate max-w-full">{track.artist.name}</div>
-          <div className="flex flex-wrap justify-center gap-2 mt-3">
-            {track.releaseDate && (
-              <span className="px-2.5 py-1 rounded-full bg-black/25 text-[11px] font-bold text-[var(--muted-foreground)]">
-                {track.releaseDate}
-              </span>
-            )}
-            {track.versions.slice(0, 3).map((version) => (
-              <span key={version} className="px-2.5 py-1 rounded-full bg-[var(--accent)]/12 text-[11px] font-bold text-white/85 border border-[var(--accent)]/20">
-                {version}
-              </span>
-            ))}
+          <div className="flex items-center justify-center gap-2 mt-3 text-[11px] font-bold">
+            {track.releaseDate ? (
+              <span className="text-[var(--muted-foreground)]">{track.releaseDate}</span>
+            ) : null}
+            <span className="text-white/70">{getVersionLabel(track.versions)}</span>
           </div>
           <div className="mt-4 text-xl font-black text-green-400">{formatPopularity(track.popularity)}</div>
         </div>
@@ -236,6 +235,9 @@ export default function SongsPage() {
     fetchTracks(tracks.length, debouncedSearch, true);
   }
 
+  const podiumTracks = tracks.slice(0, 3);
+  const tableTracks = podiumTracks.length === 3 ? tracks.slice(3) : tracks;
+
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans relative">
       {/* Grid overlay */}
@@ -269,19 +271,20 @@ export default function SongsPage() {
           </div>
         </div>
 
-        {!loading && tracks.length >= 3 && (
+        {!loading && podiumTracks.length === 3 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
-            <PodiumTrackCard track={tracks[1]} rank={2} isPlaying={playingTrackId === tracks[1].id} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={tracks[0]} rank={1} isPlaying={playingTrackId === tracks[0].id} onTogglePreview={togglePreview} />
-            <PodiumTrackCard track={tracks[2]} rank={3} isPlaying={playingTrackId === tracks[2].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} />
+            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} />
           </div>
         )}
 
         {/* Table header */}
-        <div className="hidden md:grid grid-cols-[2rem_3rem_1fr_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+        <div className="hidden md:grid grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
           <span />
           <span>#</span>
           <span>Title</span>
+          <span>Version</span>
           <span className="text-right">Released</span>
           <span className="text-right">
             <Clock className="w-3 h-3 inline" />
@@ -310,16 +313,15 @@ export default function SongsPage() {
         {/* Track list */}
         {!loading && (
           <div className="flex flex-col">
-            {tracks.map((track, i) => {
-              const rank = i + 1;
-              const isTop3 = rank <= 3;
-              const rankColor = rank === 1 ? "text-yellow-400" : rank === 2 ? "text-zinc-300" : rank === 3 ? "text-amber-600" : "text-[var(--muted-foreground)]";
+            {tableTracks.map((track, i) => {
+              const rank = i + (podiumTracks.length === 3 ? 4 : 1);
+              const rankColor = "text-[var(--muted-foreground)]";
               const isPlaying = playingTrackId === track.id;
 
               return (
                 <div
                   key={track.id}
-                  className={`group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_1fr_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors ${isTop3 ? "bg-[var(--secondary)]/30" : ""}`}
+                  className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors"
                 >
                   {/* Preview button */}
                   <div className="flex justify-center">
@@ -362,7 +364,7 @@ export default function SongsPage() {
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className={`font-bold text-sm truncate ${isTop3 ? "text-white" : ""}`}>
+                        <span className="font-bold text-sm truncate">
                           {track.name}
                         </span>
                         {track.explicit && (
@@ -414,19 +416,17 @@ export default function SongsPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-1.5 mt-1.5">
-                        {track.versions.slice(0, 3).map((version) => (
-                          <span key={version} className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-white/75 font-bold">
-                            {version}
-                          </span>
-                        ))}
-                      </div>
-                      {/* Mobile: release date inline */}
                       <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
+                        {getVersionLabel(track.versions)}
+                        <span className="mx-1.5">•</span>
                         {track.releaseDate ?? "Unknown date"}
                       </div>
                     </div>
                   </div>
+
+                  <span className="hidden md:block text-xs text-[var(--muted-foreground)] truncate font-medium">
+                    {getVersionLabel(track.versions)}
+                  </span>
 
                   <span className="hidden md:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
                     <CalendarDays className="w-3 h-3 opacity-50" />
