@@ -70,6 +70,7 @@ export default function AdminPage() {
   const [lastFullUpdate, setLastFullUpdate] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
   const [migrating, setMigrating] = useState(false);
+  const [deduplicating, setDeduplicating] = useState(false);
   const [settingsResult, setSettingsResult] = useState<string | null>(null);
 
   const isAdmin = session?.user?.role === "ADMIN";
@@ -200,6 +201,28 @@ export default function AdminPage() {
       }
     } finally {
       setMigrating(false);
+    }
+  }
+
+  async function deduplicateArtists() {
+    const confirmed = window.confirm(
+      "This will merge duplicate artists (by name). The one with fewer links gets deleted. Continue?"
+    );
+    if (!confirmed) return;
+    setDeduplicating(true);
+    setSettingsResult(null);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "deduplicate" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettingsResult(`Removed ${data.deleted} duplicate artist(s).`);
+      }
+    } finally {
+      setDeduplicating(false);
     }
   }
 
@@ -668,6 +691,33 @@ export default function AdminPage() {
                     <ArrowRightLeft className="w-4 h-4" />
                   )}
                   {migrating ? "Migrating..." : "Switch to Spotify Names & Images"}
+                </button>
+              </div>
+            </div>
+
+            {/* Deduplicate */}
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-red-400" />
+                Deduplicate Artists
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5">
+                <p className="text-sm text-[var(--muted-foreground)] mb-3">
+                  Find artists with the same name and merge them. The duplicate
+                  with fewer links is removed; any unique links are transferred
+                  to the kept artist.
+                </p>
+                <button
+                  onClick={deduplicateArtists}
+                  disabled={deduplicating}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                >
+                  {deduplicating ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  {deduplicating ? "Deduplicating..." : "Remove Duplicates"}
                 </button>
               </div>
             </div>

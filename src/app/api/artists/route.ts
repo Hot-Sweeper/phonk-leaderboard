@@ -12,6 +12,7 @@ async function enrichLink<T extends {
   followerCount: number;
   monthlyListeners: number;
   platformId: string | null;
+  artistId: string;
 }>(link: T): Promise<T> {
   const needsSpotifyRefresh =
     link.platform === "SPOTIFY" &&
@@ -46,6 +47,16 @@ async function enrichLink<T extends {
       platformId: nextLink.platformId,
     },
   });
+
+  // When refreshing a Spotify link, also update the artist's image and name
+  if (link.platform === "SPOTIFY" && stats.imageUrl) {
+    const artistUpdate: Record<string, string> = { imageUrl: stats.imageUrl };
+    if (stats.name) artistUpdate.name = stats.name;
+    await prisma.artist.update({
+      where: { id: link.artistId },
+      data: artistUpdate,
+    });
+  }
 
   return nextLink;
 }

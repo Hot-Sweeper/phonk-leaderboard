@@ -429,7 +429,12 @@ async function scrapeSpotifyListeners(
     let name: string | null = null;
     const nameMatch = html.match(/"name"\s*:\s*"([^"]+)"/);
     if (nameMatch) {
-      name = nameMatch[1];
+      // Decode JSON unicode escapes (e.g. \u00F8 → ø)
+      try {
+        name = JSON.parse(`"${nameMatch[1]}"`);
+      } catch {
+        name = nameMatch[1];
+      }
     }
 
     return { monthlyListeners, followers, name };
@@ -518,6 +523,7 @@ export type PlatformStats = {
   monthlyListeners: number;
   handle: string | null;
   platformId: string | null;
+  name?: string | null;
 };
 
 /** Fetch stats for a given platform link */
@@ -546,6 +552,7 @@ export async function fetchPlatformStats(
       monthlyListeners: data.monthlyListeners,
       handle: null,
       platformId: data.platformId,
+      name: data.name,
     };
   }
 

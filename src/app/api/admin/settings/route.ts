@@ -63,6 +63,10 @@ export async function POST(req: Request) {
     return handleMigrateToSpotify();
   }
 
+  if (action === "deduplicate") {
+    return handleDeduplicate();
+  }
+
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
 
@@ -168,4 +172,59 @@ async function handleMigrateToSpotify() {
   }
 
   return NextResponse.json({ migrated, failed, total: artists.length });
+}
+
+async function handleDeduplicate() {
+  // Find artists grouped by name (case-insensitive) to detect duplicates
+  const artists = await prisma.artist.findMany({
+    include: { links: true, _count: { select: { watchlist: true } } },
+    orderBy: { name: "asc" },
+  });
+
+  // Group by lowercase name
+  const groups = new Map<string, typeof artists>();
+  for (const a of artists) {
+    const key = a.name.toLowerCase().trim();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(a);
+  }
+
+  let deleted = 0;
+
+  for (const [, group] of groups) {
+    if (group.length <= 1) continue;
+
+    // Sort: most links first, then most watchlist, then oldest (keep first created)
+    group.sort((a, b) => {
+      const linkDiff = b.links.length - a.links.length;
+      if (linkDiff !== 0) return linkDiff;
+      const watchDiff = b._count.watchlist - a._count.watchlist;
+      if (watchDiff !== 0) return watchDiff;
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    });
+
+    // Keep the first, delete the rest
+    const keep = group[0];
+    for (let i = 1; i < group.length; i++) {
+      const dupe = group[i];
+
+      // Move any unique platform links to the keeper before deleting
+      for (const link of dupe.links) {
+        const keeperHasPlatform = keep.links.some(
+          (kl) => kl.platform === link.platform
+        );
+        if (!keeperHasPlatform) {
+          await prisma.artistLink.update({
+            where: { id: link.id },
+            data: { artistId: keep.id },
+          });
+        }
+      }
+
+      await prisma.artist.delete({ where: { id: dupe.id } });
+      deleted++;
+    }
+  }
+
+  return NextResponse.json({ deleted, totalGroups: groups.size });
 }
