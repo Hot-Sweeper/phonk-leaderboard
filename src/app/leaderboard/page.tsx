@@ -380,13 +380,13 @@ export default function LeaderboardPage() {
     return () => clearTimeout(timeout);
   }, [linkModalYtQuery, linkModalPlatform]);
 
-  function openLinkModal(artistId: string, artistName: string, platform: string) {
+  function openLinkModal(artistId: string, artistName: string, plat: string) {
     setLinkModalArtistId(artistId);
     setLinkModalArtistName(artistName);
-    setLinkModalPlatform(platform);
+    setLinkModalPlatform(plat);
     setLinkModalUrl("");
-    setLinkModalYtQuery("");
     setLinkModalYtResults([]);
+    setLinkModalYtQuery(plat === "YOUTUBE" ? artistName : "");
     setShowLinkModal(true);
   }
 
@@ -1155,7 +1155,7 @@ export default function LeaderboardPage() {
               Add a {linkModalPlatform.charAt(0) + linkModalPlatform.slice(1).toLowerCase()} link for <strong className="text-white">{linkModalArtistName}</strong>
             </p>
             <form onSubmit={submitLinkModal} className="flex flex-col gap-3">
-              <select value={linkModalPlatform} onChange={(e) => { setLinkModalPlatform(e.target.value); setLinkModalUrl(""); setLinkModalYtQuery(""); setLinkModalYtResults([]); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
+              <select value={linkModalPlatform} onChange={(e) => { setLinkModalPlatform(e.target.value); setLinkModalUrl(""); setLinkModalYtResults([]); setLinkModalYtQuery(e.target.value === "YOUTUBE" ? linkModalArtistName : ""); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
                 {ALL_PLATFORMS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
               </select>
               {linkModalPlatform === "YOUTUBE" ? (
@@ -1172,7 +1172,7 @@ export default function LeaderboardPage() {
                     )}
                   </div>
                   {linkModalYtResults.length > 0 && (
-                    <div className="max-h-52 overflow-y-auto flex flex-col gap-1 rounded-lg border border-[var(--muted)] bg-[var(--background)] p-1">
+                    <div className="flex flex-col gap-2">
                       {linkModalYtResults.map((ch) => (
                         <button
                           key={ch.platformId}
@@ -1182,20 +1182,31 @@ export default function LeaderboardPage() {
                             setLinkModalYtQuery(ch.name);
                             setLinkModalYtResults([]);
                           }}
-                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+                          className={`flex items-center gap-4 p-3 rounded-xl border transition-all text-left ${
+                            linkModalUrl.includes(ch.platformId ?? "___")
+                              ? "border-red-500 bg-red-950/30"
+                              : "border-[var(--muted)] bg-[var(--muted)]/30 hover:border-red-500/50 hover:bg-red-950/10"
+                          }`}
                         >
-                          {ch.imageUrl && (
-                            <img src={ch.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                          {ch.imageUrl ? (
+                            <img src={ch.imageUrl} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-full bg-red-950/50 flex items-center justify-center shrink-0">
+                              <span className="text-lg font-black text-red-400">{ch.name.charAt(0)}</span>
+                            </div>
                           )}
                           <div className="flex-1 min-w-0">
-                            <div className="text-sm font-bold truncate">{ch.name}</div>
-                            <div className="text-xs text-[var(--muted-foreground)]">{formatCount(ch.subscriberCount)} subscribers</div>
+                            <div className="font-bold truncate">{ch.name}</div>
+                            {ch.handle && <div className="text-xs text-[var(--muted-foreground)]">@{ch.handle}</div>}
+                            <div className="text-sm text-red-400 font-bold tabular-nums mt-0.5">{formatCount(ch.subscriberCount)} subscribers</div>
                           </div>
                         </button>
                       ))}
                     </div>
                   )}
-                  <input type="url" placeholder="https://youtube.com/..." value={linkModalUrl} onChange={(e) => setLinkModalUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                  {!linkModalYtResults.length && !linkModalYtSearching && (
+                    <input type="url" placeholder="Or paste YouTube URL manually..." value={linkModalUrl} onChange={(e) => setLinkModalUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                  )}
                 </div>
               ) : (
                 <input required type="url" placeholder="https://..." value={linkModalUrl} onChange={(e) => setLinkModalUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />

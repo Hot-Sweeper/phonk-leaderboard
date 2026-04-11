@@ -698,7 +698,7 @@ export default function ArtistPage() {
                   return (
                     <button
                       key={platform}
-                      onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); setShowSuggest(true); }}
+                      onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchResults([]); setYtSearchQuery(platform === "YOUTUBE" && artist ? artist.name : ""); setShowSuggest(true); }}
                       className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110 opacity-25 hover:opacity-60"
                       style={{ backgroundColor: `${meta.color}10` }}
                       title={`Add ${meta.label}`}
@@ -883,7 +883,7 @@ export default function ArtistPage() {
             return (
               <button
                 key={platform}
-                onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); session ? setShowSuggest(true) : signIn("google"); }}
+                onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchResults([]); setYtSearchQuery(platform === "YOUTUBE" && artist ? artist.name : ""); session ? setShowSuggest(true) : signIn("google"); }}
                 className="rounded-xl border border-dashed border-[var(--muted)] p-4 transition-all hover:border-[var(--accent)] group text-left"
               >
                 <div className="flex items-center gap-3">
@@ -1034,7 +1034,7 @@ export default function ArtistPage() {
               <div className="text-green-400 font-bold text-center py-8">Suggestion submitted!</div>
             ) : (
               <form onSubmit={submitSuggestion} className="flex flex-col gap-3">
-                <select value={suggestPlatform} onChange={(e) => { setSuggestPlatform(e.target.value); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
+                <select value={suggestPlatform} onChange={(e) => { setSuggestPlatform(e.target.value); setSuggestUrl(""); setYtSearchResults([]); setYtSearchQuery(e.target.value === "YOUTUBE" && artist ? artist.name : ""); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
                   {Object.entries(PLATFORM_META).map(([val, meta]) => <option key={val} value={val}>{meta.label}</option>)}
                 </select>
                 {isPrivileged && suggestPlatform === "YOUTUBE" ? (
@@ -1051,7 +1051,7 @@ export default function ArtistPage() {
                       )}
                     </div>
                     {ytSearchResults.length > 0 && (
-                      <div className="max-h-52 overflow-y-auto flex flex-col gap-1 rounded-lg border border-[var(--muted)] bg-[var(--background)] p-1">
+                      <div className="flex flex-col gap-2">
                         {ytSearchResults.map((ch) => (
                           <button
                             key={ch.platformId}
@@ -1061,20 +1061,31 @@ export default function ArtistPage() {
                               setYtSearchQuery(ch.name);
                               setYtSearchResults([]);
                             }}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+                            className={`flex items-center gap-4 p-3 rounded-xl border transition-all text-left ${
+                              suggestUrl.includes(ch.platformId ?? "___")
+                                ? "border-red-500 bg-red-950/30"
+                                : "border-[var(--muted)] bg-[var(--muted)]/30 hover:border-red-500/50 hover:bg-red-950/10"
+                            }`}
                           >
-                            {ch.imageUrl && (
-                              <img src={ch.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                            {ch.imageUrl ? (
+                              <img src={ch.imageUrl} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-red-950/50 flex items-center justify-center shrink-0">
+                                <span className="text-lg font-black text-red-400">{ch.name.charAt(0)}</span>
+                              </div>
                             )}
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-bold truncate">{ch.name}</div>
-                              <div className="text-xs text-[var(--muted-foreground)]">{formatCount(ch.subscriberCount)} subscribers</div>
+                              <div className="font-bold truncate">{ch.name}</div>
+                              {ch.handle && <div className="text-xs text-[var(--muted-foreground)]">@{ch.handle}</div>}
+                              <div className="text-sm text-red-400 font-bold tabular-nums mt-0.5">{formatCount(ch.subscriberCount)} subscribers</div>
                             </div>
                           </button>
                         ))}
                       </div>
                     )}
-                    <input type="url" placeholder="https://youtube.com/..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                    {!ytSearchResults.length && !ytSearching && (
+                      <input type="url" placeholder="Or paste YouTube URL manually..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                    )}
                   </div>
                 ) : (
                   <input required type="url" placeholder="https://..." value={suggestUrl} onChange={(e) => setSuggestUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
