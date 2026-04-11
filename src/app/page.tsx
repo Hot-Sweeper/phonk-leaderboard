@@ -990,8 +990,6 @@ export default function LeaderboardPage() {
                 {addSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 Add to Leaderboard
               </button>
-                Add to Leaderboard
-              </button>
             </form>
           </div>
         </div>
