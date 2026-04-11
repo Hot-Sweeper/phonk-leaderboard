@@ -143,12 +143,14 @@ function PodiumCard({
   isWatched,
   onToggle,
   toggling,
+  platform,
 }: {
   artist: Artist;
   rank: number;
   isWatched: boolean;
   onToggle: () => void;
   toggling: boolean;
+  platform: string;
 }) {
   const heights = ["h-52", "h-44", "h-40"];
   const rings = [
@@ -217,16 +219,36 @@ function PodiumCard({
           {artist.name}
         </Link>
 
-        {/* Platform dots */}
+        {/* Platform stat */}
         <div className="flex flex-col items-center gap-1 mt-2">
           {(() => {
-            const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
-            if (spotifyLink && spotifyLink.monthlyListeners > 0) {
-              return (
-                <span className="text-xs text-green-400 font-bold tabular-nums">
-                  {formatCount(spotifyLink.monthlyListeners)} listeners
-                </span>
-              );
+            const platformColors: Record<string, string> = {
+              "": "text-green-400",
+              YOUTUBE: "text-red-400",
+              INSTAGRAM: "text-fuchsia-400",
+              TIKTOK: "text-cyan-400",
+            };
+            const color = platformColors[platform] ?? "text-green-400";
+
+            if (!platform || platform === "") {
+              const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
+              if (spotifyLink && spotifyLink.monthlyListeners > 0) {
+                return (
+                  <span className={`text-xs ${color} font-bold tabular-nums`}>
+                    {formatCount(spotifyLink.monthlyListeners)} listeners
+                  </span>
+                );
+              }
+            } else {
+              const link = artist.links.find((l) => l.platform === platform);
+              if (link && link.followerCount > 0) {
+                const label = platform === "YOUTUBE" ? "subs" : "followers";
+                return (
+                  <span className={`text-xs ${color} font-bold tabular-nums`}>
+                    {formatCount(link.followerCount)} {label}
+                  </span>
+                );
+              }
             }
             return null;
           })()}
@@ -666,7 +688,7 @@ export default function LeaderboardPage() {
         </div>
 
         {/* ── Podium (top 3) ── */}
-        {!loading && artists.length >= 3 && !search && !platform && (
+        {!loading && artists.length >= 3 && !search && (
           <div className="grid grid-cols-3 gap-4 md:gap-6 mb-12 items-end max-w-2xl mx-auto">
             {top3.map((artist, i) => (
               <PodiumCard
@@ -676,6 +698,7 @@ export default function LeaderboardPage() {
                 isWatched={watchlistedIds.has(artist.id)}
                 onToggle={() => toggleWatchlist(artist.id)}
                 toggling={togglingIds.has(artist.id)}
+                platform={platform}
               />
             ))}
           </div>
@@ -724,11 +747,11 @@ export default function LeaderboardPage() {
         ) : (
           <div className="flex flex-col gap-2">
             {(() => {
-              const showPodium = !search && !platform && artists.length >= 3;
+              const showPodium = !search && artists.length >= 3;
               const listArtists = showPodium ? rest : artists;
               return listArtists.map((artist, idx) => {
               const rc = rankChanges[artist.id];
-              const rank = (search || platform) && rc ? rc.currentRank - 1 : (showPodium ? idx + 3 : idx);
+              const rank = showPodium ? idx + 3 : idx;
               const isWatched = watchlistedIds.has(artist.id);
               return (
                 <div
