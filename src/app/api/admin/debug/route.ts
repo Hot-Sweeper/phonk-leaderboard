@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSpotifyToken, fetchDeezerTopTracks, resolveDeezerId } from "@/lib/platforms";
+import { getSpotifyToken, fetchDeezerTopTracks, resolveDeezerId, searchDeezerArtist } from "@/lib/platforms";
 
 type CheckResult = {
   name: string;
@@ -413,20 +413,25 @@ export async function POST(req: Request) {
 
   if (action === "testDeezerResolve") {
     try {
-      // Test Odesli resolution with a known Spotify artist
-      const testSpotifyId = "4q3ewBCX7sLwd24euuV69X"; // Bas
-      const deezerId = await resolveDeezerId(testSpotifyId);
+      const testSpotifyId = "4q3ewBCX7sLwd24euuV69X";
+      let method = "deezer-search";
+      let deezerId = await searchDeezerArtist("Bas");
+      if (!deezerId) {
+        deezerId = await resolveDeezerId(testSpotifyId);
+        method = "odesli";
+      }
+
       if (deezerId) {
         const tracks = await fetchDeezerTopTracks(deezerId);
         return NextResponse.json({
           status: "ok",
-          message: `Resolved Spotify ${testSpotifyId} -> Deezer ${deezerId}, got ${tracks?.length ?? 0} tracks`,
+          message: `Resolved via ${method}: Spotify ${testSpotifyId} -> Deezer ${deezerId}, got ${tracks?.length ?? 0} tracks`,
           detail: tracks?.slice(0, 5).map(t => `${t.name} (${t.bpm ? Math.round(t.bpm) + ' BPM' : 'no BPM'}, preview: ${t.previewUrl ? 'yes' : 'no'})`).join("\n"),
         });
       } else {
         return NextResponse.json({
           status: "warn",
-          message: "Odesli rate limited or no mapping found — may need to retry in a minute",
+          message: "No safe Deezer match found from name search, and Odesli fallback did not resolve one",
         });
       }
     } catch (err) {

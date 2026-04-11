@@ -210,10 +210,10 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         // ── Resolve Deezer ID (one-time per artist) ──
         let deezerId = artist.deezerId;
         if (!deezerId) {
-          // Try Odesli first (exact mapping), fall back to Deezer name search
-          deezerId = await resolveDeezerId(spotifyId);
+          // Try safe Deezer name matching first to avoid Odesli rate limits.
+          deezerId = await searchDeezerArtist(artist.name);
           if (!deezerId) {
-            deezerId = await searchDeezerArtist(artist.name);
+            deezerId = await resolveDeezerId(spotifyId);
           }
           if (deezerId) {
             await prisma.artist.update({

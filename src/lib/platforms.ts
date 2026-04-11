@@ -645,17 +645,96 @@ export async function resolveDeezerId(spotifyId: string): Promise<number | null>
   }
 }
 
-/** Fallback: search Deezer by artist name to find their ID */
+function normalizeArtistName(name: string) {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+type DeezerArtistCandidate = {
+  id: number;
+  name: string;
+  nbFan: number;
+  nbAlbum: number;
+  pictureMedium: string | null;
+};
+
+/**
+ * Search Deezer by name and return a best-effort exact candidate.
+ * We prefer exact normalized matches and avoid guessing when multiple candidates are too close.
+ */
 export async function searchDeezerArtist(name: string): Promise<number | null> {
   try {
     const res = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`);
     if (!res.ok) return null;
     const data = await res.json();
-    // Try exact name match first (case insensitive)
-    const exact = data.data?.find((a: { name: string }) => a.name.toLowerCase() === name.toLowerCase());
-    if (exact) return exact.id;
-    // Otherwise take top result
-    return data.data?.[0]?.id ?? null;
+    const candidates: DeezerArtistCandidate[] = (data.data ?? []).map((artist: {
+      id: number;
+      name: string;
+      nb_fan?: number;
+      nb_album?: number;
+      picture_medium?: string;
+    }) => ({
+      id: artist.id,
+      name: artist.name,
+      nbFan: artist.nb_fan ?? 0,
+      nbAlbum: artist.nb_album ?? 0,
+      pictureMedium: artist.picture_medium ?? null,
+    }));
+
+    if (candidates.length === 0) return null;
+
+    const normalizedTarget = normalizeArtistName(name);
+    const exactMatches = candidates.filter(
+      (artist) => normalizeArtistName(artist.name) === normalizedTarget
+    );
+
+    if (exactMatches.length === 1) {
+      return exactMatches[0].id;
+    }
+
+    if (exactMatches.length > 1) {
+      const sorted = [...exactMatches].sort((a, b) => b.nbFan - a.nbFan || b.nbAlbum - a.nbAlbum);
+      const best = sorted[0];
+      const second = sorted[1];
+
+      // Only auto-pick when the top exact match is clearly dominant.
+      if (!second || best.nbFan >= Math.max(10_000, second.nbFan * 5)) {
+        return best.id;
+      }
+
+      console.warn(
+        `[Deezer] Ambiguous exact artist match for "${name}": ${sorted
+          .slice(0, 3)
+          .map((artist) => `${artist.name}#${artist.id} (${artist.nbFan} fans)`)
+          .join(", ")}`
+      );
+      return null;
+    }
+
+    // Only accept a fuzzy match when the top result is very strong and the names are very close.
+    const sorted = [...candidates].sort((a, b) => b.nbFan - a.nbFan || b.nbAlbum - a.nbAlbum);
+    const best = sorted[0];
+    const second = sorted[1];
+    const bestNormalized = normalizeArtistName(best.name);
+
+    if (
+      (bestNormalized.includes(normalizedTarget) || normalizedTarget.includes(bestNormalized)) &&
+      (!second || best.nbFan >= Math.max(10_000, second.nbFan * 8))
+    ) {
+      return best.id;
+    }
+
+    console.warn(
+      `[Deezer] No safe artist match for "${name}". Best candidates: ${sorted
+        .slice(0, 3)
+        .map((artist) => `${artist.name}#${artist.id} (${artist.nbFan} fans)`)
+        .join(", ")}`
+    );
+    return null;
   } catch (err) {
     console.error(`[Deezer] Search error for "${name}":`, err);
     return null;
