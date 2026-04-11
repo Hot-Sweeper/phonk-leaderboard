@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
-import { runFullUpdate, runSongUpdate } from "@/lib/update-runner";
+import { runFullUpdate, runSongUpdate, cancelAllRunning } from "@/lib/update-runner";
 
 // GET — fetch site settings + recent update logs
 export async function GET() {
@@ -79,6 +79,11 @@ export async function POST(req: Request) {
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 409 });
     }
+  }
+
+  if (action === "cancelAll") {
+    const count = await cancelAllRunning();
+    return NextResponse.json({ cancelled: count });
   }
 
   if (action === "migrateToSpotify") {

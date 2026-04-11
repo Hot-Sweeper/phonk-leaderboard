@@ -10,12 +10,33 @@ export type UpdateResult = {
   durationMs: number;
 };
 
-/** Check if an update of a given type is already running */
+const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes — anything running longer is considered stale
+
+/** Mark stale "running" logs as failed, then check if a real one is still running */
 async function isUpdateRunning(updateType: string): Promise<boolean> {
+  // Mark stale entries as failed
+  await prisma.updateLog.updateMany({
+    where: {
+      updateType,
+      status: "running",
+      createdAt: { lt: new Date(Date.now() - STALE_THRESHOLD_MS) },
+    },
+    data: { status: "failed", completedAt: new Date() },
+  });
+
   const running = await prisma.updateLog.findFirst({
     where: { updateType, status: "running" },
   });
   return !!running;
+}
+
+/** Cancel all currently running update logs */
+export async function cancelAllRunning(): Promise<number> {
+  const result = await prisma.updateLog.updateMany({
+    where: { status: "running" },
+    data: { status: "cancelled", completedAt: new Date() },
+  });
+  return result.count;
 }
 
 /**
@@ -46,75 +67,92 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
   let failed = 0;
   const details: { name: string; status: string; durationMs: number; error?: string }[] = [];
 
-  for (const artist of artists) {
-    const artistStart = Date.now();
-    try {
-      let newImageUrl = artist.imageUrl;
+  try {
+    for (const artist of artists) {
+      const artistStart = Date.now();
+      try {
+        let newImageUrl = artist.imageUrl;
 
-      for (const link of artist.links) {
-        const stats = await fetchPlatformStats(link.platform, link.url);
-        if (!stats) continue;
+        for (const link of artist.links) {
+          const stats = await fetchPlatformStats(link.platform, link.url);
+          if (!stats) continue;
 
-        await prisma.artistLink.update({
-          where: { id: link.id },
-          data: {
-            followerCount: stats.followerCount,
-            monthlyListeners: stats.monthlyListeners,
-            handle: stats.handle ?? link.handle,
-            platformId: stats.platformId ?? link.platformId,
-          },
-        });
+          await prisma.artistLink.update({
+            where: { id: link.id },
+            data: {
+              followerCount: stats.followerCount,
+              monthlyListeners: stats.monthlyListeners,
+              handle: stats.handle ?? link.handle,
+              platformId: stats.platformId ?? link.platformId,
+            },
+          });
 
-        if (link.platform === "SPOTIFY" && stats.imageUrl) {
-          newImageUrl = stats.imageUrl;
+          if (link.platform === "SPOTIFY" && stats.imageUrl) {
+            newImageUrl = stats.imageUrl;
+          }
         }
+
+        if (newImageUrl !== artist.imageUrl) {
+          await prisma.artist.update({
+            where: { id: artist.id },
+            data: { imageUrl: newImageUrl },
+          });
+        }
+
+        await recordSnapshot(artist.id);
+
+        updated++;
+        details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart });
+      } catch (err) {
+        failed++;
+        details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
       }
 
-      if (newImageUrl !== artist.imageUrl) {
-        await prisma.artist.update({
-          where: { id: artist.id },
-          data: { imageUrl: newImageUrl },
-        });
-      }
-
-      await recordSnapshot(artist.id);
-
-      updated++;
-      details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart });
-    } catch (err) {
-      failed++;
-      details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
+      await prisma.updateLog.update({
+        where: { id: log.id },
+        data: { updatedCount: updated, failedCount: failed },
+      });
     }
+
+    await prisma.siteSetting.upsert({
+      where: { key: "lastFullUpdate" },
+      update: { value: new Date().toISOString() },
+      create: { key: "lastFullUpdate", value: new Date().toISOString() },
+    });
+
+    await recordRankSnapshots();
+
+    const totalDuration = Date.now() - startTime;
 
     await prisma.updateLog.update({
       where: { id: log.id },
-      data: { updatedCount: updated, failedCount: failed },
+      data: {
+        status: "completed",
+        updatedCount: updated,
+        failedCount: failed,
+        durationMs: totalDuration,
+        details: JSON.stringify(details),
+        completedAt: new Date(),
+      },
     });
+
+    return { updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration };
+  } catch (err) {
+    // Crash during update — mark log as failed so it doesn't stay stuck
+    const totalDuration = Date.now() - startTime;
+    await prisma.updateLog.update({
+      where: { id: log.id },
+      data: {
+        status: "failed",
+        updatedCount: updated,
+        failedCount: failed,
+        durationMs: totalDuration,
+        details: JSON.stringify([...details, { name: "CRASH", status: "failed", durationMs: 0, error: String(err) }]),
+        completedAt: new Date(),
+      },
+    }).catch(() => {});
+    throw err;
   }
-
-  await prisma.siteSetting.upsert({
-    where: { key: "lastFullUpdate" },
-    update: { value: new Date().toISOString() },
-    create: { key: "lastFullUpdate", value: new Date().toISOString() },
-  });
-
-  await recordRankSnapshots();
-
-  const totalDuration = Date.now() - startTime;
-
-  await prisma.updateLog.update({
-    where: { id: log.id },
-    data: {
-      status: "completed",
-      updatedCount: updated,
-      failedCount: failed,
-      durationMs: totalDuration,
-      details: JSON.stringify(details),
-      completedAt: new Date(),
-    },
-  });
-
-  return { updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration };
 }
 
 /**
@@ -144,92 +182,108 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
   let failed = 0;
   const details: { name: string; status: string; durationMs: number; tracks?: number; error?: string }[] = [];
 
-  for (const artist of artists) {
-    const artistStart = Date.now();
-    try {
-      const spotifyLink = artist.links[0];
-      const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
+  try {
+    for (const artist of artists) {
+      const artistStart = Date.now();
+      try {
+        const spotifyLink = artist.links[0];
+        const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
 
-      if (!spotifyId) {
-        details.push({ name: artist.name, status: "skipped", durationMs: Date.now() - artistStart });
-        continue;
-      }
-
-      // Persist spotifyId if missing
-      if (!artist.spotifyId) {
-        await prisma.artist.update({ where: { id: artist.id }, data: { spotifyId } }).catch(() => {});
-      }
-
-      const [topTracks, artistDetails] = await Promise.all([
-        fetchSpotifyTopTracks(spotifyId),
-        fetchSpotifyArtistDetails(spotifyId),
-      ]);
-
-      if (artistDetails) {
-        await prisma.artist.update({
-          where: { id: artist.id },
-          data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
-        });
-      }
-
-      let trackCount = 0;
-      if (topTracks && topTracks.length > 0) {
-        for (const t of topTracks) {
-          const featured = t.artists.filter(a => a.id !== spotifyId).map(a => a.name);
-          await prisma.track.upsert({
-            where: { spotifyId: t.id },
-            update: {
-              name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-              previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-              trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
-              releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
-            },
-            create: {
-              spotifyId: t.id, artistId: artist.id,
-              name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-              previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-              trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
-              releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
-            },
-          });
-          trackCount++;
+        if (!spotifyId) {
+          details.push({ name: artist.name, status: "skipped", durationMs: Date.now() - artistStart });
+          continue;
         }
+
+        // Persist spotifyId if missing
+        if (!artist.spotifyId) {
+          await prisma.artist.update({ where: { id: artist.id }, data: { spotifyId } }).catch(() => {});
+        }
+
+        const [topTracks, artistDetails] = await Promise.all([
+          fetchSpotifyTopTracks(spotifyId),
+          fetchSpotifyArtistDetails(spotifyId),
+        ]);
+
+        if (artistDetails) {
+          await prisma.artist.update({
+            where: { id: artist.id },
+            data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
+          });
+        }
+
+        let trackCount = 0;
+        if (topTracks && topTracks.length > 0) {
+          for (const t of topTracks) {
+            const featured = t.artists.filter(a => a.id !== spotifyId).map(a => a.name);
+            await prisma.track.upsert({
+              where: { spotifyId: t.id },
+              update: {
+                name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
+                previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
+                trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
+                releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
+              },
+              create: {
+                spotifyId: t.id, artistId: artist.id,
+                name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
+                previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
+                trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
+                releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
+              },
+            });
+            trackCount++;
+          }
+        }
+
+        updated++;
+        details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart, tracks: trackCount });
+      } catch (err) {
+        failed++;
+        details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
       }
 
-      updated++;
-      details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart, tracks: trackCount });
-    } catch (err) {
-      failed++;
-      details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
+      await prisma.updateLog.update({
+        where: { id: log.id },
+        data: { updatedCount: updated, failedCount: failed },
+      });
     }
+
+    await prisma.siteSetting.upsert({
+      where: { key: "lastSongUpdate" },
+      update: { value: new Date().toISOString() },
+      create: { key: "lastSongUpdate", value: new Date().toISOString() },
+    });
+
+    const totalDuration = Date.now() - startTime;
 
     await prisma.updateLog.update({
       where: { id: log.id },
-      data: { updatedCount: updated, failedCount: failed },
+      data: {
+        status: "completed",
+        updatedCount: updated,
+        failedCount: failed,
+        durationMs: totalDuration,
+        details: JSON.stringify(details),
+        completedAt: new Date(),
+      },
     });
+
+    return { updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration };
+  } catch (err) {
+    const totalDuration = Date.now() - startTime;
+    await prisma.updateLog.update({
+      where: { id: log.id },
+      data: {
+        status: "failed",
+        updatedCount: updated,
+        failedCount: failed,
+        durationMs: totalDuration,
+        details: JSON.stringify([...details, { name: "CRASH", status: "failed", durationMs: 0, error: String(err) }]),
+        completedAt: new Date(),
+      },
+    }).catch(() => {});
+    throw err;
   }
-
-  await prisma.siteSetting.upsert({
-    where: { key: "lastSongUpdate" },
-    update: { value: new Date().toISOString() },
-    create: { key: "lastSongUpdate", value: new Date().toISOString() },
-  });
-
-  const totalDuration = Date.now() - startTime;
-
-  await prisma.updateLog.update({
-    where: { id: log.id },
-    data: {
-      status: "completed",
-      updatedCount: updated,
-      failedCount: failed,
-      durationMs: totalDuration,
-      details: JSON.stringify(details),
-      completedAt: new Date(),
-    },
-  });
-
-  return { updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration };
 }
 
 /**
@@ -250,9 +304,13 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
 
   if (statsElapsed >= statsIntervalMs * 0.9) {
     console.log("[Scheduler] Stats update is due, starting...");
-    const result = await runFullUpdate("cron");
-    console.log(`[Scheduler] Stats update complete: ${result.updated}/${result.total} updated, ${result.failed} failed, took ${(result.durationMs / 1000).toFixed(1)}s`);
-    didRun = true;
+    try {
+      const result = await runFullUpdate("cron");
+      console.log(`[Scheduler] Stats update complete: ${result.updated}/${result.total} updated, ${result.failed} failed, took ${(result.durationMs / 1000).toFixed(1)}s`);
+      didRun = true;
+    } catch (err) {
+      console.error("[Scheduler] Stats update failed:", err);
+    }
   }
 
   // Check song update
@@ -263,9 +321,13 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
 
   if (songElapsed >= songIntervalMs * 0.9) {
     console.log("[Scheduler] Song update is due, starting...");
-    const result = await runSongUpdate("cron");
-    console.log(`[Scheduler] Song update complete: ${result.updated}/${result.total} updated, ${result.failed} failed, took ${(result.durationMs / 1000).toFixed(1)}s`);
-    didRun = true;
+    try {
+      const result = await runSongUpdate("cron");
+      console.log(`[Scheduler] Song update complete: ${result.updated}/${result.total} updated, ${result.failed} failed, took ${(result.durationMs / 1000).toFixed(1)}s`);
+      didRun = true;
+    } catch (err) {
+      console.error("[Scheduler] Song update failed:", err);
+    }
   }
 
   return didRun;

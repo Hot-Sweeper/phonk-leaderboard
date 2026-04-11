@@ -23,6 +23,7 @@ import {
   FileText,
   AlertCircle,
   Music,
+  StopCircle,
 } from "lucide-react";
 
 type ModInvite = {
@@ -97,6 +98,7 @@ export default function AdminPage() {
   const [settingsResult, setSettingsResult] = useState<string | null>(null);
   const [updateLogs, setUpdateLogs] = useState<UpdateLogEntry[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [cancellingAll, setCancellingAll] = useState(false);
 
   const isAdmin = session?.user?.role === "ADMIN";
 
@@ -281,6 +283,32 @@ export default function AdminPage() {
       clearInterval(pollInterval);
       setUpdatingSongs(false);
       setSongProgress(null);
+    }
+  }
+
+  async function cancelAllUpdates() {
+    setCancellingAll(true);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancelAll" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSettingsResult(`Cancelled ${data.cancelled} running update(s).`);
+        setUpdatingAll(false);
+        setUpdatingSongs(false);
+        setUpdateProgress(null);
+        setSongProgress(null);
+        const logsRes = await fetch("/api/admin/settings");
+        if (logsRes.ok) {
+          const s = await logsRes.json();
+          setUpdateLogs(s.logs ?? []);
+        }
+      }
+    } finally {
+      setCancellingAll(false);
     }
   }
 
@@ -924,14 +952,27 @@ export default function AdminPage() {
             {/* Update History */}
             {updateLogs.length > 0 && (
               <div className="mb-10">
-                <h2 className="text-lg font-black mb-3 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-blue-400" />
-                  Update History
-                </h2>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-lg font-black flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-blue-400" />
+                    Update History
+                  </h2>
+                  {updateLogs.some((l) => l.status === "running") && (
+                    <button
+                      onClick={cancelAllUpdates}
+                      disabled={cancellingAll}
+                      className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 transition-all"
+                    >
+                      {cancellingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <StopCircle className="w-3.5 h-3.5" />}
+                      Cancel All Running
+                    </button>
+                  )}
+                </div>
                 <div className="flex flex-col gap-2">
                   {updateLogs.map((log) => {
                     const isRunning = log.status === "running";
                     const isFailed = log.status === "failed";
+                    const isCancelled = log.status === "cancelled";
                     const duration = log.durationMs > 0
                       ? log.durationMs >= 60000
                         ? `${(log.durationMs / 60000).toFixed(1)}m`
@@ -950,6 +991,8 @@ export default function AdminPage() {
                         >
                           {isRunning ? (
                             <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                          ) : isCancelled ? (
+                            <StopCircle className="w-4 h-4 text-orange-400 shrink-0" />
                           ) : isFailed ? (
                             <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                           ) : (
@@ -958,9 +1001,9 @@ export default function AdminPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 text-sm font-bold">
                               <span className={
-                                isRunning ? "text-blue-300" : isFailed ? "text-red-300" : "text-green-300"
+                                isRunning ? "text-blue-300" : isCancelled ? "text-orange-300" : isFailed ? "text-red-300" : "text-green-300"
                               }>
-                                {isRunning ? "Running" : isFailed ? "Failed" : "Completed"}
+                                {isRunning ? "Running" : isCancelled ? "Cancelled" : isFailed ? "Failed" : "Completed"}
                               </span>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--muted)] text-[var(--muted-foreground)] uppercase font-bold">
                                 {log.trigger}
