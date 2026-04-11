@@ -699,12 +699,11 @@ export default function ArtistPage() {
                     <button
                       key={platform}
                       onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchQuery(""); setYtSearchResults([]); setShowSuggest(true); }}
-                      className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110 relative group"
+                      className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:scale-110 opacity-25 hover:opacity-60"
                       style={{ backgroundColor: `${meta.color}10` }}
                       title={`Add ${meta.label}`}
                     >
-                      <Icon className={`w-4 h-4 opacity-30 ${meta.textColor}`} />
-                      <X className="w-3 h-3 absolute -top-0.5 -right-0.5 text-red-400 bg-[var(--background)] rounded-full" />
+                      <Icon className={`w-4 h-4 ${meta.textColor}`} />
                     </button>
                   );
                 })}

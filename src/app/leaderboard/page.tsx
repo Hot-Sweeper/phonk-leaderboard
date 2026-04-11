@@ -19,6 +19,7 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Minus,
+  RefreshCw,
 } from "lucide-react";
 
 
@@ -289,6 +290,17 @@ export default function LeaderboardPage() {
   const [rankChanges, setRankChanges] = useState<Record<string, { currentRank: number; previousRank: number | null; rankChange: number }>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  // Add-link-for-artist modal state (admin only)
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [linkModalArtistId, setLinkModalArtistId] = useState<string | null>(null);
+  const [linkModalArtistName, setLinkModalArtistName] = useState("");
+  const [linkModalPlatform, setLinkModalPlatform] = useState("YOUTUBE");
+  const [linkModalUrl, setLinkModalUrl] = useState("");
+  const [linkModalSubmitting, setLinkModalSubmitting] = useState(false);
+  const [linkModalYtQuery, setLinkModalYtQuery] = useState("");
+  const [linkModalYtResults, setLinkModalYtResults] = useState<Array<{ name: string; imageUrl: string | null; subscriberCount: number; handle: string | null; platformId: string | null }>>([]);
+  const [linkModalYtSearching, setLinkModalYtSearching] = useState(false);
+
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
 
@@ -345,6 +357,57 @@ export default function LeaderboardPage() {
     loadWatchlist();
     loadRankChanges();
   }, [loadArtists, loadWatchlist, loadRankChanges]);
+
+  // Debounced YouTube channel search for link modal
+  useEffect(() => {
+    if (linkModalPlatform !== "YOUTUBE" || !linkModalYtQuery.trim()) {
+      setLinkModalYtResults([]);
+      return;
+    }
+    const timeout = setTimeout(async () => {
+      setLinkModalYtSearching(true);
+      try {
+        const res = await fetch("/api/artists/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "search", q: linkModalYtQuery.trim() }),
+        });
+        if (res.ok) setLinkModalYtResults(await res.json());
+      } finally {
+        setLinkModalYtSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(timeout);
+  }, [linkModalYtQuery, linkModalPlatform]);
+
+  function openLinkModal(artistId: string, artistName: string, platform: string) {
+    setLinkModalArtistId(artistId);
+    setLinkModalArtistName(artistName);
+    setLinkModalPlatform(platform);
+    setLinkModalUrl("");
+    setLinkModalYtQuery("");
+    setLinkModalYtResults([]);
+    setShowLinkModal(true);
+  }
+
+  async function submitLinkModal(e: React.FormEvent) {
+    e.preventDefault();
+    if (!linkModalArtistId || !linkModalUrl.trim()) return;
+    setLinkModalSubmitting(true);
+    try {
+      const res = await fetch(`/api/artists/${linkModalArtistId}/suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: linkModalPlatform, url: linkModalUrl.trim(), note: "" }),
+      });
+      if (res.ok) {
+        setShowLinkModal(false);
+        loadArtists(search, platform);
+      }
+    } finally {
+      setLinkModalSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -766,6 +829,21 @@ export default function LeaderboardPage() {
                                 ) : null}
                               </a>
                             ))}
+                            {isPrivileged && (() => {
+                              const existing = new Set(artist.links.map((l) => l.platform));
+                              const missing = Object.keys(PLATFORM_DOT).filter((p) => !existing.has(p));
+                              return missing.map((p) => (
+                                <button
+                                  key={p}
+                                  onClick={(e) => { e.stopPropagation(); openLinkModal(artist.id, artist.name, p); }}
+                                  className="flex items-center gap-0.5 text-xs opacity-40 hover:opacity-100 transition-opacity"
+                                  title={`Add ${p.charAt(0) + p.slice(1).toLowerCase()}`}
+                                >
+                                  <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[p]}`} />
+                                  <X className="w-2.5 h-2.5 text-red-400" />
+                                </button>
+                              ));
+                            })()}
                           </>
                         );
                       })()}
@@ -1059,6 +1137,72 @@ export default function LeaderboardPage() {
               >
                 {addSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 Add to Leaderboard
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Link Modal (admin, from leaderboard) ── */}
+      {showLinkModal && linkModalArtistId && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-6 w-full max-w-md relative">
+            <button onClick={() => setShowLinkModal(false)} className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-xl font-black mb-1">Add Link</h2>
+            <p className="text-[var(--muted-foreground)] text-sm mb-4">
+              Add a {linkModalPlatform.charAt(0) + linkModalPlatform.slice(1).toLowerCase()} link for <strong className="text-white">{linkModalArtistName}</strong>
+            </p>
+            <form onSubmit={submitLinkModal} className="flex flex-col gap-3">
+              <select value={linkModalPlatform} onChange={(e) => { setLinkModalPlatform(e.target.value); setLinkModalUrl(""); setLinkModalYtQuery(""); setLinkModalYtResults([]); }} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]">
+                {ALL_PLATFORMS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+              {linkModalPlatform === "YOUTUBE" ? (
+                <div className="flex flex-col gap-2">
+                  <div className="relative">
+                    <input
+                      placeholder="Search YouTube channel..."
+                      value={linkModalYtQuery}
+                      onChange={(e) => setLinkModalYtQuery(e.target.value)}
+                      className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500 w-full"
+                    />
+                    {linkModalYtSearching && (
+                      <RefreshCw className="w-4 h-4 animate-spin absolute right-3 top-2.5 text-[var(--muted-foreground)]" />
+                    )}
+                  </div>
+                  {linkModalYtResults.length > 0 && (
+                    <div className="max-h-52 overflow-y-auto flex flex-col gap-1 rounded-lg border border-[var(--muted)] bg-[var(--background)] p-1">
+                      {linkModalYtResults.map((ch) => (
+                        <button
+                          key={ch.platformId}
+                          type="button"
+                          onClick={() => {
+                            setLinkModalUrl(`https://www.youtube.com/${ch.handle ? `@${ch.handle}` : `channel/${ch.platformId}`}`);
+                            setLinkModalYtQuery(ch.name);
+                            setLinkModalYtResults([]);
+                          }}
+                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors text-left"
+                        >
+                          {ch.imageUrl && (
+                            <img src={ch.imageUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-bold truncate">{ch.name}</div>
+                            <div className="text-xs text-[var(--muted-foreground)]">{formatCount(ch.subscriberCount)} subscribers</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <input type="url" placeholder="https://youtube.com/..." value={linkModalUrl} onChange={(e) => setLinkModalUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+                </div>
+              ) : (
+                <input required type="url" placeholder="https://..." value={linkModalUrl} onChange={(e) => setLinkModalUrl(e.target.value)} className="bg-[var(--muted)] rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-500" />
+              )}
+              <button type="submit" disabled={linkModalSubmitting || !linkModalUrl.trim()} className="mt-1 py-2.5 rounded-xl bg-[var(--accent)] hover:bg-[#a21caf] text-white font-bold transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                {linkModalSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                Apply Link
               </button>
             </form>
           </div>

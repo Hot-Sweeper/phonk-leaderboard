@@ -65,12 +65,20 @@ export async function POST(req: Request) {
   const { action } = await req.json();
 
   if (action === "updateAll") {
-    return handleUpdateAll();
+    try {
+      return await handleUpdateAll();
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 409 });
+    }
   }
 
   if (action === "updateSongs") {
-    const result = await runSongUpdate("manual");
-    return NextResponse.json(result);
+    try {
+      const result = await runSongUpdate("manual");
+      return NextResponse.json(result);
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 409 });
+    }
   }
 
   if (action === "migrateToSpotify") {

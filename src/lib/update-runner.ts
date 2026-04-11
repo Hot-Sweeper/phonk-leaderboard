@@ -10,11 +10,23 @@ export type UpdateResult = {
   durationMs: number;
 };
 
+/** Check if an update of a given type is already running */
+async function isUpdateRunning(updateType: string): Promise<boolean> {
+  const running = await prisma.updateLog.findFirst({
+    where: { updateType, status: "running" },
+  });
+  return !!running;
+}
+
 /**
  * Run a full stats update for all artists.
  * Creates an UpdateLog entry, updates each artist's platform stats, records snapshots and ranks.
  */
 export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateResult> {
+  if (await isUpdateRunning("stats")) {
+    throw new Error("A stats update is already running.");
+  }
+
   const startTime = Date.now();
 
   const artists = await prisma.artist.findMany({
@@ -109,6 +121,10 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
  * Run a song/track update for all artists — fetches top tracks + genres + popularity from Spotify.
  */
 export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateResult> {
+  if (await isUpdateRunning("songs")) {
+    throw new Error("A song update is already running.");
+  }
+
   const startTime = Date.now();
 
   const artists = await prisma.artist.findMany({
