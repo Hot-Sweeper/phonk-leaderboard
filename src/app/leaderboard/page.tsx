@@ -659,7 +659,6 @@ export default function LeaderboardPage() {
               const rc = rankChanges[artist.id];
               const rank = (search || platform) && rc ? rc.currentRank - 1 : (showPodium ? idx + 3 : idx);
               const isWatched = watchlistedIds.has(artist.id);
-              const rc = rankChanges[artist.id];
               return (
                 <div
                   key={artist.id}
