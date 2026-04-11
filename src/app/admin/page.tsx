@@ -1178,6 +1178,7 @@ export default function AdminPage() {
                 { action: "testSettingWrite", label: "Test Settings Write", icon: Database, desc: "Write, read, delete a test setting" },
                 { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks via Spotify API" },
                 { action: "testDeezerResolve", label: "Test Deezer Pipeline", icon: Play, desc: "Resolve Spotify -> Deezer + fetch tracks" },
+                { action: "backfillDeezerIds", label: "Backfill Deezer IDs", icon: Zap, desc: "Resolve and save 25 artist Deezer IDs per run" },
                 { action: "clearStaleRunning", label: "Clear Stale Running", icon: StopCircle, desc: "Mark all running logs as failed" },
               ].map((btn) => (
                 <button

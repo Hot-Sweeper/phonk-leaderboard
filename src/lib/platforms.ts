@@ -741,6 +741,25 @@ export async function searchDeezerArtist(name: string): Promise<number | null> {
   }
 }
 
+export async function resolveArtistToDeezer(name: string, spotifyId?: string | null): Promise<{
+  deezerId: number | null;
+  source: "deezer-search" | "odesli" | "unresolved";
+}> {
+  const deezerByName = await searchDeezerArtist(name);
+  if (deezerByName) {
+    return { deezerId: deezerByName, source: "deezer-search" };
+  }
+
+  if (spotifyId) {
+    const deezerBySpotify = await resolveDeezerId(spotifyId);
+    if (deezerBySpotify) {
+      return { deezerId: deezerBySpotify, source: "odesli" };
+    }
+  }
+
+  return { deezerId: null, source: "unresolved" };
+}
+
 type DeezerTrack = {
   deezerId: number;
   name: string;

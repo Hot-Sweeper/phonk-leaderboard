@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveDeezerId, searchDeezerArtist, fetchDeezerTopTracks } from "@/lib/platforms";
+import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
 
 export type UpdateResult = {
@@ -210,11 +210,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         // ── Resolve Deezer ID (one-time per artist) ──
         let deezerId = artist.deezerId;
         if (!deezerId) {
-          // Try safe Deezer name matching first to avoid Odesli rate limits.
-          deezerId = await searchDeezerArtist(artist.name);
-          if (!deezerId) {
-            deezerId = await resolveDeezerId(spotifyId);
-          }
+          const resolved = await resolveArtistToDeezer(artist.name, spotifyId);
+          deezerId = resolved.deezerId;
           if (deezerId) {
             await prisma.artist.update({
               where: { id: artist.id },
