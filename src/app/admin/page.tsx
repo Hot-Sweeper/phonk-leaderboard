@@ -20,6 +20,8 @@ import {
   RefreshCw,
   Loader2,
   ArrowRightLeft,
+  FileText,
+  AlertCircle,
 } from "lucide-react";
 
 type ModInvite = {
@@ -52,6 +54,20 @@ type StaffMember = {
   createdAt: string;
 };
 
+type UpdateLogEntry = {
+  id: string;
+  trigger: string;
+  status: string;
+  totalArtists: number;
+  updatedCount: number;
+  failedCount: number;
+  durationMs: number;
+  details: string | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const [invites, setInvites] = useState<ModInvite[]>([]);
@@ -66,12 +82,15 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings">("staff");
 
   // Settings state
-  const [updateIntervalHours, setUpdateIntervalHours] = useState(24);
+  const [updateIntervalHours, setUpdateIntervalHours] = useState(1);
   const [lastFullUpdate, setLastFullUpdate] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<{ current: number; total: number } | null>(null);
   const [migrating, setMigrating] = useState(false);
   const [deduplicating, setDeduplicating] = useState(false);
   const [settingsResult, setSettingsResult] = useState<string | null>(null);
+  const [updateLogs, setUpdateLogs] = useState<UpdateLogEntry[]>([]);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
   const isAdmin = session?.user?.role === "ADMIN";
 
@@ -87,8 +106,9 @@ export default function AdminPage() {
     if (staffRes.ok) setStaff(await staffRes.json());
     if (settingsRes.ok) {
       const s = await settingsRes.json();
-      setUpdateIntervalHours(s.updateIntervalHours ?? 24);
+      setUpdateIntervalHours(s.updateIntervalHours ?? 1);
       setLastFullUpdate(s.lastFullUpdate ?? null);
+      setUpdateLogs(s.logs ?? []);
     }
     setLoading(false);
   }, []);
@@ -162,6 +182,21 @@ export default function AdminPage() {
   async function updateAllArtists() {
     setUpdatingAll(true);
     setSettingsResult(null);
+    setUpdateProgress({ current: 0, total: 0 });
+
+    // Start polling for progress
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/admin/update-progress");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "running") {
+            setUpdateProgress({ current: data.updatedCount + data.failedCount, total: data.totalArtists });
+          }
+        }
+      } catch { /* ignore */ }
+    }, 1500);
+
     try {
       const res = await fetch("/api/admin/settings", {
         method: "POST",
@@ -170,13 +205,22 @@ export default function AdminPage() {
       });
       if (res.ok) {
         const data = await res.json();
+        const secs = (data.durationMs / 1000).toFixed(1);
         setSettingsResult(
-          `Updated ${data.updated}/${data.total} artists. ${data.failed} failed.`
+          `Updated ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
         );
         setLastFullUpdate(new Date().toISOString());
+        // Refresh logs
+        const logsRes = await fetch("/api/admin/settings");
+        if (logsRes.ok) {
+          const s = await logsRes.json();
+          setUpdateLogs(s.logs ?? []);
+        }
       }
     } finally {
+      clearInterval(pollInterval);
       setUpdatingAll(false);
+      setUpdateProgress(null);
     }
   }
 
@@ -651,19 +695,40 @@ export default function AdminPage() {
                 </div>
 
                 {/* Update All */}
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={updateAllArtists}
-                    disabled={updatingAll}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
-                  >
-                    {updatingAll ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="w-4 h-4" />
-                    )}
-                    {updatingAll ? "Updating..." : "Update All Stats Now"}
-                  </button>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={updateAllArtists}
+                      disabled={updatingAll}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm flex items-center gap-2 disabled:opacity-50 transition-all"
+                    >
+                      {updatingAll ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                      {updatingAll ? "Updating..." : "Update All Stats Now"}
+                    </button>
+                  </div>
+
+                  {/* Progress Bar */}
+                  {updatingAll && updateProgress && updateProgress.total > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
+                        <span>Updating artists...</span>
+                        <span>{updateProgress.current}/{updateProgress.total}</span>
+                      </div>
+                      <div className="w-full bg-[var(--muted)] rounded-full h-2.5 overflow-hidden">
+                        <div
+                          className="bg-blue-500 h-full rounded-full transition-all duration-500"
+                          style={{ width: `${Math.round((updateProgress.current / updateProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {Math.round((updateProgress.current / updateProgress.total) * 100)}% complete
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -726,6 +791,94 @@ export default function AdminPage() {
             {settingsResult && (
               <div className="bg-green-950/40 border border-green-800/40 rounded-2xl p-4 text-green-300 text-sm font-bold">
                 {settingsResult}
+              </div>
+            )}
+
+            {/* Update History */}
+            {updateLogs.length > 0 && (
+              <div className="mb-10">
+                <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-400" />
+                  Update History
+                </h2>
+                <div className="flex flex-col gap-2">
+                  {updateLogs.map((log) => {
+                    const isRunning = log.status === "running";
+                    const isFailed = log.status === "failed";
+                    const duration = log.durationMs > 0
+                      ? log.durationMs >= 60000
+                        ? `${(log.durationMs / 60000).toFixed(1)}m`
+                        : `${(log.durationMs / 1000).toFixed(1)}s`
+                      : "...";
+                    const expanded = expandedLogId === log.id;
+                    let details: { name: string; status: string; durationMs: number; error?: string }[] = [];
+                    if (expanded && log.details) {
+                      try { details = JSON.parse(log.details); } catch { /* ignore */ }
+                    }
+                    return (
+                      <div key={log.id} className="bg-[var(--secondary)] border border-[var(--muted)] rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setExpandedLogId(expanded ? null : log.id)}
+                          className="w-full px-4 py-3 flex items-center gap-3 text-left hover:bg-[var(--muted)]/30 transition-colors"
+                        >
+                          {isRunning ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-blue-400 shrink-0" />
+                          ) : isFailed ? (
+                            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4 text-green-400 shrink-0" />
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 text-sm font-bold">
+                              <span className={
+                                isRunning ? "text-blue-300" : isFailed ? "text-red-300" : "text-green-300"
+                              }>
+                                {isRunning ? "Running" : isFailed ? "Failed" : "Completed"}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--muted)] text-[var(--muted-foreground)] uppercase font-bold">
+                                {log.trigger}
+                              </span>
+                            </div>
+                            <div className="text-xs text-[var(--muted-foreground)] mt-0.5 flex gap-3">
+                              <span>{new Date(log.createdAt).toLocaleString()}</span>
+                              <span>{log.updatedCount}/{log.totalArtists} updated</span>
+                              {log.failedCount > 0 && (
+                                <span className="text-red-400">{log.failedCount} failed</span>
+                              )}
+                              <span>{duration}</span>
+                            </div>
+                          </div>
+                        </button>
+                        {expanded && details.length > 0 && (
+                          <div className="border-t border-[var(--muted)] px-4 py-2 max-h-60 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-[var(--muted-foreground)] text-left">
+                                  <th className="pb-1 font-semibold">Artist</th>
+                                  <th className="pb-1 font-semibold">Status</th>
+                                  <th className="pb-1 font-semibold text-right">Time</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {details.map((d, i) => (
+                                  <tr key={i} className="border-t border-[var(--muted)]/30">
+                                    <td className="py-1 truncate max-w-[180px]">{d.name}</td>
+                                    <td className={`py-1 ${d.status === "ok" ? "text-green-400" : "text-red-400"}`}>
+                                      {d.status === "ok" ? "OK" : "Failed"}
+                                    </td>
+                                    <td className="py-1 text-right text-[var(--muted-foreground)]">
+                                      {(d.durationMs / 1000).toFixed(1)}s
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </>

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats, fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
 
-// GET — fetch site settings
+// GET — fetch site settings + recent update logs
 export async function GET() {
   const session = await auth();
   if (!session || session.user.role !== "ADMIN") {
@@ -15,9 +15,15 @@ export async function GET() {
   const map: Record<string, string> = {};
   for (const s of settings) map[s.key] = s.value;
 
+  const logs = await prisma.updateLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 20,
+  });
+
   return NextResponse.json({
-    updateIntervalHours: parseInt(map["updateIntervalHours"] ?? "24", 10),
+    updateIntervalHours: parseInt(map["updateIntervalHours"] ?? "1", 10),
     lastFullUpdate: map["lastFullUpdate"] ?? null,
+    logs,
   });
 }
 
@@ -71,15 +77,28 @@ export async function POST(req: Request) {
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
 
-async function handleUpdateAll() {
+async function handleUpdateAll(trigger: string = "manual") {
+  const startTime = Date.now();
+
   const artists = await prisma.artist.findMany({
     include: { links: true },
   });
 
+  // Create log entry
+  const log = await prisma.updateLog.create({
+    data: {
+      trigger,
+      status: "running",
+      totalArtists: artists.length,
+    },
+  });
+
   let updated = 0;
   let failed = 0;
+  const details: { name: string; status: string; durationMs: number; error?: string }[] = [];
 
   for (const artist of artists) {
+    const artistStart = Date.now();
     try {
       let newImageUrl = artist.imageUrl;
 
@@ -113,9 +132,17 @@ async function handleUpdateAll() {
       await recordSnapshot(artist.id);
 
       updated++;
-    } catch {
+      details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart });
+    } catch (err) {
       failed++;
+      details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
     }
+
+    // Update progress in log
+    await prisma.updateLog.update({
+      where: { id: log.id },
+      data: { updatedCount: updated, failedCount: failed },
+    });
   }
 
   // Record the time of last update
@@ -128,7 +155,22 @@ async function handleUpdateAll() {
   // Record rank snapshots after all stats are updated
   await recordRankSnapshots();
 
-  return NextResponse.json({ updated, failed, total: artists.length });
+  const totalDuration = Date.now() - startTime;
+
+  // Finalize log
+  await prisma.updateLog.update({
+    where: { id: log.id },
+    data: {
+      status: "completed",
+      updatedCount: updated,
+      failedCount: failed,
+      durationMs: totalDuration,
+      details: JSON.stringify(details),
+      completedAt: new Date(),
+    },
+  });
+
+  return NextResponse.json({ updated, failed, total: artists.length, logId: log.id, durationMs: totalDuration });
 }
 
 async function handleMigrateToSpotify() {
