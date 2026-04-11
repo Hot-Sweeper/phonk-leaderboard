@@ -73,6 +73,7 @@ enum Platform {
 model Artist {
   id             String           @id @default(cuid())
   spotifyId      String?          @unique
+  deezerId       Int?             @unique
   name           String
   imageUrl       String?
   bannerUrl      String?
@@ -219,7 +220,8 @@ model RankSnapshot {
 
 model Track {
   id              String   @id @default(cuid())
-  spotifyId       String   @unique
+  spotifyId       String?  @unique
+  deezerId        Int?     @unique
   artistId        String
   name            String
   albumName       String?
@@ -232,7 +234,11 @@ model Track {
   explicit        Boolean  @default(false)
   releaseDate     String?
   spotifyUrl      String?
+  deezerUrl       String?
+  bpm             Float?
+  gain            Float?
   featuredArtists String[] @default([])
+  contributorIds  String[] @default([])
   artist          Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

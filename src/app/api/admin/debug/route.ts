@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSpotifyToken } from "@/lib/platforms";
+import { getSpotifyToken, fetchDeezerTopTracks, resolveDeezerId } from "@/lib/platforms";
 
 type CheckResult = {
   name: string;
@@ -281,7 +281,50 @@ export async function GET() {
     });
   }
 
-  // ── 10. Runtime Info ──
+  // ── 10. Deezer API ──
+  try {
+    const res = await fetch("https://api.deezer.com/artist/13/top?limit=3");
+    if (res.ok) {
+      const data = await res.json();
+      const trackCount = data.data?.length ?? 0;
+      checks.push({
+        name: "Deezer API: Top Tracks",
+        status: trackCount > 0 ? "ok" : "warn",
+        message: `${trackCount} tracks returned (test artist: Eminem)`,
+        detail: trackCount > 0
+          ? data.data.slice(0, 3).map((t: { title: string }) => t.title).join(", ")
+          : undefined,
+      });
+    } else {
+      checks.push({
+        name: "Deezer API: Top Tracks",
+        status: "error",
+        message: `HTTP ${res.status}`,
+      });
+    }
+  } catch (err) {
+    checks.push({
+      name: "Deezer API: Top Tracks",
+      status: "error",
+      message: "Request failed",
+      detail: (err as Error).message,
+    });
+  }
+
+  // ── 11. Deezer ID Resolution Stats ──
+  try {
+    const totalArtists = await prisma.artist.count();
+    const withDeezerId = await prisma.artist.count({ where: { deezerId: { not: null } } });
+    checks.push({
+      name: "Deezer ID Mapping",
+      status: withDeezerId === 0 ? "warn" : withDeezerId < totalArtists ? "warn" : "ok",
+      message: `${withDeezerId}/${totalArtists} artists have Deezer IDs`,
+    });
+  } catch {
+    // Non-critical
+  }
+
+  // ── 12. Runtime Info ──
   checks.push({
     name: "Node.js Version",
     status: "ok",
@@ -363,6 +406,29 @@ export async function POST(req: Request) {
         data: { status: "failed", error: "Manually cleared via debug panel" },
       });
       return NextResponse.json({ status: "ok", message: `Cleared ${stale.count} stale running logs` });
+    } catch (err) {
+      return NextResponse.json({ status: "error", message: (err as Error).message });
+    }
+  }
+
+  if (action === "testDeezerResolve") {
+    try {
+      // Test Odesli resolution with a known Spotify artist
+      const testSpotifyId = "4q3ewBCX7sLwd24euuV69X"; // Bas
+      const deezerId = await resolveDeezerId(testSpotifyId);
+      if (deezerId) {
+        const tracks = await fetchDeezerTopTracks(deezerId);
+        return NextResponse.json({
+          status: "ok",
+          message: `Resolved Spotify ${testSpotifyId} -> Deezer ${deezerId}, got ${tracks?.length ?? 0} tracks`,
+          detail: tracks?.slice(0, 5).map(t => `${t.name} (${t.bpm ? Math.round(t.bpm) + ' BPM' : 'no BPM'}, preview: ${t.previewUrl ? 'yes' : 'no'})`).join("\n"),
+        });
+      } else {
+        return NextResponse.json({
+          status: "warn",
+          message: "Odesli rate limited or no mapping found — may need to retry in a minute",
+        });
+      }
     } catch (err) {
       return NextResponse.json({ status: "error", message: (err as Error).message });
     }

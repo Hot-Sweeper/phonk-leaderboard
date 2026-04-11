@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * GET /api/songs?skip=0&take=50&search=...
- * Returns all tracks ranked by Spotify popularity, with artist info.
+ * Returns all tracks ranked by popularity, with artist info + contributor matching.
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -36,5 +36,22 @@ export async function GET(req: Request) {
     prisma.track.count({ where }),
   ]);
 
-  return NextResponse.json({ tracks, totalCount });
+  // Resolve contributorIds to actual artist info
+  const allContributorIds = [...new Set(tracks.flatMap(t => t.contributorIds))];
+  const contributors = allContributorIds.length > 0
+    ? await prisma.artist.findMany({
+        where: { id: { in: allContributorIds } },
+        select: { id: true, name: true, imageUrl: true },
+      })
+    : [];
+  const contributorMap = new Map(contributors.map(c => [c.id, c]));
+
+  const enrichedTracks = tracks.map(t => ({
+    ...t,
+    contributors: t.contributorIds
+      .map(id => contributorMap.get(id))
+      .filter((c): c is { id: string; name: string; imageUrl: string | null } => !!c),
+  }));
+
+  return NextResponse.json({ tracks: enrichedTracks, totalCount });
 }

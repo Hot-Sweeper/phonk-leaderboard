@@ -1173,10 +1173,11 @@ export default function AdminPage() {
 
             {/* Debug Actions */}
             <h3 className="text-sm font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-3">Debug Actions</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
               {[
                 { action: "testSettingWrite", label: "Test Settings Write", icon: Database, desc: "Write, read, delete a test setting" },
-                { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks for a test artist" },
+                { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks via Spotify API" },
+                { action: "testDeezerResolve", label: "Test Deezer Pipeline", icon: Play, desc: "Resolve Spotify -> Deezer + fetch tracks" },
                 { action: "clearStaleRunning", label: "Clear Stale Running", icon: StopCircle, desc: "Mark all running logs as failed" },
               ].map((btn) => (
                 <button

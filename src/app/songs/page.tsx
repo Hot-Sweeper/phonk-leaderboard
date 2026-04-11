@@ -9,11 +9,21 @@ import {
   Loader2,
   Clock,
   ChevronUp,
+  Play,
+  Pause,
+  Activity,
 } from "lucide-react";
+
+type Contributor = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+};
 
 type Track = {
   id: string;
-  spotifyId: string;
+  spotifyId: string | null;
+  deezerId: number | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
@@ -22,7 +32,13 @@ type Track = {
   explicit: boolean;
   releaseDate: string | null;
   spotifyUrl: string | null;
+  deezerUrl: string | null;
+  previewUrl: string | null;
+  bpm: number | null;
+  gain: number | null;
   featuredArtists: string[];
+  contributorIds: string[];
+  contributors: Contributor[];
   artist: {
     id: string;
     name: string;
@@ -37,17 +53,35 @@ function formatDuration(ms: number) {
 }
 
 function popularityColor(p: number) {
-  if (p >= 70) return "text-green-400";
-  if (p >= 50) return "text-yellow-400";
-  if (p >= 30) return "text-orange-400";
+  // Deezer rank is 0-1,000,000; Spotify is 0-100
+  const normalized = p > 100 ? p / 10000 : p;
+  if (normalized >= 70) return "text-green-400";
+  if (normalized >= 50) return "text-yellow-400";
+  if (normalized >= 30) return "text-orange-400";
   return "text-[var(--muted-foreground)]";
 }
 
 function popularityBar(p: number) {
-  if (p >= 70) return "bg-green-500";
-  if (p >= 50) return "bg-yellow-500";
-  if (p >= 30) return "bg-orange-500";
+  const normalized = p > 100 ? p / 10000 : p;
+  if (normalized >= 70) return "bg-green-500";
+  if (normalized >= 50) return "bg-yellow-500";
+  if (normalized >= 30) return "bg-orange-500";
   return "bg-zinc-600";
+}
+
+function normalizePopularity(p: number) {
+  // Deezer rank 0-1,000,000 → percentage 0-100
+  return p > 100 ? Math.min(100, p / 10000) : p;
+}
+
+function formatPopularity(p: number) {
+  // Deezer rank: show as "980K" or "12K", Spotify: show raw 0-100
+  if (p > 100) {
+    if (p >= 1_000_000) return `${(p / 1_000_000).toFixed(1)}M`;
+    if (p >= 1_000) return `${Math.round(p / 1_000)}K`;
+    return String(p);
+  }
+  return String(p);
 }
 
 export default function SongsPage() {
@@ -58,6 +92,8 @@ export default function SongsPage() {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search
@@ -96,6 +132,39 @@ export default function SongsPage() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  function togglePreview(trackId: string, previewUrl: string) {
+    if (playingTrackId === trackId) {
+      // Stop playing
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setPlayingTrackId(null);
+      return;
+    }
+    // Stop any current playback
+    if (audioRef.current) {
+      audioRef.current.pause();
+    }
+    const audio = new Audio(previewUrl);
+    audio.volume = 0.5;
+    audio.play();
+    audio.onended = () => {
+      setPlayingTrackId(null);
+      audioRef.current = null;
+    };
+    audioRef.current = audio;
+    setPlayingTrackId(trackId);
+  }
+
   function loadMore() {
     fetchTracks(tracks.length, debouncedSearch, true);
   }
@@ -116,7 +185,7 @@ export default function SongsPage() {
               </span>
             </h1>
             <p className="text-[var(--muted-foreground)] text-sm">
-              {totalCount > 0 ? `${totalCount} tracks ranked by Spotify popularity` : "Loading tracks..."}
+              {totalCount > 0 ? `${totalCount} tracks ranked by popularity` : "Loading tracks..."}
             </p>
           </div>
 
@@ -134,10 +203,12 @@ export default function SongsPage() {
         </div>
 
         {/* Table header */}
-        <div className="hidden md:grid grid-cols-[3rem_1fr_1fr_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+        <div className="hidden md:grid grid-cols-[2rem_3rem_1fr_1fr_3.5rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+          <span />
           <span>#</span>
           <span>Title</span>
           <span>Album</span>
+          <span className="text-right">BPM</span>
           <span className="text-right">
             <Clock className="w-3 h-3 inline" />
           </span>
@@ -169,12 +240,32 @@ export default function SongsPage() {
               const rank = i + 1;
               const isTop3 = rank <= 3;
               const rankColor = rank === 1 ? "text-yellow-400" : rank === 2 ? "text-zinc-300" : rank === 3 ? "text-amber-600" : "text-[var(--muted-foreground)]";
+              const isPlaying = playingTrackId === track.id;
 
               return (
                 <div
                   key={track.id}
-                  className={`group grid grid-cols-[3rem_1fr_4rem] md:grid-cols-[3rem_1fr_1fr_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors ${isTop3 ? "bg-[var(--secondary)]/30" : ""}`}
+                  className={`group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_1fr_1fr_3.5rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors ${isTop3 ? "bg-[var(--secondary)]/30" : ""}`}
                 >
+                  {/* Preview button */}
+                  <div className="flex justify-center">
+                    {track.previewUrl ? (
+                      <button
+                        onClick={() => togglePreview(track.id, track.previewUrl!)}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                          isPlaying
+                            ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
+                            : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"
+                        }`}
+                        title={isPlaying ? "Pause preview" : "Play 30s preview"}
+                      >
+                        {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
+                      </button>
+                    ) : (
+                      <div className="w-7 h-7" />
+                    )}
+                  </div>
+
                   {/* Rank */}
                   <span className={`text-center font-black text-base tabular-nums ${rankColor}`}>
                     {rank}
@@ -213,15 +304,46 @@ export default function SongsPage() {
                         >
                           {track.artist.name}
                         </Link>
-                        {track.featuredArtists.length > 0 && (
+                        {/* Contributors: forum artists get links, others show as text */}
+                        {(track.contributors.length > 0 || track.featuredArtists.length > 0) && (
                           <span className="opacity-60">
-                            {" "}feat. {track.featuredArtists.join(", ")}
+                            {" "}feat.{" "}
+                            {track.contributors.length > 0
+                              ? track.contributors.map((c, ci) => (
+                                  <span key={c.id}>
+                                    {ci > 0 && ", "}
+                                    <Link
+                                      href={`/artist/${c.id}`}
+                                      className="text-[var(--accent)] hover:text-white transition-colors"
+                                    >
+                                      {c.name}
+                                    </Link>
+                                  </span>
+                                ))
+                              : null}
+                            {/* Non-forum featured artists */}
+                            {track.featuredArtists
+                              .filter(name => !track.contributors.some(c => c.name === name))
+                              .map((name, fi) => (
+                                <span key={name}>
+                                  {(fi > 0 || track.contributors.length > 0) && ", "}
+                                  <a
+                                    href={`https://open.spotify.com/search/${encodeURIComponent(name)}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="hover:text-white transition-colors"
+                                  >
+                                    {name}
+                                  </a>
+                                </span>
+                              ))}
                           </span>
                         )}
                       </div>
-                      {/* Mobile: album + duration inline */}
+                      {/* Mobile: album + BPM inline */}
                       <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-0.5">
                         {track.albumName}
+                        {track.bpm && <span className="ml-2">{Math.round(track.bpm)} BPM</span>}
                       </div>
                     </div>
                   </div>
@@ -236,6 +358,18 @@ export default function SongsPage() {
                     )}
                   </div>
 
+                  {/* BPM - desktop only */}
+                  <span className="hidden md:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">
+                    {track.bpm ? (
+                      <span className="flex items-center justify-end gap-1">
+                        <Activity className="w-3 h-3 opacity-50" />
+                        {Math.round(track.bpm)}
+                      </span>
+                    ) : (
+                      <span className="opacity-30">--</span>
+                    )}
+                  </span>
+
                   {/* Duration */}
                   <span className="hidden md:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">
                     {formatDuration(track.durationMs)}
@@ -244,25 +378,25 @@ export default function SongsPage() {
                   {/* Popularity */}
                   <div className="flex flex-col items-end gap-0.5">
                     <span className={`text-xs font-bold tabular-nums ${popularityColor(track.popularity)}`}>
-                      {track.popularity}
+                      {formatPopularity(track.popularity)}
                     </span>
                     <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
                       <div
                         className={`h-full rounded-full ${popularityBar(track.popularity)}`}
-                        style={{ width: `${track.popularity}%` }}
+                        style={{ width: `${normalizePopularity(track.popularity)}%` }}
                       />
                     </div>
                   </div>
 
-                  {/* Spotify link */}
+                  {/* Link to Deezer/Spotify */}
                   <div className="hidden md:flex justify-end">
-                    {track.spotifyUrl && (
+                    {(track.deezerUrl || track.spotifyUrl) && (
                       <a
-                        href={track.spotifyUrl}
+                        href={track.deezerUrl ?? track.spotifyUrl!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors"
-                        title="Open in Spotify"
+                        title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>

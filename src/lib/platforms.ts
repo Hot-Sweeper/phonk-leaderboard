@@ -619,6 +619,133 @@ async function scrapeTikTokStats(url: string): Promise<ScrapedSocialStats | null
   }
 }
 
+// ─────────── Deezer API (free, no auth) ───────────
+
+/** Resolve Spotify artist → Deezer artist ID via Odesli (song.link) */
+export async function resolveDeezerId(spotifyId: string): Promise<number | null> {
+  try {
+    const url = `https://api.song.link/v1-alpha.1/links?url=https://open.spotify.com/artist/${spotifyId}&userCountry=US`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`[Odesli] Failed to resolve ${spotifyId}: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    // Odesli returns linksByPlatform.deezer.url like "https://www.deezer.com/artist/12345"
+    const deezerUrl: string | undefined = data.linksByPlatform?.deezer?.url;
+    if (!deezerUrl) {
+      console.warn(`[Odesli] No Deezer mapping for Spotify artist ${spotifyId}`);
+      return null;
+    }
+    const match = deezerUrl.match(/\/artist\/(\d+)/);
+    return match ? parseInt(match[1], 10) : null;
+  } catch (err) {
+    console.error(`[Odesli] Error resolving ${spotifyId}:`, err);
+    return null;
+  }
+}
+
+/** Fallback: search Deezer by artist name to find their ID */
+export async function searchDeezerArtist(name: string): Promise<number | null> {
+  try {
+    const res = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Try exact name match first (case insensitive)
+    const exact = data.data?.find((a: { name: string }) => a.name.toLowerCase() === name.toLowerCase());
+    if (exact) return exact.id;
+    // Otherwise take top result
+    return data.data?.[0]?.id ?? null;
+  } catch (err) {
+    console.error(`[Deezer] Search error for "${name}":`, err);
+    return null;
+  }
+}
+
+type DeezerTrack = {
+  deezerId: number;
+  name: string;
+  popularity: number;
+  durationMs: number;
+  explicit: boolean;
+  previewUrl: string | null;
+  trackNumber: number;
+  deezerUrl: string;
+  album: {
+    name: string;
+    imageUrl: string | null;
+    releaseDate: string | null;
+  };
+  artists: { name: string; deezerId: number }[];
+  bpm: number | null;
+  gain: number | null;
+  releaseDate: string | null;
+};
+
+/** Fetch top tracks for an artist from Deezer */
+export async function fetchDeezerTopTracks(deezerId: number): Promise<DeezerTrack[] | null> {
+  try {
+    const res = await fetch(`https://api.deezer.com/artist/${deezerId}/top?limit=50`);
+    if (!res.ok) {
+      console.error(`[Deezer] Top tracks failed for ${deezerId}: ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    if (!data.data || data.data.length === 0) return [];
+
+    // Fetch BPM/gain/release_date for each track (detail endpoint)
+    const tracks: DeezerTrack[] = [];
+    for (const t of data.data) {
+      let bpm: number | null = null;
+      let gain: number | null = null;
+      let releaseDate: string | null = null;
+      let trackPosition = 0;
+
+      // Fetch individual track details for BPM, gain, and release date
+      try {
+        const detailRes = await fetch(`https://api.deezer.com/track/${t.id}`);
+        if (detailRes.ok) {
+          const detail = await detailRes.json();
+          bpm = detail.bpm && detail.bpm > 0 ? detail.bpm : null;
+          gain = detail.gain ?? null;
+          releaseDate = detail.release_date ?? null;
+          trackPosition = detail.track_position ?? 0;
+        }
+      } catch {
+        // Non-critical, continue without detail
+      }
+
+      tracks.push({
+        deezerId: t.id,
+        name: t.title_short ?? t.title,
+        popularity: t.rank ?? 0,
+        durationMs: (t.duration ?? 0) * 1000,
+        explicit: t.explicit_lyrics ?? false,
+        previewUrl: t.preview ?? null,
+        trackNumber: trackPosition,
+        deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
+        album: {
+          name: t.album?.title ?? "",
+          imageUrl: t.album?.cover_big ?? t.album?.cover_medium ?? null,
+          releaseDate: releaseDate,
+        },
+        artists: (t.contributors ?? []).map((c: { name: string; id: number }) => ({
+          name: c.name,
+          deezerId: c.id,
+        })),
+        bpm,
+        gain,
+        releaseDate,
+      });
+    }
+
+    return tracks;
+  } catch (err) {
+    console.error(`[Deezer] Top tracks error for ${deezerId}:`, err);
+    return null;
+  }
+}
+
 // ─── Combined ───
 
 export type PlatformStats = {
