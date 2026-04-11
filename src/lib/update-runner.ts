@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats } from "@/lib/platforms";
+import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots } from "@/lib/snapshots";
 
 export type UpdateResult = {
@@ -62,6 +62,50 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
           where: { id: artist.id },
           data: { imageUrl: newImageUrl },
         });
+      }
+
+      // Refresh top tracks from Spotify
+      const spotifyLink = artist.links.find(l => l.platform === "SPOTIFY");
+      const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
+      if (spotifyId) {
+        // Persist spotifyId if missing
+        if (!artist.spotifyId) {
+          await prisma.artist.update({ where: { id: artist.id }, data: { spotifyId } }).catch(() => {});
+        }
+
+        const [topTracks, artistDetails] = await Promise.all([
+          fetchSpotifyTopTracks(spotifyId),
+          fetchSpotifyArtistDetails(spotifyId),
+        ]);
+
+        if (artistDetails) {
+          await prisma.artist.update({
+            where: { id: artist.id },
+            data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
+          });
+        }
+
+        if (topTracks && topTracks.length > 0) {
+          for (const t of topTracks) {
+            const featured = t.artists.filter(a => a.id !== spotifyId).map(a => a.name);
+            await prisma.track.upsert({
+              where: { spotifyId: t.id },
+              update: {
+                name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
+                previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
+                trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
+                releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
+              },
+              create: {
+                spotifyId: t.id, artistId: artist.id,
+                name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
+                previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
+                trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
+                releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
+              },
+            });
+          }
+        }
       }
 
       await recordSnapshot(artist.id);

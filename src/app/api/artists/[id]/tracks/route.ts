@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchSpotifyTopTracks, fetchSpotifyArtistDetails } from "@/lib/platforms";
+import { fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl } from "@/lib/platforms";
 
 // GET — fetch and cache artist's top tracks from Spotify
 export async function GET(
@@ -32,14 +32,25 @@ export async function GET(
     });
   }
 
-  // Get Spotify ID
-  const spotifyId = artist.spotifyId ?? artist.links[0]?.platformId;
+  // Get Spotify ID — try multiple sources
+  let spotifyId = artist.spotifyId ?? artist.links[0]?.platformId;
+  if (!spotifyId && artist.links[0]?.url) {
+    spotifyId = parseSpotifyUrl(artist.links[0].url);
+  }
   if (!spotifyId) {
     return NextResponse.json({
       tracks: artist.tracks,
       genres: artist.genres,
       spotifyPopularity: artist.spotifyPopularity,
     });
+  }
+
+  // Persist spotifyId on the Artist if missing
+  if (!artist.spotifyId && spotifyId) {
+    await prisma.artist.update({
+      where: { id },
+      data: { spotifyId },
+    }).catch(() => {}); // ignore unique constraint conflicts
   }
 
   // Fetch fresh data from Spotify API
