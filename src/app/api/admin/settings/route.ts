@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats, fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
+import { recordSnapshot } from "@/lib/snapshots";
 
 // GET — fetch site settings
 export async function GET() {
@@ -107,6 +108,9 @@ async function handleUpdateAll() {
           data: { imageUrl: newImageUrl },
         });
       }
+
+      // Record snapshot for growth tracking
+      await recordSnapshot(artist.id);
 
       updated++;
     } catch {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fetchPlatformStats } from "@/lib/platforms";
+import { recordSnapshot } from "@/lib/snapshots";
 
 // POST — refresh platform stats for an artist (admin/mod only)
 export async function POST(
@@ -66,6 +67,9 @@ export async function POST(
       data: { imageUrl: newImageUrl },
     });
   }
+
+  // Record snapshot for growth tracking
+  await recordSnapshot(id);
 
   const updated = await prisma.artist.findUnique({
     where: { id },

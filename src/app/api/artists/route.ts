@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
 import { fetchPlatformStats, parseSpotifyUrl, fetchSpotifyArtist } from "@/lib/platforms";
+import { recordSnapshot } from "@/lib/snapshots";
 
 async function enrichLink<T extends {
   id: string;
@@ -245,6 +246,9 @@ export async function POST(req: Request) {
     },
     include: { links: true },
   });
+
+  // Record initial snapshot
+  await recordSnapshot(artist.id);
 
   return NextResponse.json(artist, { status: 201 });
 }

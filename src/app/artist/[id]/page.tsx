@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -15,8 +15,7 @@ import {
   RefreshCw,
   Pencil,
   Save,
-  Trash2,
-} from "lucide-react";
+  Trash2,  TrendingUp,} from "lucide-react";
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -128,6 +127,199 @@ type EditableLink = {
   url: string;
   handle: string;
 };
+
+/* ─── Growth Chart Component ─── */
+type Snapshot = {
+  monthlyListeners: number;
+  followerCount: number;
+  createdAt: string;
+};
+
+const CHART_PERIODS = [
+  { key: "day", label: "24H" },
+  { key: "week", label: "7D" },
+  { key: "month", label: "30D" },
+  { key: "year", label: "1Y" },
+];
+
+function GrowthChart({ artistId }: { artistId: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [period, setPeriod] = useState("week");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/artists/${artistId}/snapshots?period=${period}`)
+      .then((r) => r.json())
+      .then((data) => setSnapshots(data ?? []))
+      .catch(() => setSnapshots([]))
+      .finally(() => setLoading(false));
+  }, [artistId, period]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || snapshots.length < 2) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const w = rect.width;
+    const h = rect.height;
+    const pad = { top: 20, right: 16, bottom: 30, left: 50 };
+    const chartW = w - pad.left - pad.right;
+    const chartH = h - pad.top - pad.bottom;
+
+    const values = snapshots.map((s) => s.monthlyListeners);
+    const times = snapshots.map((s) => new Date(s.createdAt).getTime());
+    const minVal = Math.min(...values) * 0.98;
+    const maxVal = Math.max(...values) * 1.02;
+    const minTime = Math.min(...times);
+    const maxTime = Math.max(...times);
+
+    const toX = (t: number) => pad.left + ((t - minTime) / (maxTime - minTime || 1)) * chartW;
+    const toY = (v: number) => pad.top + chartH - ((v - minVal) / (maxVal - minVal || 1)) * chartH;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + (chartH / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(w - pad.right, y);
+      ctx.stroke();
+    }
+
+    // Y-axis labels
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i <= 4; i++) {
+      const val = minVal + ((maxVal - minVal) / 4) * (4 - i);
+      const y = pad.top + (chartH / 4) * i;
+      let label: string;
+      if (val >= 1_000_000) label = `${(val / 1_000_000).toFixed(1)}M`;
+      else if (val >= 1_000) label = `${(val / 1_000).toFixed(0)}K`;
+      else label = String(Math.round(val));
+      ctx.fillText(label, pad.left - 6, y);
+    }
+
+    // X-axis labels
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const xLabelCount = Math.min(6, snapshots.length);
+    for (let i = 0; i < xLabelCount; i++) {
+      const idx = Math.round((i / (xLabelCount - 1)) * (snapshots.length - 1));
+      const d = new Date(snapshots[idx].createdAt);
+      const label = period === "day"
+        ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+        : d.toLocaleDateString([], { month: "short", day: "numeric" });
+      ctx.fillText(label, toX(times[idx]), h - pad.bottom + 8);
+    }
+
+    // Line
+    const isGrowing = values[values.length - 1] >= values[0];
+    const lineColor = isGrowing ? "#22c55e" : "#ef4444";
+    const fillColor = isGrowing ? "rgba(34, 197, 94, 0.1)" : "rgba(239, 68, 68, 0.1)";
+
+    // Area fill
+    ctx.beginPath();
+    ctx.moveTo(toX(times[0]), toY(values[0]));
+    for (let i = 1; i < values.length; i++) {
+      ctx.lineTo(toX(times[i]), toY(values[i]));
+    }
+    ctx.lineTo(toX(times[times.length - 1]), pad.top + chartH);
+    ctx.lineTo(toX(times[0]), pad.top + chartH);
+    ctx.closePath();
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+
+    // Line stroke
+    ctx.beginPath();
+    ctx.moveTo(toX(times[0]), toY(values[0]));
+    for (let i = 1; i < values.length; i++) {
+      ctx.lineTo(toX(times[i]), toY(values[i]));
+    }
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    // Dots at start and end
+    for (const idx of [0, values.length - 1]) {
+      ctx.beginPath();
+      ctx.arc(toX(times[idx]), toY(values[idx]), 3, 0, Math.PI * 2);
+      ctx.fillStyle = lineColor;
+      ctx.fill();
+    }
+  }, [snapshots, period]);
+
+  const first = snapshots[0];
+  const last = snapshots[snapshots.length - 1];
+  const changePercent = first && last && first.monthlyListeners > 0
+    ? ((last.monthlyListeners - first.monthlyListeners) / first.monthlyListeners * 100)
+    : null;
+
+  return (
+    <div className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-black uppercase tracking-wider text-[var(--muted-foreground)] flex items-center gap-2">
+          <TrendingUp className="w-5 h-5" /> Growth
+        </h2>
+        <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+          {CHART_PERIODS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                period === p.key
+                  ? "bg-[var(--accent)] text-white"
+                  : "text-[var(--muted-foreground)] hover:text-white"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4">
+        {loading ? (
+          <div className="h-48 flex items-center justify-center text-[var(--muted-foreground)] text-sm">
+            Loading...
+          </div>
+        ) : snapshots.length < 2 ? (
+          <div className="h-48 flex items-center justify-center text-[var(--muted-foreground)] text-sm">
+            Not enough data yet. Stats are recorded on each refresh.
+          </div>
+        ) : (
+          <>
+            {changePercent !== null && (
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`text-lg font-black tabular-nums ${changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  {changePercent >= 0 ? "+" : ""}{changePercent.toFixed(2)}%
+                </span>
+                <span className="text-xs text-[var(--muted-foreground)]">
+                  monthly listeners change
+                </span>
+              </div>
+            )}
+            <canvas ref={canvasRef} className="w-full h-48" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function ArtistPage() {
   const { id } = useParams<{ id: string }>();
@@ -499,6 +691,9 @@ export default function ArtistPage() {
             );
           })}
         </div>
+
+        {/* Growth Chart */}
+        <GrowthChart artistId={artist.id} />
 
         {/* Pending suggestions (visible to all) */}
         {artist.suggestions.length > 0 && (
