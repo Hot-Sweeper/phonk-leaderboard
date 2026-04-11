@@ -75,7 +75,10 @@ model Artist {
   spotifyId      String?          @unique
   name           String
   imageUrl       String?
+  bannerUrl      String?
   bio            String?
+  genres         String[]         @default([])
+  spotifyPopularity Int           @default(0)
   watchlistCount Int              @default(0)
   addedById      String
   links          ArtistLink[]
@@ -84,6 +87,7 @@ model Artist {
   requests       ArtistRequest[]
   snapshots      ArtistSnapshot[]
   rankSnapshots  RankSnapshot[]
+  tracks         Track[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -211,4 +215,27 @@ model RankSnapshot {
 
   @@unique([artistId, date])
   @@index([date])
+}
+
+model Track {
+  id              String   @id @default(cuid())
+  spotifyId       String   @unique
+  artistId        String
+  name            String
+  albumName       String?
+  albumImageUrl   String?
+  previewUrl      String?
+  durationMs      Int      @default(0)
+  popularity      Int      @default(0)
+  trackNumber     Int      @default(0)
+  discNumber      Int      @default(0)
+  explicit        Boolean  @default(false)
+  releaseDate     String?
+  spotifyUrl      String?
+  featuredArtists String[] @default([])
+  artist          Artist   @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([artistId, popularity(sort: Desc)])
 }

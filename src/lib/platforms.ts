@@ -361,6 +361,89 @@ export async function fetchSpotifyArtist(
   };
 }
 
+/** Fetch full Spotify artist details (genres, popularity, images) */
+export async function fetchSpotifyArtistDetails(spotifyId: string): Promise<{
+  genres: string[];
+  popularity: number;
+  images: { url: string; width: number; height: number }[];
+  followers: number;
+  name: string;
+} | null> {
+  const token = await getSpotifyToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/artists/${spotifyId}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      genres: data.genres ?? [],
+      popularity: data.popularity ?? 0,
+      images: data.images ?? [],
+      followers: data.followers?.total ?? 0,
+      name: data.name ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch Spotify artist's top tracks */
+export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
+  id: string;
+  name: string;
+  popularity: number;
+  durationMs: number;
+  explicit: boolean;
+  previewUrl: string | null;
+  trackNumber: number;
+  discNumber: number;
+  spotifyUrl: string;
+  album: {
+    name: string;
+    imageUrl: string | null;
+    releaseDate: string | null;
+  };
+  artists: { name: string; id: string }[];
+}[] | null> {
+  const token = await getSpotifyToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.tracks ?? []).map((t: Record<string, unknown>) => ({
+      id: t.id as string,
+      name: t.name as string,
+      popularity: (t.popularity as number) ?? 0,
+      durationMs: (t.duration_ms as number) ?? 0,
+      explicit: (t.explicit as boolean) ?? false,
+      previewUrl: (t.preview_url as string | null) ?? null,
+      trackNumber: (t.track_number as number) ?? 0,
+      discNumber: (t.disc_number as number) ?? 0,
+      spotifyUrl: (t.external_urls as Record<string, string>)?.spotify ?? "",
+      album: {
+        name: ((t.album as Record<string, unknown>)?.name as string) ?? "",
+        imageUrl: ((t.album as Record<string, unknown>)?.images as { url: string }[])?.[0]?.url ?? null,
+        releaseDate: ((t.album as Record<string, unknown>)?.release_date as string) ?? null,
+      },
+      artists: ((t.artists as { name: string; id: string }[]) ?? []).map((a) => ({
+        name: a.name,
+        id: a.id,
+      })),
+    }));
+  } catch {
+    return null;
+  }
+}
+
 async function fetchSpotifyArtistApi(
   artistId: string
 ): Promise<{ imageUrl: string | null; followerCount: number; name: string | null } | null> {
