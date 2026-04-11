@@ -61,11 +61,13 @@ async function enrichLink<T extends {
   return nextLink;
 }
 
-// GET artists with optional search + platform filter
+// GET artists with optional search + platform filter + pagination
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
   const platform = searchParams.get("platform")?.toUpperCase();
+  const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
+  const take = Math.min(parseInt(searchParams.get("take") ?? "50", 10) || 50, 100);
 
   const where: Record<string, unknown> = {};
 
@@ -80,12 +82,15 @@ export async function GET(req: Request) {
     where.links = { some: { platform } };
   }
 
-  const artists = await prisma.artist.findMany({
-    where,
-    include: {
-      links: { orderBy: { platform: "asc" } },
-    },
-  });
+  const [artists, totalCount] = await Promise.all([
+    prisma.artist.findMany({
+      where,
+      include: {
+        links: { orderBy: { platform: "asc" } },
+      },
+    }),
+    prisma.artist.count({ where }),
+  ]);
 
   const enrichedArtists = await Promise.all(
     artists.map(async (artist) => ({
@@ -125,7 +130,10 @@ export async function GET(req: Request) {
     return a.name.localeCompare(b.name);
   });
 
-  return NextResponse.json(enrichedArtists.slice(0, 50));
+  return NextResponse.json({
+    artists: enrichedArtists.slice(skip, skip + take),
+    totalCount,
+  });
 }
 
 // POST — admins/mods add an artist with links

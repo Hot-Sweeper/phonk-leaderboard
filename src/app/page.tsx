@@ -260,6 +260,8 @@ function PodiumCard({
 export default function LeaderboardPage() {
   const { data: session } = useSession();
   const [artists, setArtists] = useState<Artist[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [watchlistedIds, setWatchlistedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [platform, setPlatform] = useState("");
@@ -290,11 +292,31 @@ export default function LeaderboardPage() {
       if (plat) params.set("platform", plat);
       const qs = params.toString();
       const res = await fetch(`/api/artists${qs ? `?${qs}` : ""}`);
-      if (res.ok) setArtists(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setArtists(data.artists);
+        setTotalCount(data.totalCount);
+      }
       setLoading(false);
     },
     []
   );
+
+  const loadMore = useCallback(async () => {
+    setLoadingMore(true);
+    const params = new URLSearchParams();
+    if (search) params.set("q", search);
+    if (platform) params.set("platform", platform);
+    params.set("skip", String(artists.length));
+    const qs = params.toString();
+    const res = await fetch(`/api/artists?${qs}`);
+    if (res.ok) {
+      const data = await res.json();
+      setArtists((prev) => [...prev, ...data.artists]);
+      setTotalCount(data.totalCount);
+    }
+    setLoadingMore(false);
+  }, [search, platform, artists.length]);
 
   const loadWatchlist = useCallback(async () => {
     const res = await fetch("/api/watchlist");
@@ -536,7 +558,7 @@ export default function LeaderboardPage() {
               icon: Users,
               iconColor: "text-blue-400",
               label: "Artists",
-              value: String(artists.length),
+              value: String(totalCount),
             },
             {
               icon: TrendingUp,
@@ -743,6 +765,22 @@ export default function LeaderboardPage() {
               );
             });
             })()}
+          </div>
+        )}
+
+        {/* Load More */}
+        {!loading && artists.length < totalCount && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="px-6 py-3 rounded-xl font-bold border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)]/80 transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              {loadingMore ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : null}
+              {loadingMore ? "Loading..." : `Load More (${artists.length} / ${totalCount})`}
+            </button>
           </div>
         )}
       </div>
