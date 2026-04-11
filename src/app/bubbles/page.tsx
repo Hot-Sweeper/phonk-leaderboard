@@ -19,6 +19,8 @@ type Bubble = {
   value: number;
   changePercent: number;
   hasData: boolean;
+  rank: number; // 1-based global rank (0 = unknown)
+  isWatchlisted: boolean;
   x: number;
   y: number;
   vx: number;
@@ -75,8 +77,17 @@ export default function BubblesPage() {
   const [availablePeriods, setAvailablePeriods] = useState<string[]>(["hour"]);
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Bubble | null>(null);
+  const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  // Load watchlist once
+  useEffect(() => {
+    fetch("/api/watchlist")
+      .then((r) => r.ok ? r.json() : [])
+      .then((ids: string[]) => setWatchlist(new Set(ids)))
+      .catch(() => {});
+  }, []);
 
   // Load artist changes for current page, period, metric, mode
   useEffect(() => {
@@ -145,6 +156,9 @@ export default function BubblesPage() {
         };
       }
 
+      // Global rank: page offset + position in sorted list + 1
+      const globalRank = page * PAGE_SIZE + artists.indexOf(artist) + 1;
+
       return {
         id: artist.id,
         name: artist.name,
@@ -152,6 +166,8 @@ export default function BubblesPage() {
         value: artist.currentValue,
         changePercent: artist.changePercent,
         hasData: artist.hasData,
+        rank: globalRank,
+        isWatchlisted: watchlist.has(artist.id),
         x: minR + Math.random() * (w - 2 * minR),
         y: minR + Math.random() * (h - 2 * minR),
         vx: 0,
@@ -164,7 +180,7 @@ export default function BubblesPage() {
     });
 
     bubblesRef.current = newBubbles;
-  }, [artists, mode]);
+  }, [artists, mode, page, watchlist]);
 
   // Animation loop with repulsion physics
   useEffect(() => {
@@ -280,23 +296,48 @@ export default function BubblesPage() {
         const isHov = b === newHovered || (drag && b === drag.bubble);
         const drawR = isHov ? b.r * 1.06 : b.r;
 
-        // Colors: change mode uses green/red, current mode uses purple/blue
+        // Size-based saturation: bigger bubbles are more vivid (0.3 to 1.0)
+        const maxBubbleR = Math.max(1, ...bubbles.map((bb) => bb.targetR));
+        const sizeRatio = Math.min(1, b.targetR / maxBubbleR);
+        const saturation = 0.3 + sizeRatio * 0.7;
+
+        // Determine bubble style: podium > watchlist > change mode > default
+        const isPodium = b.rank >= 1 && b.rank <= 3;
         const isChangeMode = b.hasData && b.changePercent !== 0;
         const isPositive = b.changePercent >= 0;
-        const intensity = isChangeMode ? Math.min(1, Math.abs(b.changePercent) / 20) : 0.5;
+
+        // Podium colors: gold (#FFD700), silver (#C0C0C0), bronze (#CD7F32)
+        const podiumColors: Record<number, { r: number; g: number; b: number }> = {
+          1: { r: 255, g: 215, b: 0 },    // gold
+          2: { r: 192, g: 192, b: 192 },   // silver
+          3: { r: 205, g: 127, b: 50 },    // bronze
+        };
+
         let borderColor: string;
         let glowColor: string;
+        let overlayColor: string;
 
-        if (isChangeMode) {
-          borderColor = isPositive
-            ? `rgba(34, 197, 94, ${0.4 + intensity * 0.4})`
-            : `rgba(239, 68, 68, ${0.4 + intensity * 0.4})`;
-          glowColor = isPositive
-            ? `rgba(34, 197, 94, ${0.15 + intensity * 0.3})`
-            : `rgba(239, 68, 68, ${0.15 + intensity * 0.3})`;
+        if (isPodium) {
+          const pc = podiumColors[b.rank];
+          borderColor = `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.6 + saturation * 0.4})`;
+          glowColor = `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.3 + saturation * 0.4})`;
+          overlayColor = `rgba(${Math.floor(pc.r * 0.15)}, ${Math.floor(pc.g * 0.15)}, ${Math.floor(pc.b * 0.1)}, ${0.45 + saturation * 0.15})`;
+        } else if (isChangeMode) {
+          const alpha = 0.3 + saturation * 0.5;
+          const intensity = Math.min(1, Math.abs(b.changePercent) / 20);
+          if (isPositive) {
+            borderColor = `rgba(34, 197, 94, ${alpha + intensity * 0.2})`;
+            glowColor = `rgba(34, 197, 94, ${0.15 + saturation * 0.3})`;
+            overlayColor = `rgba(0, 40, 0, ${0.4 + saturation * 0.25})`;
+          } else {
+            borderColor = `rgba(239, 68, 68, ${alpha + intensity * 0.2})`;
+            glowColor = `rgba(239, 68, 68, ${0.15 + saturation * 0.3})`;
+            overlayColor = `rgba(40, 0, 0, ${0.4 + saturation * 0.25})`;
+          }
         } else {
-          borderColor = `rgba(168, 85, 247, 0.5)`;
-          glowColor = `rgba(168, 85, 247, 0.3)`;
+          borderColor = `rgba(168, 85, 247, ${0.3 + saturation * 0.4})`;
+          glowColor = `rgba(168, 85, 247, ${0.2 + saturation * 0.3})`;
+          overlayColor = `rgba(20, 0, 40, ${0.45 + saturation * 0.15})`;
         }
 
         ctx.save();
@@ -311,47 +352,56 @@ export default function BubblesPage() {
           ctx.drawImage(b.img, b.x - drawR, b.y - drawR, drawR * 2, drawR * 2);
           ctx.restore();
 
-          // Color overlay
+          // Color overlay — thinner for bigger bubbles so image shows through
           ctx.beginPath();
           ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
-          if (isChangeMode) {
-            ctx.fillStyle = isPositive
-              ? `rgba(0, 40, 0, ${0.5 + intensity * 0.2})`
-              : `rgba(40, 0, 0, ${0.5 + intensity * 0.2})`;
-          } else {
-            ctx.fillStyle = `rgba(20, 0, 40, 0.55)`;
-          }
+          ctx.fillStyle = overlayColor;
           ctx.fill();
         } else {
           // Gradient fill
           const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, drawR);
-          if (isChangeMode) {
+          if (isPodium) {
+            const pc = podiumColors[b.rank];
+            grad.addColorStop(0, `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.3 + saturation * 0.3})`);
+            grad.addColorStop(1, `rgba(${Math.floor(pc.r * 0.3)}, ${Math.floor(pc.g * 0.3)}, ${Math.floor(pc.b * 0.3)}, ${0.5 + saturation * 0.3})`);
+          } else if (isChangeMode) {
             if (isPositive) {
-              grad.addColorStop(0, `rgba(34, 197, 94, ${0.4 + intensity * 0.3})`);
-              grad.addColorStop(1, `rgba(20, 83, 45, ${0.6 + intensity * 0.2})`);
+              grad.addColorStop(0, `rgba(34, 197, 94, ${0.3 + saturation * 0.3})`);
+              grad.addColorStop(1, `rgba(20, 83, 45, ${0.5 + saturation * 0.3})`);
             } else {
-              grad.addColorStop(0, `rgba(239, 68, 68, ${0.4 + intensity * 0.3})`);
-              grad.addColorStop(1, `rgba(127, 29, 29, ${0.6 + intensity * 0.2})`);
+              grad.addColorStop(0, `rgba(239, 68, 68, ${0.3 + saturation * 0.3})`);
+              grad.addColorStop(1, `rgba(127, 29, 29, ${0.5 + saturation * 0.3})`);
             }
           } else {
-            grad.addColorStop(0, `rgba(168, 85, 247, 0.4)`);
-            grad.addColorStop(1, `rgba(88, 28, 135, 0.6)`);
+            grad.addColorStop(0, `rgba(168, 85, 247, ${0.3 + saturation * 0.2})`);
+            grad.addColorStop(1, `rgba(88, 28, 135, ${0.5 + saturation * 0.2})`);
           }
           ctx.fillStyle = grad;
           ctx.fill();
+        }
+
+        // Watchlist highlight: outer ring
+        if (b.isWatchlisted) {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, drawR + 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(236, 72, 153, ${0.6 + saturation * 0.3})`; // pink
+          ctx.lineWidth = 2.5;
+          ctx.setLineDash([4, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
         }
 
         // Border
         ctx.beginPath();
         ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
         ctx.strokeStyle = borderColor;
-        ctx.lineWidth = isHov ? 2.5 : 1.5;
+        ctx.lineWidth = isPodium ? (isHov ? 3.5 : 2.5) : (isHov ? 2.5 : 1.5);
         ctx.stroke();
 
-        // Glow on hover
-        if (isHov) {
+        // Glow on hover or podium
+        if (isHov || isPodium) {
           ctx.shadowColor = glowColor;
-          ctx.shadowBlur = 20;
+          ctx.shadowBlur = isPodium ? 15 + saturation * 15 : 20;
           ctx.beginPath();
           ctx.arc(b.x, b.y, drawR, 0, Math.PI * 2);
           ctx.strokeStyle = borderColor;
@@ -616,7 +666,13 @@ export default function BubblesPage() {
         {hovered && !dragRef.current && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[var(--secondary)] border border-[var(--muted)] rounded-xl px-4 py-2.5 flex items-center gap-3 shadow-2xl pointer-events-none z-20">
             <div>
-              <div className="font-bold text-sm">{hovered.name}</div>
+              <div className="font-bold text-sm flex items-center gap-2">
+                {hovered.name}
+                {hovered.rank === 1 && <span className="text-yellow-400 text-xs">1st</span>}
+                {hovered.rank === 2 && <span className="text-gray-300 text-xs">2nd</span>}
+                {hovered.rank === 3 && <span className="text-amber-600 text-xs">3rd</span>}
+                {hovered.isWatchlisted && <span className="text-pink-400 text-xs">Watchlist</span>}
+              </div>
               <div className="flex items-center gap-3 text-xs">
                 {hovered.value > 0 && (
                   <span className="text-[var(--muted-foreground)] tabular-nums">
