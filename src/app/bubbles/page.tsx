@@ -103,6 +103,7 @@ export default function BubblesPage() {
 
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
+    const canvasArea = w * h;
 
     // In "current" mode, size = absolute value. In "change" mode, size = |changePercent|
     const isCurrentMode = mode === "current";
@@ -111,14 +112,24 @@ export default function BubblesPage() {
     );
     const maxVal = Math.max(0.01, ...sizeValues);
 
-    const minR = Math.max(16, Math.min(w, h) * 0.02);
-    const maxR = Math.min(65, Math.min(w, h) * 0.085);
+    // Compute radii so total bubble area fills ~55% of the canvas
+    // Each bubble area is proportional to sqrt(value/max) (area-proportional)
+    // total_area = sum(pi * r_i^2) = fillRatio * canvasArea
+    // r_i = scale * sqrt(val_i / maxVal)
+    // sum(pi * scale^2 * val_i / maxVal) = fillRatio * canvasArea
+    // scale = sqrt(fillRatio * canvasArea / (pi * sum(val_i / maxVal)))
+    const fillRatio = 0.55;
+    const normalizedSum = sizeValues.reduce((s, v) => s + v / maxVal, 0);
+    const scale = Math.sqrt((fillRatio * canvasArea) / (Math.PI * Math.max(0.01, normalizedSum)));
+
+    // Clamp individual bubbles to reasonable min/max
+    const minR = Math.max(12, Math.min(w, h) * 0.015);
+    const maxR = Math.min(w, h) * 0.4; // allow very large bubbles
 
     const newBubbles: Bubble[] = artists.map((artist) => {
       const sizeVal = isCurrentMode ? artist.currentValue : Math.abs(artist.changePercent);
-      // sqrt scale for area-proportional sizing
-      const ratio = Math.sqrt(sizeVal / maxVal);
-      const targetR = minR + ratio * (maxR - minR);
+      const rawR = scale * Math.sqrt(sizeVal / maxVal);
+      const targetR = Math.max(minR, Math.min(maxR, rawR));
 
       // Load image
       let img: HTMLImageElement | null = null;
@@ -126,7 +137,8 @@ export default function BubblesPage() {
       if (artist.imageUrl) {
         img = new window.Image();
         img.crossOrigin = "anonymous";
-        img.src = `/_next/image?url=${encodeURIComponent(artist.imageUrl)}&w=128&q=75`;
+        const imgSize = targetR > 60 ? 256 : 128;
+        img.src = `/_next/image?url=${encodeURIComponent(artist.imageUrl)}&w=${imgSize}&q=75`;
         img.onload = () => {
           const b = bubblesRef.current.find((b) => b.id === artist.id);
           if (b) b.imgLoaded = true;
@@ -140,8 +152,8 @@ export default function BubblesPage() {
         value: artist.currentValue,
         changePercent: artist.changePercent,
         hasData: artist.hasData,
-        x: targetR + Math.random() * (w - 2 * targetR),
-        y: targetR + Math.random() * (h - 2 * targetR),
+        x: minR + Math.random() * (w - 2 * minR),
+        y: minR + Math.random() * (h - 2 * minR),
         vx: 0,
         vy: 0,
         r: 0,
@@ -190,17 +202,19 @@ export default function BubblesPage() {
       // Physics: repulsion between overlapping bubbles + spacing
       for (let i = 0; i < bubbles.length; i++) {
         const a = bubbles[i];
-        if (drag && a === drag.bubble) continue; // skip dragged bubble
+        if (drag && a === drag.bubble) continue;
 
         for (let j = i + 1; j < bubbles.length; j++) {
           const b = bubbles[j];
           const dx = b.x - a.x;
           const dy = b.y - a.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const desiredDist = a.r + b.r + 4; // 4px gap
+          const desiredDist = a.r + b.r + 3;
 
           if (dist < desiredDist && dist > 0.1) {
-            const force = (desiredDist - dist) / dist * 0.15;
+            // Strong repulsion force when overlapping
+            const overlap = desiredDist - dist;
+            const force = overlap / dist * 0.25;
             const nx = dx * force;
             const ny = dy * force;
 
@@ -216,20 +230,15 @@ export default function BubblesPage() {
         }
       }
 
-      // Boundary repulsion + center nudge
+      // Boundary: keep bubbles inside canvas, push away from edges
       for (const b of bubbles) {
         if (drag && b === drag.bubble) continue;
 
-        // Soft boundary push
-        const margin = b.r + 2;
-        if (b.x < margin) b.vx += (margin - b.x) * 0.1;
-        if (b.x > w - margin) b.vx += (w - margin - b.x) * 0.1;
-        if (b.y < margin) b.vy += (margin - b.y) * 0.1;
-        if (b.y > h - margin) b.vy += (h - margin - b.y) * 0.1;
-
-        // Very gentle center pull to keep things grouped
-        b.vx += (w / 2 - b.x) * 0.0003;
-        b.vy += (h / 2 - b.y) * 0.0003;
+        const pad = b.r + 1;
+        if (b.x < pad) b.vx += (pad - b.x) * 0.2;
+        if (b.x > w - pad) b.vx += (w - pad - b.x) * 0.2;
+        if (b.y < pad) b.vy += (pad - b.y) * 0.2;
+        if (b.y > h - pad) b.vy += (h - pad - b.y) * 0.2;
 
         // Damping
         b.vx *= 0.88;
@@ -352,10 +361,10 @@ export default function BubblesPage() {
         }
 
         // Text: name + value or change %
-        if (drawR > 18) {
+        if (drawR > 14) {
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
-          const fontSize = Math.max(7, Math.min(13, drawR * 0.3));
+          const fontSize = Math.max(7, Math.min(22, drawR * 0.32));
 
           // Name
           ctx.font = `bold ${fontSize}px sans-serif`;
