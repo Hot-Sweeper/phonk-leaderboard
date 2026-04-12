@@ -45,14 +45,13 @@ const BUBBLE_MODES = [
 ];
 
 const PERIOD_LABELS: Record<string, string> = {
-  hour: "1H",
   day: "24H",
   week: "7D",
   month: "30D",
   year: "1Y",
 };
 
-const ALL_PERIODS = ["hour", "day", "week", "month", "year"];
+const ALL_PERIODS = ["day", "week", "month", "year"];
 
 export default function RankingsPage() {
   return (
@@ -77,7 +76,7 @@ function RankingsInner() {
   // Bubble-specific
   const [metric, setMetric] = useState(searchParams.get("metric") || "listeners");
   const [bubbleMode, setBubbleMode] = useState(searchParams.get("bmode") || "change");
-  const [period, setPeriod] = useState(searchParams.get("period") || "hour");
+  const [period, setPeriod] = useState(searchParams.get("period") || "day");
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -99,7 +98,7 @@ function RankingsInner() {
       if (entity === "artists") {
         if (metric !== "listeners") params.set("metric", metric);
         if (bubbleMode !== "change") params.set("bmode", bubbleMode);
-        if (period !== "hour") params.set("period", period);
+        if (period !== "day") params.set("period", period);
       }
     }
     const qs = params.toString();

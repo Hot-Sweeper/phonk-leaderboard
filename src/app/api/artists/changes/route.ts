@@ -2,14 +2,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 const PERIODS: Record<string, number> = {
-  hour: 60 * 60 * 1000,
   day: 24 * 60 * 60 * 1000,
   week: 7 * 24 * 60 * 60 * 1000,
   month: 30 * 24 * 60 * 60 * 1000,
   year: 365 * 24 * 60 * 60 * 1000,
 };
 
-const PERIOD_ORDER = ["hour", "day", "week", "month", "year"];
+const PERIOD_ORDER = ["day", "week", "month", "year"];
 
 type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
 
@@ -42,14 +41,14 @@ function getMetricFromLinks(
 }
 
 /**
- * GET /api/artists/changes?period=hour&metric=listeners&mode=change&skip=0&take=100
+ * GET /api/artists/changes?period=day&metric=listeners&mode=change&skip=0&take=100
  *
  * metric: listeners | followers | youtube | tiktok | instagram
  * mode: change (% change over period) | current (absolute value, no change calc)
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const period = searchParams.get("period") ?? "hour";
+  const period = searchParams.get("period") ?? "day";
   const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
   const mode = searchParams.get("mode") ?? "change";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
@@ -76,7 +75,7 @@ export async function GET(req: Request) {
   if (oldestSnapshot) {
     const dataAge = Date.now() - oldestSnapshot.createdAt.getTime();
     for (const p of PERIOD_ORDER) {
-      if (p === "hour" || dataAge >= PERIODS[p] * 0.5) {
+      if (p === "day" || dataAge >= PERIODS[p] * 0.5) {
         availablePeriods.push(p);
       }
     }

@@ -81,7 +81,9 @@ export function getCanonicalTrackTitle(title: string) {
     return hasVersionHint(inner) ? "" : full;
   });
 
-  normalized = normalized.replace(/\s+-\s+(slowed|sped up|speed up|nightcore|remix|edit|extended|instrumental|reverb).*$/g, "");
+  normalized = normalized.replace(/\s+-\s+(.+)$/g, (full, suffix) => {
+    return hasVersionHint(suffix) ? "" : full;
+  });
   normalized = normalized.replace(/[^a-z0-9]+/g, " ");
   return normalized.trim();
 }

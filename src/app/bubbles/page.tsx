@@ -40,7 +40,6 @@ function formatCount(n: number): string {
 
 const PAGE_SIZE = 100;
 const PERIOD_LABELS: Record<string, string> = {
-  hour: "1H",
   day: "24H",
   week: "7D",
   month: "30D",
@@ -72,10 +71,10 @@ export default function BubblesPage() {
   const [artists, setArtists] = useState<ChangeArtist[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
-  const [period, setPeriod] = useState("hour");
+  const [period, setPeriod] = useState("day");
   const [metric, setMetric] = useState("listeners");
   const [mode, setMode] = useState("change");
-  const [availablePeriods, setAvailablePeriods] = useState<string[]>(["hour"]);
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>(["day"]);
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Bubble | null>(null);
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
