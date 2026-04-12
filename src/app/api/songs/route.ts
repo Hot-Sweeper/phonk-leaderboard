@@ -9,6 +9,16 @@ const TREND_PERIODS = {
   month: 30 * 24 * 60 * 60 * 1000,
 } as const;
 
+// Server-side in-memory caches
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rankedTracksCache = new Map<string, { rankedTracks: any[]; timestamp: number }>();
+const RANKED_CACHE_TTL = 120_000; // 2 minutes
+
+type DeezerDetail = Awaited<ReturnType<typeof fetchDeezerTrackDetail>>;
+type DeezerCacheEntry = { data: DeezerDetail; timestamp: number };
+const deezerDetailCache = new Map<number, DeezerCacheEntry>();
+const DEEZER_CACHE_TTL = 3_600_000; // 1 hour
+
 type SongsLeaderboardMode = "popularity" | keyof typeof TREND_PERIODS;
 
 function normalizeName(value: string) {
@@ -112,77 +122,87 @@ export async function GET(req: Request) {
   const collapseVersions = searchParams.get("collapseVersions") !== "false";
   const mode = getLeaderboardMode(searchParams.get("mode"));
 
-  const allTracks = await prisma.track.findMany({
-    orderBy: { popularity: "desc" },
-    include: {
-      artist: {
-        select: { id: true, name: true, imageUrl: true },
-      },
-    },
-  });
+  const rankedCacheKey = `${mode}:${collapseVersions}`;
+  const now = Date.now();
+  const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let rankedTracks: any[];
 
-  const popularityMetricTracks = allTracks.map((track) => ({
-    ...track,
-    metricValue: track.popularity,
-    trendDelta: 0,
-    trendPercent: 0,
-    hasTrendData: false,
-  }));
-
-  let rankedTracks;
-
-  if (mode === "popularity") {
-    rankedTracks = collapseVersions
-      ? collapseFeedTrackVersions(popularityMetricTracks)
-      : collapseFeedTracks(popularityMetricTracks);
+  if (cachedRanked && now - cachedRanked.timestamp < RANKED_CACHE_TTL) {
+    rankedTracks = cachedRanked.rankedTracks;
   } else {
-    const periodMs = TREND_PERIODS[mode];
-    const cutoff = new Date(Date.now() - periodMs);
-    const snapshotUpperBound = new Date(cutoff.getTime() + periodMs * 0.3);
-    let oldSnapshots: Array<{ trackId: string; popularity: number; createdAt: Date }> = [];
-
-    try {
-      oldSnapshots = await prisma.trackSnapshot.findMany({
-        where: {
-          trackId: { in: allTracks.map((track) => track.id) },
-          createdAt: { lte: snapshotUpperBound },
+    const allTracks = await prisma.track.findMany({
+      orderBy: { popularity: "desc" },
+      include: {
+        artist: {
+          select: { id: true, name: true, imageUrl: true },
         },
-        orderBy: { createdAt: "desc" },
-        distinct: ["trackId"],
-        select: {
-          trackId: true,
-          popularity: true,
-          createdAt: true,
-        },
-      });
-    } catch {
-      oldSnapshots = [];
-    }
-
-    const oldSnapshotMap = new Map(oldSnapshots.map((snapshot) => [snapshot.trackId, snapshot]));
-
-    const metricTracks = allTracks.map((track) => {
-      const oldSnapshot = oldSnapshotMap.get(track.id);
-      const trendDelta = oldSnapshot ? track.popularity - oldSnapshot.popularity : 0;
-      const trendPercent = oldSnapshot && oldSnapshot.popularity > 0
-        ? Math.round(((track.popularity - oldSnapshot.popularity) / oldSnapshot.popularity) * 10000) / 100
-        : 0;
-
-      return {
-        ...track,
-        metricValue: trendDelta,
-        trendDelta,
-        trendPercent,
-        hasTrendData: !!oldSnapshot,
-      };
+      },
     });
 
-    rankedTracks = collapseVersions
-      ? collapseFeedTrackVersions(metricTracks, chooseTrackByMetric)
-      : collapseFeedTracks(metricTracks, chooseTrackByMetric);
+    const popularityMetricTracks = allTracks.map((track) => ({
+      ...track,
+      metricValue: track.popularity,
+      trendDelta: 0,
+      trendPercent: 0,
+      hasTrendData: false,
+    }));
 
-    rankedTracks.sort(sortByMetric);
+    if (mode === "popularity") {
+      rankedTracks = collapseVersions
+        ? collapseFeedTrackVersions(popularityMetricTracks)
+        : collapseFeedTracks(popularityMetricTracks);
+    } else {
+      const periodMs = TREND_PERIODS[mode];
+      const cutoff = new Date(Date.now() - periodMs);
+      const snapshotUpperBound = new Date(cutoff.getTime() + periodMs * 0.3);
+      let oldSnapshots: Array<{ trackId: string; popularity: number; createdAt: Date }> = [];
+
+      try {
+        oldSnapshots = await prisma.trackSnapshot.findMany({
+          where: {
+            trackId: { in: allTracks.map((track) => track.id) },
+            createdAt: { lte: snapshotUpperBound },
+          },
+          orderBy: { createdAt: "desc" },
+          distinct: ["trackId"],
+          select: {
+            trackId: true,
+            popularity: true,
+            createdAt: true,
+          },
+        });
+      } catch {
+        oldSnapshots = [];
+      }
+
+      const oldSnapshotMap = new Map(oldSnapshots.map((snapshot) => [snapshot.trackId, snapshot]));
+
+      const metricTracks = allTracks.map((track) => {
+        const oldSnapshot = oldSnapshotMap.get(track.id);
+        const trendDelta = oldSnapshot ? track.popularity - oldSnapshot.popularity : 0;
+        const trendPercent = oldSnapshot && oldSnapshot.popularity > 0
+          ? Math.round(((track.popularity - oldSnapshot.popularity) / oldSnapshot.popularity) * 10000) / 100
+          : 0;
+
+        return {
+          ...track,
+          metricValue: trendDelta,
+          trendDelta,
+          trendPercent,
+          hasTrendData: !!oldSnapshot,
+        };
+      });
+
+      rankedTracks = collapseVersions
+        ? collapseFeedTrackVersions(metricTracks, chooseTrackByMetric)
+        : collapseFeedTracks(metricTracks, chooseTrackByMetric);
+
+      rankedTracks.sort(sortByMetric);
+    }
+
+    rankedTracksCache.set(rankedCacheKey, { rankedTracks, timestamp: now });
   }
 
   const rankByTrackId = new Map(rankedTracks.map(({ track }, index) => [track.id, index + 1]));
@@ -192,7 +212,7 @@ export async function GET(req: Request) {
         includesSearch(track.name, search)
         || includesSearch(track.artist.name, search)
         || includesSearch(track.albumName, search)
-        || track.featuredArtists.some((name) => includesSearch(name, search))
+        || track.featuredArtists.some((name: string) => includesSearch(name, search))
       ))
     : rankedTracks;
 
@@ -202,7 +222,13 @@ export async function GET(req: Request) {
   const deezerDetailEntries = await Promise.all(
     tracks.map(async ({ track }) => {
       if (!track.deezerId) return null;
-      const detail = await fetchDeezerTrackDetail(Number(track.deezerId));
+      const deezerId = Number(track.deezerId);
+      const cachedDeezer = deezerDetailCache.get(deezerId);
+      if (cachedDeezer && now - cachedDeezer.timestamp < DEEZER_CACHE_TTL) {
+        return cachedDeezer.data ? [track.id, cachedDeezer.data] as const : null;
+      }
+      const detail = await fetchDeezerTrackDetail(deezerId);
+      deezerDetailCache.set(deezerId, { data: detail, timestamp: now });
       return detail ? [track.id, detail] as const : null;
     })
   );
@@ -310,9 +336,9 @@ export async function GET(req: Request) {
 
     const seenNames = new Set<string>([normalizeName(artist.name)]);
     const resolvedContributors = track.contributorIds
-      .map((id) => contributorMap.get(id))
-      .filter((artist): artist is { id: string; name: string; imageUrl: string | null } => !!artist)
-      .filter((artist) => {
+      .map((id: string) => contributorMap.get(id))
+      .filter((artist: { id: string; name: string; imageUrl: string | null } | undefined): artist is { id: string; name: string; imageUrl: string | null } => !!artist)
+      .filter((artist: { id: string; name: string; imageUrl: string | null }) => {
         const key = normalizeName(artist.name);
         if (seenNames.has(key)) return false;
         seenNames.add(key);
@@ -357,5 +383,12 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json({ tracks: enrichedTracks, totalCount, mode });
+  return NextResponse.json(
+    { tracks: enrichedTracks, totalCount, mode },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
+      },
+    }
+  );
 }

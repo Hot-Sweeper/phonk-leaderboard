@@ -202,7 +202,7 @@ export default function ModerationPage() {
     return (
       <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
         <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
-        <div className="max-w-3xl mx-auto relative z-10">
+        <div className="max-w-6xl mx-auto relative z-10">
           <Skeleton className="h-10 w-56 max-w-full mb-4" />
           <Skeleton className="h-10 w-80 max-w-full mb-8" />
           <ModerationSkeleton />
@@ -239,7 +239,7 @@ export default function ModerationPage() {
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-3xl mx-auto relative z-10">
+      <div className="max-w-6xl mx-auto relative z-10">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-3xl md:text-4xl font-black tracking-tighter flex items-center gap-3">

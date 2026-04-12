@@ -1,12 +1,13 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSession, signIn } from "next-auth/react";
-import Link from "next/link";
 import Image from "next/image";
+import { useDetailPanel } from "@/lib/detail-panel";
 import { Skeleton } from "@/components/Skeleton";
+import { clearSessionCacheByPrefix, fetchJsonWithSessionCache } from "@/lib/client-cache";
+import { SpotifyIcon, YouTubeIcon, TikTokIcon, InstagramIcon } from "@/components/platform-icons";
 import {
   Trophy,
-  TrendingUp,
   Users,
   PlusCircle,
   Flame,
@@ -71,6 +72,20 @@ const PLATFORM_DOT: Record<string, string> = {
   SPOTIFY: "bg-green-400",
   TIKTOK: "bg-cyan-400",
   INSTAGRAM: "bg-fuchsia-400",
+};
+
+const PLATFORM_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  YOUTUBE: YouTubeIcon,
+  SPOTIFY: SpotifyIcon,
+  TIKTOK: TikTokIcon,
+  INSTAGRAM: InstagramIcon,
+};
+
+const PLATFORM_COLOR: Record<string, string> = {
+  YOUTUBE: "text-red-400",
+  SPOTIFY: "text-green-400",
+  TIKTOK: "text-cyan-400",
+  INSTAGRAM: "text-fuchsia-400",
 };
 
 function formatCount(n: number): string {
@@ -153,6 +168,182 @@ function ListSkeleton() {
   );
 }
 
+// ─── Color extraction from profile picture ─────────────────────────────────
+
+function nameToRgb(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash << 5) - hash + name.charCodeAt(i);
+    hash |= 0;
+  }
+  const h = Math.abs(hash) % 360;
+  // HSL(h, 70%, 60%) → RGB
+  const s = 0.7, l = 0.6;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    return Math.round(255 * (l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1)));
+  };
+  return `${f(0)}, ${f(8)}, ${f(4)}`;
+}
+
+function useExtractColor(imageUrl: string | null, fallbackName: string): string {
+  const [rgb, setRgb] = useState<string>(() => nameToRgb(fallbackName));
+  useEffect(() => {
+    if (!imageUrl) return;
+    const img = new window.Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 12;
+        canvas.height = 12;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, 12, 12);
+        const data = ctx.getImageData(0, 0, 12, 12).data;
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] < 10) continue; // skip transparent
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
+        }
+        if (count > 0) setRgb(`${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)}`);
+      } catch { /* CORS blocked — keep name-hash fallback */ }
+    };
+    img.src = imageUrl;
+  }, [imageUrl]);
+  return rgb;
+}
+
+// ─── Change-mode podium card ─────────────────────────────────────────────────
+
+type ChangeItemForPodium = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  watchlistCount: number;
+  currentValue: number;
+  changePercent: number;
+  hasData: boolean;
+  metric: string;
+};
+
+function ChangePodiumCard({
+  item,
+  position,
+  isWatched,
+  onToggle,
+  toggling,
+  openArtist,
+}: {
+  item: ChangeItemForPodium;
+  position: 0 | 1 | 2;
+  isWatched: boolean;
+  onToggle: () => void;
+  toggling: boolean;
+  openArtist: (id: string) => void;
+}) {
+  const accentHex = useExtractColor(item.imageUrl, item.name);
+  const isFirst = position === 0;
+  const isUp = item.changePercent > 0;
+  const isDown = item.changePercent < 0;
+
+  const sizes = {
+    0: { height: "h-[220px] md:h-[260px]", fadeStop: "90%", artSize: "w-28 h-28 md:w-40 md:h-40", titleSize: "text-base md:text-xl" },
+    1: { height: "h-[160px] md:h-[190px]", fadeStop: "80%", artSize: "w-24 h-24 md:w-32 md:h-32", titleSize: "text-sm md:text-lg" },
+    2: { height: "h-[140px] md:h-[160px]", fadeStop: "75%", artSize: "w-24 h-24 md:w-32 md:h-32", titleSize: "text-sm md:text-lg" },
+  }[position];
+
+  return (
+    <div className={`w-full flex-1 flex flex-col items-center justify-end h-full relative group ${isFirst ? "z-20" : "z-10"}`}>
+      {/* Background Aura */}
+      <div
+        className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[150%] h-[120%] max-h-[300px] rounded-full blur-[100px] opacity-10 md:opacity-[0.15] pointer-events-none transition-opacity duration-700 group-hover:opacity-20"
+        style={{ backgroundColor: `rgb(${accentHex})` }}
+      />
+
+      {/* Floating Avatar + Info */}
+      <div className="relative z-30 flex flex-col items-center group-hover:-translate-y-3 transition-transform duration-500">
+        {/* Avatar */}
+        <button onClick={() => openArtist(item.id)} className="cursor-pointer">
+          <div
+            className={`relative ${sizes.artSize} rounded-full overflow-hidden ring-[3px] ring-offset-2 ring-offset-[var(--background)] transition-all duration-300 z-20 mb-3`}
+            style={{
+              boxShadow: `0 0 60px rgba(${accentHex}, 0.4)`,
+              outline: `3px solid rgba(${accentHex}, 0.8)`,
+              outlineOffset: "2px",
+            }}
+          >
+            {item.imageUrl ? (
+              <Image src={item.imageUrl} alt={item.name} fill className="object-cover" sizes="(max-width: 768px) 112px, 160px" />
+            ) : (
+              <div className="w-full h-full bg-zinc-900/80 flex items-center justify-center">
+                <span className="text-3xl md:text-4xl font-black text-zinc-500">{item.name.charAt(0)}</span>
+              </div>
+            )}
+          </div>
+        </button>
+        {/* Name */}
+        <button onClick={() => openArtist(item.id)} className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-0.5 hover:text-[var(--accent)] transition-colors cursor-pointer ${sizes.titleSize}`}>
+          {item.name}
+        </button>
+        {/* Change badge */}
+        {item.hasData && (
+          <span className={`flex items-center gap-1 text-xs font-bold tabular-nums px-2 py-0.5 rounded-lg mb-3 ${isUp ? "bg-green-500/20 text-green-400" : isDown ? "bg-red-500/20 text-red-400" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}>
+            {isUp ? <ArrowUpRight className="w-3 h-3" /> : isDown ? <ArrowDownRight className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+            {item.changePercent > 0 ? "+" : ""}{item.changePercent.toFixed(1)}%
+          </span>
+        )}
+      </div>
+
+      {/* 2.5D Podium Base */}
+      <div className="relative w-full flex flex-col items-center z-0">
+        {/* Top Glass Surface */}
+        <div
+          className="absolute top-0 -translate-y-1/2 w-[94%] md:w-[96%] h-[20px] md:h-[28px] rounded-[100%] border-t-[2px] border-b border-x z-20 flex items-center justify-center backdrop-blur-xl shadow-2xl"
+          style={{
+            background: `linear-gradient(to bottom, rgba(${accentHex}, 0.35), rgba(${accentHex}, 0.12))`,
+            borderColor: `rgba(${accentHex}, 0.7)`,
+            boxShadow: `0 0 50px rgba(${accentHex}, 0.35) inset`,
+          }}
+        >
+          <div className="w-[55%] h-[35%] rounded-[100%] bg-white/[0.06] border border-white/10 mix-blend-overlay" />
+        </div>
+
+        {/* Extruded Base Column */}
+        <div
+          className={`w-[92%] md:w-[96%] ${sizes.height} relative overflow-hidden flex flex-col items-center justify-center z-10 border-x border-white/[0.08] group-hover:brightness-125 transition-all duration-500`}
+          style={{
+            background: `linear-gradient(to bottom, rgba(${accentHex}, 0.3), rgba(${accentHex}, 0.12), rgba(${accentHex}, 0.05))`,
+            backgroundImage: `radial-gradient(circle at center, rgba(255,255,255,0.12) 1px, transparent 1px)`,
+            backgroundSize: `10px 10px`,
+            WebkitMaskImage: `linear-gradient(to bottom, black 0%, black ${sizes.fadeStop}, transparent 100%)`,
+            maskImage: `linear-gradient(to bottom, black 0%, black ${sizes.fadeStop}, transparent 100%)`,
+          }}
+        >
+          {/* Light streaks */}
+          <div className="absolute inset-y-0 left-[15%] w-6 md:w-10 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent mix-blend-overlay skew-x-12" />
+          <div className="absolute inset-y-0 right-[20%] w-3 md:w-5 bg-gradient-to-r from-transparent via-white/[0.04] to-transparent mix-blend-overlay -skew-x-12" />
+
+          {/* Watchlist button */}
+          <div className="relative z-30 flex flex-col items-center">
+            <button
+              onClick={onToggle}
+              disabled={toggling}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60 shadow-2xl ${
+                isWatched ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]" : "bg-black/50 border border-white/20 text-white hover:bg-white hover:text-black hover:scale-105"
+              }`}
+            >
+              {toggling ? <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Star className={`w-3.5 h-3.5 ${isWatched ? "fill-current" : ""}`} />}
+              <span className="tabular-nums">{item.watchlistCount}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PodiumCard({
   artist,
   rank,
@@ -160,6 +351,7 @@ function PodiumCard({
   onToggle,
   toggling,
   platform,
+  openArtist,
 }: {
   artist: Artist;
   rank: number;
@@ -167,90 +359,158 @@ function PodiumCard({
   onToggle: () => void;
   toggling: boolean;
   platform: string;
+  openArtist: (id: string) => void;
 }) {
-  const heights = ["h-52", "h-44", "h-40"];
-  const rings = [
-    "ring-yellow-400/60 shadow-[0_0_40px_rgba(250,204,21,0.25)]",
-    "ring-zinc-400/40 shadow-[0_0_30px_rgba(161,161,170,0.15)]",
-    "ring-amber-700/40 shadow-[0_0_25px_rgba(180,83,9,0.15)]",
-  ];
-  const medals = ["text-yellow-400", "text-zinc-300", "text-amber-600"];
-  const glows = [
-    "from-yellow-400/10 via-transparent",
-    "from-zinc-400/5 via-transparent",
-    "from-amber-700/5 via-transparent",
-  ];
-  const order = [1, 0, 2];
+  const isFirst = rank === 0;
+
+  const theme = {
+    0: {
+      height: "h-[220px] md:h-[260px]",
+      fadeStop: "90%",
+      baseGradient: "from-yellow-500/30 via-yellow-700/12 to-yellow-900/5",
+      topGradient: "from-yellow-400/35 to-yellow-600/12",
+      rimColor: "border-yellow-400/70",
+      insetGlow: "shadow-[0_0_50px_rgba(234,179,8,0.35)_inset]",
+      artRing: "ring-yellow-400/80",
+      artGlow: "shadow-[0_0_60px_rgba(234,179,8,0.4)] group-hover:shadow-[0_0_80px_rgba(234,179,8,0.6)]",
+      accentHex: "234, 179, 8",
+      numberColor: "text-yellow-500/[0.18]",
+      artSize: "w-28 h-28 md:w-40 md:h-40",
+      titleSize: "text-base md:text-xl",
+      numberSize: "text-[100px] md:text-[160px]",
+    },
+    1: {
+      height: "h-[160px] md:h-[190px]",
+      fadeStop: "80%",
+      baseGradient: "from-zinc-300/25 via-zinc-500/8 to-zinc-700/3",
+      topGradient: "from-zinc-200/30 to-zinc-400/10",
+      rimColor: "border-zinc-300/70",
+      insetGlow: "shadow-[0_0_50px_rgba(212,212,216,0.25)_inset]",
+      artRing: "ring-zinc-300/80",
+      artGlow: "shadow-[0_0_50px_rgba(212,212,216,0.3)] group-hover:shadow-[0_0_70px_rgba(212,212,216,0.5)]",
+      accentHex: "212, 212, 216",
+      numberColor: "text-zinc-400/[0.15]",
+      artSize: "w-24 h-24 md:w-32 md:h-32",
+      titleSize: "text-sm md:text-lg",
+      numberSize: "text-[80px] md:text-[130px]",
+    },
+    2: {
+      height: "h-[140px] md:h-[160px]",
+      fadeStop: "75%",
+      baseGradient: "from-amber-600/25 via-amber-800/8 to-amber-900/3",
+      topGradient: "from-amber-500/30 to-amber-700/10",
+      rimColor: "border-amber-500/70",
+      insetGlow: "shadow-[0_0_50px_rgba(217,119,6,0.3)_inset]",
+      artRing: "ring-amber-500/80",
+      artGlow: "shadow-[0_0_50px_rgba(217,119,6,0.3)] group-hover:shadow-[0_0_70px_rgba(217,119,6,0.5)]",
+      accentHex: "217, 119, 6",
+      numberColor: "text-amber-600/[0.15]",
+      artSize: "w-24 h-24 md:w-32 md:h-32",
+      titleSize: "text-sm md:text-lg",
+      numberSize: "text-[80px] md:text-[130px]",
+    },
+  }[rank as 0 | 1 | 2];
+
+  const platformColors: Record<string, string> = { "": "text-green-400", YOUTUBE: "text-red-400", INSTAGRAM: "text-fuchsia-400", TIKTOK: "text-cyan-400" };
+
+  const statLine = (() => {
+    const color = platformColors[platform] ?? "text-green-400";
+    if (!platform || platform === "") {
+      const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
+      if (spotifyLink && spotifyLink.monthlyListeners > 0) return { text: `${formatCount(spotifyLink.monthlyListeners)} listeners`, color };
+    } else {
+      const link = artist.links.find((l) => l.platform === platform);
+      if (link && link.followerCount > 0) {
+        const label = platform === "YOUTUBE" ? "subs" : "followers";
+        return { text: `${formatCount(link.followerCount)} ${label}`, color };
+      }
+    }
+    return null;
+  })();
 
   return (
-    <div
-      className={`flex flex-col items-center ${rank === 0 ? "order-2 md:-mt-8" : rank === 1 ? "order-1" : "order-3"}`}
-      style={{ order: order[rank] }}
-    >
-      <div className="relative mb-3">
-        {rank === 0 && (
-          <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-yellow-400 text-2xl">
-            <Trophy className="w-7 h-7 fill-yellow-400/30" />
+    <div className={`w-full flex-1 flex flex-col items-center justify-end h-full relative group ${isFirst ? "z-20" : "z-10"}`}>
+      {/* Background Aura */}
+      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[150%] h-[120%] max-h-[300px] rounded-full blur-[100px] opacity-10 md:opacity-[0.15] pointer-events-none transition-opacity duration-700 group-hover:opacity-20" style={{ backgroundColor: `rgb(${theme.accentHex})` }} />
+
+      {/* Floating Avatar + Info */}
+      <div className="relative z-30 flex flex-col items-center group-hover:-translate-y-3 transition-transform duration-500">
+        {/* Trophy for #1 */}
+        {isFirst && (
+          <div className="mb-1">
+            <Trophy className="w-7 h-7 text-yellow-400 fill-yellow-400/30" />
           </div>
         )}
-        <Link href={`/artist/${artist.id}`}>
-          {artist.imageUrl ? (
-            <Image
-              src={artist.imageUrl}
-              alt={artist.name}
-              width={96}
-              height={96}
-              className={`w-20 h-20 md:w-24 md:h-24 rounded-full ring-4 ${rings[rank]} object-cover transition-transform hover:scale-105`}
-            />
-          ) : (
-            <div className={`w-20 h-20 md:w-24 md:h-24 rounded-full ring-4 ${rings[rank]} bg-[var(--muted)] flex items-center justify-center`}>
-              <span className="text-2xl font-black text-[var(--muted-foreground)]">{artist.name.charAt(0)}</span>
-            </div>
-          )}
-        </Link>
-      </div>
-      <div
-        className={`w-full ${heights[rank]} rounded-t-2xl bg-gradient-to-t ${glows[rank]} to-transparent border border-[var(--muted)] border-b-0 relative flex flex-col items-center pt-4 px-3`}
-        style={{ background: `linear-gradient(to top, var(--secondary) 0%, transparent 100%), var(--secondary)` }}
-      >
-        <span className={`text-3xl md:text-4xl font-black ${medals[rank]} mb-1 tabular-nums`}>{rank + 1}</span>
-        <Link href={`/artist/${artist.id}`} className="font-bold text-sm md:text-base text-center hover:text-[var(--accent)] transition-colors truncate max-w-full">
+        {/* Avatar */}
+        <button onClick={() => openArtist(artist.id)} className="cursor-pointer">
+          <div className={`relative ${theme.artSize} rounded-full overflow-hidden ring-[3px] ring-offset-2 ring-offset-[var(--background)] ${theme.artRing} ${theme.artGlow} transition-all duration-300 z-20 mb-3`}>
+            {artist.imageUrl ? (
+              <Image src={artist.imageUrl} alt={artist.name} fill className="object-cover" sizes="(max-width: 768px) 112px, 160px" />
+            ) : (
+              <div className="w-full h-full bg-zinc-900/80 flex items-center justify-center">
+                <span className="text-3xl md:text-4xl font-black text-zinc-500">{artist.name.charAt(0)}</span>
+              </div>
+            )}
+          </div>
+        </button>
+        {/* Name */}
+        <button onClick={() => openArtist(artist.id)} className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-0.5 hover:text-[var(--accent)] transition-colors cursor-pointer ${theme.titleSize}`}>
           {artist.name}
-        </Link>
-        <div className="flex flex-col items-center gap-1 mt-2">
-          {(() => {
-            const platformColors: Record<string, string> = { "": "text-green-400", YOUTUBE: "text-red-400", INSTAGRAM: "text-fuchsia-400", TIKTOK: "text-cyan-400" };
-            const color = platformColors[platform] ?? "text-green-400";
-            if (!platform || platform === "") {
-              const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
-              if (spotifyLink && spotifyLink.monthlyListeners > 0) {
-                return <span className={`text-xs ${color} font-bold tabular-nums`}>{formatCount(spotifyLink.monthlyListeners)} listeners</span>;
-              }
-            } else {
-              const link = artist.links.find((l) => l.platform === platform);
-              if (link && link.followerCount > 0) {
-                const label = platform === "YOUTUBE" ? "subs" : "followers";
-                return <span className={`text-xs ${color} font-bold tabular-nums`}>{formatCount(link.followerCount)} {label}</span>;
-              }
-            }
-            return null;
-          })()}
-          <div className="flex gap-1.5">
-            {artist.links.map((l) => (
-              <span key={l.id} className={`w-2 h-2 rounded-full ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`} title={`${l.platform}: ${formatCount(l.followerCount)}`} />
-            ))}
+        </button>
+        {/* Stat line */}
+        {statLine && <span className={`text-[10px] md:text-xs ${statLine.color} font-bold tabular-nums mb-1`}>{statLine.text}</span>}
+        {/* Platform icons */}
+        <div className="flex gap-1.5 mb-3">
+          {artist.links.map((l) => {
+            const Icon = PLATFORM_ICON[l.platform];
+            const color = PLATFORM_COLOR[l.platform] ?? "text-zinc-400";
+            return Icon ? <Icon key={l.id} className={`w-3.5 h-3.5 ${color}`} /> : null;
+          })}
+        </div>
+      </div>
+
+      {/* 2.5D Podium Base */}
+      <div className="relative w-full flex flex-col items-center z-0">
+        {/* Top Glass Surface */}
+        <div className={`absolute top-0 -translate-y-1/2 w-[94%] md:w-[96%] h-[20px] md:h-[28px] bg-gradient-to-b ${theme.topGradient} rounded-[100%] border-t-[2px] border-b border-x ${theme.rimColor} ${theme.insetGlow} z-20 flex items-center justify-center backdrop-blur-xl shadow-2xl`}>
+          <div className="w-[55%] h-[35%] rounded-[100%] bg-white/[0.06] border border-white/10 mix-blend-overlay" />
+        </div>
+
+        {/* Extruded Base Column */}
+        <div
+          className={`w-[92%] md:w-[96%] ${theme.height} bg-gradient-to-b ${theme.baseGradient} relative overflow-hidden flex flex-col items-center justify-center z-10 border-x border-white/[0.08] group-hover:brightness-125 transition-all duration-500`}
+          style={{
+            backgroundImage: `radial-gradient(circle at center, rgba(255,255,255,0.12) 1px, transparent 1px)`,
+            backgroundSize: `10px 10px`,
+            WebkitMaskImage: `linear-gradient(to bottom, black 0%, black ${theme.fadeStop}, transparent 100%)`,
+            maskImage: `linear-gradient(to bottom, black 0%, black ${theme.fadeStop}, transparent 100%)`,
+          }}
+        >
+          {/* Giant Rank Number */}
+          <div className={`absolute inset-x-0 top-0 bottom-0 flex items-start justify-center pt-2 md:pt-3 select-none pointer-events-none ${theme.numberColor}`}>
+            <span className={`font-black italic ${theme.numberSize} leading-none tracking-tighter`} style={{ textShadow: `0 0 40px rgba(${theme.accentHex}, 0.5), 0 0 80px rgba(${theme.accentHex}, 0.2)`, WebkitTextStroke: `1px rgba(${theme.accentHex}, 0.08)` }}>
+              {rank + 1}
+            </span>
+          </div>
+
+          {/* Light streaks */}
+          <div className="absolute inset-y-0 left-[15%] w-6 md:w-10 bg-gradient-to-r from-transparent via-white/[0.08] to-transparent mix-blend-overlay skew-x-12" />
+          <div className="absolute inset-y-0 right-[20%] w-3 md:w-5 bg-gradient-to-r from-transparent via-white/[0.04] to-transparent mix-blend-overlay -skew-x-12" />
+
+          {/* Watchlist button centered */}
+          <div className="relative z-30 flex flex-col items-center">
+            <button
+              onClick={onToggle}
+              disabled={toggling}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-60 shadow-2xl ${
+                isWatched ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]" : "bg-black/50 border border-white/20 text-white hover:bg-white hover:text-black hover:scale-105"
+              }`}
+            >
+              {toggling ? <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Star className={`w-3.5 h-3.5 ${isWatched ? "fill-current" : ""}`} />}
+              <span className="tabular-nums">{artist.watchlistCount}</span>
+            </button>
           </div>
         </div>
-        <button
-          onClick={onToggle}
-          disabled={toggling}
-          className={`mt-auto mb-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all disabled:opacity-60 ${
-            isWatched ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"
-          }`}
-        >
-          {toggling ? <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Star className={`w-3.5 h-3.5 ${isWatched ? "fill-current" : ""}`} />}
-          {artist.watchlistCount}
-        </button>
       </div>
     </div>
   );
@@ -259,18 +519,60 @@ function PodiumCard({
 interface ArtistListViewProps {
   platform: string;
   search: string;
+  sortMode?: "current" | "change";
+  period?: string;
+  changeSortOrder?: "desc" | "asc" | "abs";
 }
 
-export default function ArtistListView({ platform, search }: ArtistListViewProps) {
+type AllChanges = {
+  listeners: number | null;
+  followers: number | null;
+  youtube: number | null;
+  tiktok: number | null;
+  instagram: number | null;
+  listenersCurrent: number;
+  followersCurrent: number;
+  youtubeCurrent: number;
+  tiktokCurrent: number;
+  instagramCurrent: number;
+};
+
+type ChangeItem = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  watchlistCount: number;
+  currentValue: number;
+  changePercent: number;
+  hasData: boolean;
+  metric: string;
+  allChanges?: AllChanges;
+};
+
+export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc" }: ArtistListViewProps) {
   const { data: session } = useSession();
+  const { openArtist } = useDetailPanel();
   const [artists, setArtists] = useState<Artist[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loadingPodium, setLoadingPodium] = useState(true);
+  const [loadingList, setLoadingList] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [watchlistedIds, setWatchlistedIds] = useState<Set<string>>(new Set());
   const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
   const [rankChanges, setRankChanges] = useState<Record<string, { currentRank: number; previousRank: number | null; rankChange: number }>>({});
+  const [changeItems, setChangeItems] = useState<ChangeItem[]>([]);
+  const [loadingChange, setLoadingChange] = useState(false);
 
+  const isChangeMode = sortMode === "change";
+
+  const sortedChangeItems = useMemo(() => {
+    if (!changeItems.length) return changeItems;
+    return [...changeItems].sort((a, b) => {
+      if (changeSortOrder === "desc") return b.changePercent - a.changePercent;
+      if (changeSortOrder === "asc") return a.changePercent - b.changePercent;
+      return Math.abs(b.changePercent) - Math.abs(a.changePercent);
+    });
+  }, [changeItems, changeSortOrder]);
   // Request modal
   const [showRequest, setShowRequest] = useState(false);
   const [reqName, setReqName] = useState("");
@@ -298,19 +600,40 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
   const isPrivileged = session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
   const prevSearchRef = useRef(search);
   const prevPlatformRef = useRef(platform);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const loadArtists = useCallback(async (q = "", plat = "") => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (plat) params.set("platform", plat);
+
+    // Phase 1: fetch top 3 for the podium
+    const podiumParams = new URLSearchParams(params);
+    podiumParams.set("take", "3");
+    const podiumQs = podiumParams.toString();
+    const podiumData = await fetchJsonWithSessionCache<{ artists: Artist[]; totalCount: number }>(
+      `rank:artists:podium:${podiumQs}`,
+      `/api/artists?${podiumQs}`,
+      300_000
+    ).catch(() => null);
+    if (podiumData) {
+      setArtists(podiumData.artists);
+      setTotalCount(podiumData.totalCount);
+    }
+    setLoadingPodium(false);
+
+    // Phase 2: fetch the full first page
     const qs = params.toString();
-    const res = await fetch(`/api/artists${qs ? `?${qs}` : ""}`);
-    if (res.ok) {
-      const data = await res.json();
+    const data = await fetchJsonWithSessionCache<{ artists: Artist[]; totalCount: number }>(
+      `rank:artists:list:${qs || "default"}`,
+      `/api/artists${qs ? `?${qs}` : ""}`,
+      300_000
+    ).catch(() => null);
+    if (data) {
       setArtists(data.artists);
       setTotalCount(data.totalCount);
     }
-    setLoading(false);
+    setLoadingList(false);
   }, []);
 
   const loadMore = useCallback(async () => {
@@ -320,27 +643,50 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
     if (platform) params.set("platform", platform);
     params.set("skip", String(artists.length));
     const qs = params.toString();
-    const res = await fetch(`/api/artists?${qs}`);
-    if (res.ok) {
-      const data = await res.json();
+    const data = await fetchJsonWithSessionCache<{ artists: Artist[]; totalCount: number }>(
+      `rank:artists:more:${qs}`,
+      `/api/artists?${qs}`,
+      300_000
+    ).catch(() => null);
+    if (data) {
       setArtists((prev) => [...prev, ...data.artists]);
       setTotalCount(data.totalCount);
     }
     setLoadingMore(false);
   }, [search, platform, artists.length]);
 
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+
   const loadWatchlist = useCallback(async () => {
-    const res = await fetch("/api/watchlist");
-    if (res.ok) {
-      const ids: string[] = await res.json();
+    const ids = await fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 120_000).catch(() => null);
+    if (ids) {
       setWatchlistedIds(new Set(ids));
     }
   }, []);
 
   const loadRankChanges = useCallback(async () => {
-    const res = await fetch("/api/artists/ranks");
-    if (res.ok) setRankChanges(await res.json());
+    const ranks = await fetchJsonWithSessionCache<Record<string, { currentRank: number; previousRank: number | null; rankChange: number }>>(
+      "rank:artists:changes",
+      "/api/artists/ranks",
+      300_000
+    ).catch(() => null);
+    if (ranks) setRankChanges(ranks);
   }, []);
+
+  const METRIC_FOR_PLATFORM: Record<string, string> = { "": "listeners", SPOTIFY: "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
+
+  const loadChangeArtists = useCallback(async (plat: string, p: string) => {
+    const metric = METRIC_FOR_PLATFORM[plat] ?? "listeners";
+    setLoadingChange(true);
+    const data = await fetchJsonWithSessionCache<{ artists: ChangeItem[] }>(
+      `rank:artists:change:${p}:${metric}`,
+      `/api/artists/changes?period=${p}&metric=${metric}&mode=change&skip=0&take=200`,
+      300_000
+    ).catch(() => null);
+    if (data) setChangeItems(data.artists ?? []);
+    setLoadingChange(false);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initial load
   useEffect(() => {
@@ -349,12 +695,18 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
     loadRankChanges();
   }, [loadArtists, loadWatchlist, loadRankChanges]);
 
+  // Load change data when change mode is active or params change
+  useEffect(() => {
+    if (isChangeMode) loadChangeArtists(platform, period);
+  }, [isChangeMode, platform, period, loadChangeArtists]);
+
   // React to prop changes
   useEffect(() => {
     if (search !== prevSearchRef.current || platform !== prevPlatformRef.current) {
       prevSearchRef.current = search;
       prevPlatformRef.current = platform;
-      setLoading(true);
+      setLoadingPodium(true);
+      setLoadingList(true);
       loadArtists(search, platform);
     }
   }, [search, platform, loadArtists]);
@@ -392,6 +744,18 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
     });
     return () => timers.forEach((t) => clearTimeout(t));
   }, [addLinks]);
+
+  // Auto-load more when sentinel is visible
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting && !loadingMore && !loadingList && artists.length < totalCount) loadMoreRef.current(); },
+      { rootMargin: "200px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [artists.length, totalCount, loadingMore, loadingList, loadMore]);
 
   function openLinkModal(artistId: string, artistName: string, plat: string) {
     setLinkModalArtistId(artistId);
@@ -443,6 +807,9 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
           return next;
         });
         setArtists((prev) => prev.map((a) => a.id === artistId ? { ...a, watchlistCount: a.watchlistCount + (isWatched ? -1 : 1) } : a));
+        clearSessionCacheByPrefix("watchlist:");
+        clearSessionCacheByPrefix("rank:artists:");
+        window.dispatchEvent(new Event("watchlist-changed"));
       }
     } finally {
       setTogglingIds((prev) => { const next = new Set(prev); next.delete(artistId); return next; });
@@ -501,51 +868,154 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
 
   const top3 = artists.slice(0, 3);
   const rest = artists.slice(3);
-  const totalWatchlists = artists.reduce((s, a) => s + a.watchlistCount, 0);
-  const showPodium = !search && artists.length >= 3;
+  const showPodium = !search && !isChangeMode && artists.length >= 3;
 
-  if (loading) return <ListSkeleton />;
+  // Listen for sidebar-triggered modal opens
+  useEffect(() => {
+    const handleAddArtist = () => setShowAdd(true);
+    const handleRequest = () => session ? setShowRequest(true) : signIn("google");
+    window.addEventListener("open-add-artist", handleAddArtist);
+    window.addEventListener("open-request-join", handleRequest);
+    return () => {
+      window.removeEventListener("open-add-artist", handleAddArtist);
+      window.removeEventListener("open-request-join", handleRequest);
+    };
+  }, [session]);
+
+  if (loadingPodium) return <ListSkeleton />;
 
   return (
     <>
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-10">
-        {[
-          { icon: Trophy, iconColor: "text-yellow-400", label: "Most Watched", value: top3[0]?.name ?? "\u2014" },
-          { icon: Users, iconColor: "text-blue-400", label: "Artists", value: String(totalCount) },
-          { icon: TrendingUp, iconColor: "text-[var(--accent)]", label: "Total Watchlists", value: String(totalWatchlists) },
-        ].map((s) => (
-          <div key={s.label} className="bg-[var(--secondary)]/80 border border-[var(--muted)] rounded-2xl p-5 text-center">
-            <s.icon className={`w-6 h-6 ${s.iconColor} mx-auto mb-2`} />
-            <div className="text-[var(--muted-foreground)] text-[10px] font-bold uppercase tracking-widest">{s.label}</div>
-            <div className="text-xl font-black mt-1 truncate">{s.value}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Action buttons */}
-      <div className="flex gap-3 mb-8">
-        {isPrivileged && (
-          <button onClick={() => setShowAdd(true)} className="px-5 py-3 rounded-xl font-bold bg-[var(--accent)] hover:bg-[#a21caf] transition-all flex items-center gap-2 shadow-[0_0_20px_var(--accent-glow)] text-white">
-            <PlusCircle className="w-5 h-5" /> Add Artist
-          </button>
-        )}
-        <button onClick={() => session ? setShowRequest(true) : signIn("google")} className="px-5 py-3 rounded-xl font-bold border border-[var(--muted)] hover:border-[var(--accent)] transition-all flex items-center gap-2">
-          <Send className="w-5 h-5" /> Request to Join
-        </button>
-      </div>
 
       {/* Podium */}
       {showPodium && (
-        <div className="grid grid-cols-3 gap-4 md:gap-6 mb-12 items-end max-w-2xl mx-auto">
-          {top3.map((artist, i) => (
-            <PodiumCard key={artist.id} artist={artist} rank={i} isWatched={watchlistedIds.has(artist.id)} onToggle={() => toggleWatchlist(artist.id)} toggling={togglingIds.has(artist.id)} platform={platform} />
-          ))}
+        <div className="flex flex-row items-end justify-center h-[520px] md:h-[620px] gap-2 md:gap-5 mb-16 px-2 md:px-0 max-w-5xl mx-auto">
+          <PodiumCard key={top3[1].id} artist={top3[1]} rank={1} isWatched={watchlistedIds.has(top3[1].id)} onToggle={() => toggleWatchlist(top3[1].id)} toggling={togglingIds.has(top3[1].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[0].id} artist={top3[0]} rank={0} isWatched={watchlistedIds.has(top3[0].id)} onToggle={() => toggleWatchlist(top3[0].id)} toggling={togglingIds.has(top3[0].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[2].id} artist={top3[2]} rank={2} isWatched={watchlistedIds.has(top3[2].id)} onToggle={() => toggleWatchlist(top3[2].id)} toggling={togglingIds.has(top3[2].id)} platform={platform} openArtist={openArtist} />
         </div>
       )}
 
-      {/* Artist List */}
-      {artists.length === 0 ? (
+      {/* Change mode list */}
+      {isChangeMode && (
+        loadingChange ? (
+          <div className="flex flex-col gap-2">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 px-5 py-4 flex items-center gap-4">
+                <Skeleton className="h-8 w-8" />
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <div className="min-w-0 flex-1 space-y-1.5"><Skeleton className="h-4 w-36 max-w-full" /><Skeleton className="h-3 w-24 max-w-full" /></div>
+                <Skeleton className="h-7 w-20 rounded-lg" />
+              </div>
+            ))}
+          </div>
+        ) : changeItems.length === 0 ? (
+          <div className="text-center text-[var(--muted-foreground)] py-20">No trend data yet for this period.</div>
+        ) : (
+          <>
+            {/* Change Podium — top 3, profile-color themed */}
+            {!search && sortedChangeItems.length >= 3 && (
+              <div className="flex flex-row items-end justify-center h-[520px] md:h-[620px] gap-2 md:gap-5 mb-16 px-2 md:px-0 max-w-5xl mx-auto">
+                <ChangePodiumCard
+                  item={sortedChangeItems[1]}
+                  position={1}
+                  isWatched={watchlistedIds.has(sortedChangeItems[1].id)}
+                  onToggle={() => toggleWatchlist(sortedChangeItems[1].id)}
+                  toggling={togglingIds.has(sortedChangeItems[1].id)}
+                  openArtist={openArtist}
+                />
+                <ChangePodiumCard
+                  item={sortedChangeItems[0]}
+                  position={0}
+                  isWatched={watchlistedIds.has(sortedChangeItems[0].id)}
+                  onToggle={() => toggleWatchlist(sortedChangeItems[0].id)}
+                  toggling={togglingIds.has(sortedChangeItems[0].id)}
+                  openArtist={openArtist}
+                />
+                <ChangePodiumCard
+                  item={sortedChangeItems[2]}
+                  position={2}
+                  isWatched={watchlistedIds.has(sortedChangeItems[2].id)}
+                  onToggle={() => toggleWatchlist(sortedChangeItems[2].id)}
+                  toggling={togglingIds.has(sortedChangeItems[2].id)}
+                  openArtist={openArtist}
+                />
+              </div>
+            )}
+            {/* Rest of the list */}
+            <div className="flex flex-col gap-2">
+              {(!search && sortedChangeItems.length >= 3 ? sortedChangeItems.slice(3) : sortedChangeItems).map((item, idx) => {
+                const listRank = (!search && sortedChangeItems.length >= 3 ? idx + 3 : idx);
+                const isWatched = watchlistedIds.has(item.id);
+                const isUp = item.changePercent > 0;
+                const isDown = item.changePercent < 0;
+                return (
+                  <div key={item.id} className="group flex items-center gap-4 px-5 py-3 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all">
+                    {/* Rank */}
+                    <div className="w-10 text-center shrink-0">
+                      <span className="font-black text-lg tabular-nums text-[var(--muted-foreground)]">{listRank + 1}</span>
+                    </div>
+                    {/* Avatar */}
+                    <button onClick={() => openArtist(item.id)} className="shrink-0 cursor-pointer">
+                      {item.imageUrl ? (
+                        <Image src={item.imageUrl} alt={item.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover border border-[var(--muted)] group-hover:border-[var(--accent)] transition-colors" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-[var(--muted)] flex items-center justify-center border border-[var(--muted)]">
+                          <span className="font-bold text-sm text-[var(--muted-foreground)]">{item.name.charAt(0)}</span>
+                        </div>
+                      )}
+                    </button>
+                    {/* Name + Metric */}
+                    <div className="flex-1 min-w-0">
+                      <button onClick={() => openArtist(item.id)} className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block cursor-pointer text-left">{item.name}</button>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className="text-xs text-[var(--muted-foreground)] tabular-nums">{formatCount(item.currentValue)} {item.metric}</span>
+                      </div>
+                    </div>
+                    {/* Change badge */}
+                    <div className="shrink-0 flex items-center gap-2">
+                      {item.hasData ? (
+                        <span className={`flex items-center gap-1 text-sm font-bold tabular-nums px-2.5 py-1 rounded-lg ${isUp ? "bg-green-500/15 text-green-400" : isDown ? "bg-red-500/15 text-red-400" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}>
+                          {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : isDown ? <ArrowDownRight className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
+                          {item.changePercent > 0 ? "+" : ""}{item.changePercent.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[var(--muted-foreground)] opacity-50">No data</span>
+                      )}
+                      {/* Watchlist */}
+                      <button
+                        onClick={() => toggleWatchlist(item.id)}
+                        disabled={togglingIds.has(item.id)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all shrink-0 disabled:opacity-60 ${isWatched ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"}`}
+                      >
+                        {togglingIds.has(item.id) ? <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <Star className={`w-4 h-4 ${isWatched ? "fill-current" : ""}`} />}
+                        <span className="tabular-nums">{item.watchlistCount}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )
+      )}
+
+      {/* Artist List (current mode) */}
+      {!isChangeMode && (loadingList ? (
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 px-5 py-4 flex items-center gap-4">
+              <Skeleton className="h-8 w-8" />
+              <Skeleton className="h-14 w-14 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-4 w-40 max-w-full" />
+                <Skeleton className="h-3 w-28 max-w-full" />
+              </div>
+              <Skeleton className="h-8 w-20 rounded-full" />
+            </div>
+          ))}
+        </div>
+      ) : artists.length === 0 ? (
         <div className="text-center text-[var(--muted-foreground)] py-20">
           {search || platform ? "No artists match your filters." : "No artists yet. Be the first to request one!"}
         </div>
@@ -570,7 +1040,7 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
                 </div>
 
                 {/* Avatar */}
-                <Link href={`/artist/${artist.id}`} className="shrink-0">
+                <button onClick={() => openArtist(artist.id)} className="shrink-0 cursor-pointer">
                   {artist.imageUrl ? (
                     <Image src={artist.imageUrl} alt={artist.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover border border-[var(--muted)] group-hover:border-[var(--accent)] transition-colors" />
                   ) : (
@@ -578,13 +1048,13 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
                       <span className="font-bold text-sm text-[var(--muted-foreground)]">{artist.name.charAt(0)}</span>
                     </div>
                   )}
-                </Link>
+                </button>
 
                 {/* Name + Stats */}
                 <div className="flex-1 min-w-0">
-                  <Link href={`/artist/${artist.id}`} className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block">
+                  <button onClick={() => openArtist(artist.id)} className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block cursor-pointer text-left">
                     {artist.name}
-                  </Link>
+                  </button>
                   <div className="flex gap-3 mt-1 flex-wrap">
                     {(() => {
                       if (platform) {
@@ -592,7 +1062,7 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
                         if (link) {
                           return (
                             <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[link.platform] ?? "bg-zinc-500"}`} />
+                              {(() => { const Icon = PLATFORM_ICON[link.platform]; const color = PLATFORM_COLOR[link.platform] ?? 'text-zinc-400'; return Icon ? <Icon className={`w-3 h-3 shrink-0 ${color}`} /> : <span className="w-2 h-2 rounded-full shrink-0 bg-zinc-500" />; })()}
                               <span className="tabular-nums">{formatCount(link.followerCount)} {PLATFORM_STAT_LABEL[link.platform] ?? ""}</span>
                             </span>
                           );
@@ -604,19 +1074,19 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
                         <>
                           {spotifyLink && spotifyLink.monthlyListeners > 0 && (
                             <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                              <span className="w-2 h-2 rounded-full shrink-0 bg-green-400" />
+                              <SpotifyIcon className="w-3 h-3 shrink-0 text-green-400" />
                               <span className="tabular-nums">{formatCount(spotifyLink.monthlyListeners)} listeners</span>
                             </span>
                           )}
                           {spotifyLink && spotifyLink.followerCount > 0 && (
                             <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                              <span className="w-2 h-2 rounded-full shrink-0 bg-green-700" />
+                              <SpotifyIcon className="w-3 h-3 shrink-0 text-green-600" />
                               <span className="tabular-nums">{formatCount(spotifyLink.followerCount)} followers</span>
                             </span>
                           )}
                           {artist.links.filter((l) => l.platform !== "SPOTIFY").map((l) => (
                             <a key={l.id} href={l.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-white transition-colors">
-                              <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`} />
+                              {(() => { const Icon = PLATFORM_ICON[l.platform]; const color = PLATFORM_COLOR[l.platform] ?? 'text-zinc-400'; return Icon ? <Icon className={`w-3 h-3 shrink-0 ${color}`} /> : <span className="w-2 h-2 rounded-full shrink-0 bg-zinc-500" />; })()}
                               {l.followerCount > 0 ? (
                                 <span className="tabular-nums">{formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}</span>
                               ) : getDisplayHandle(l) ? (
@@ -629,7 +1099,7 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
                             const missing = Object.keys(PLATFORM_DOT).filter((p) => !existing.has(p));
                             return missing.map((p) => (
                               <button key={p} onClick={(e) => { e.stopPropagation(); openLinkModal(artist.id, artist.name, p); }} className="flex items-center gap-0.5 text-xs opacity-40 hover:opacity-100 transition-opacity" title={`Add ${p.charAt(0) + p.slice(1).toLowerCase()}`}>
-                                <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[p]}`} />
+                                {(() => { const Icon = PLATFORM_ICON[p]; const color = PLATFORM_COLOR[p] ?? 'text-zinc-400'; return Icon ? <Icon className={`w-3 h-3 shrink-0 ${color}`} /> : <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[p]}`} />; })()}
                                 <X className="w-2.5 h-2.5 text-red-400" />
                               </button>
                             ));
@@ -655,15 +1125,16 @@ export default function ArtistListView({ platform, search }: ArtistListViewProps
             );
           })}
         </div>
-      )}
+      ))}
 
-      {/* Load More */}
-      {artists.length < totalCount && (
-        <div className="flex justify-center mt-6">
-          <button onClick={loadMore} disabled={loadingMore} className="px-6 py-3 rounded-xl font-bold border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)]/80 transition-all flex items-center gap-2 disabled:opacity-50">
-            {loadingMore && <Loader2 className="w-4 h-4 animate-spin" />}
-            {loadingMore ? "Loading..." : `Load More (${artists.length} / ${totalCount})`}
-          </button>
+      {/* Load More sentinel */}
+      {!isChangeMode && artists.length < totalCount && (
+        <div ref={sentinelRef} className="flex justify-center mt-6 py-4">
+          {loadingMore && (
+            <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading more...
+            </div>
+          )}
         </div>
       )}
 

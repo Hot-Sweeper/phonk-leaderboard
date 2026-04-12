@@ -109,7 +109,7 @@ export default function PackDetailPage() {
   if (loading) {
     return (
       <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12">
-        <div className="max-w-4xl mx-auto space-y-6">
+        <div className="max-w-6xl mx-auto space-y-6">
           <Skeleton className="h-8 w-32" />
           <Skeleton className="w-full aspect-[2.5/1] rounded-2xl" />
           <Skeleton className="h-10 w-2/3" />
@@ -149,7 +149,7 @@ export default function PackDetailPage() {
       {/* Grid overlay */}
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-4xl mx-auto relative z-10">
+      <div className="max-w-6xl mx-auto relative z-10">
         {/* Back button */}
         <button
           onClick={() => router.push("/samples")}

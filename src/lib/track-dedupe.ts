@@ -268,7 +268,7 @@ function collapseTracks<T extends TrackLike>(
 }
 
 export function collapseArtistTracks<T extends TrackLike>(tracks: T[]) {
-  return collapseTracks(tracks, (track) => getTrackIdentityTitle(track.name));
+  return collapseTracks(tracks, (track) => getCanonicalTrackTitle(track.name));
 }
 
 export function collapseFeedTracks<T extends TrackLike & { artistId: string }>(

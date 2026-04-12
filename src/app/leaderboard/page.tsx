@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signIn } from "next-auth/react";
-import Link from "next/link";
 import Image from "next/image";
+import { useDetailPanel } from "@/lib/detail-panel";
 import { Skeleton } from "@/components/Skeleton";
 import {
   Trophy,
@@ -193,6 +193,7 @@ function PodiumCard({
   onToggle,
   toggling,
   platform,
+  openArtist,
 }: {
   artist: Artist;
   rank: number;
@@ -200,6 +201,7 @@ function PodiumCard({
   onToggle: () => void;
   toggling: boolean;
   platform: string;
+  openArtist: (id: string) => void;
 }) {
   const heights = ["h-52", "h-44", "h-40"];
   const rings = [
@@ -227,7 +229,7 @@ function PodiumCard({
             <Trophy className="w-7 h-7 fill-yellow-400/30" />
           </div>
         )}
-        <Link href={`/artist/${artist.id}`}>
+        <button onClick={() => openArtist(artist.id)} className="cursor-pointer">
           {artist.imageUrl ? (
             <Image
               src={artist.imageUrl}
@@ -245,7 +247,7 @@ function PodiumCard({
               </span>
             </div>
           )}
-        </Link>
+        </button>
       </div>
 
       {/* Podium block */}
@@ -261,12 +263,12 @@ function PodiumCard({
         </span>
 
         {/* Name */}
-        <Link
-          href={`/artist/${artist.id}`}
-          className="font-bold text-sm md:text-base text-center hover:text-[var(--accent)] transition-colors truncate max-w-full"
+        <button
+          onClick={() => openArtist(artist.id)}
+          className="font-bold text-sm md:text-base text-center hover:text-[var(--accent)] transition-colors truncate max-w-full cursor-pointer"
         >
           {artist.name}
-        </Link>
+        </button>
 
         {/* Platform stat */}
         <div className="flex flex-col items-center gap-1 mt-2">
@@ -337,6 +339,7 @@ function PodiumCard({
 /* ─── Main Page ─── */
 export default function LeaderboardPage() {
   const { data: session } = useSession();
+  const { openArtist } = useDetailPanel();
   const [artists, setArtists] = useState<Artist[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -552,6 +555,7 @@ export default function LeaderboardPage() {
               : a
           )
         );
+        window.dispatchEvent(new Event("watchlist-changed"));
       }
     } finally {
       setTogglingIds((prev) => {
@@ -663,11 +667,11 @@ export default function LeaderboardPage() {
   const totalWatchlists = artists.reduce((s, a) => s + a.watchlistCount, 0);
 
   return (
-    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans overflow-hidden relative">
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-6 py-8 md:p-12 font-sans overflow-hidden relative">
       {/* Grid overlay */}
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-5xl mx-auto relative z-10">
+      <div className="relative z-10">
         {/* ── Header ── */}
         <header className="flex flex-col md:flex-row items-center justify-between gap-6 mb-12">
           <div>
@@ -748,6 +752,7 @@ export default function LeaderboardPage() {
                 onToggle={() => toggleWatchlist(artist.id)}
                 toggling={togglingIds.has(artist.id)}
                 platform={platform}
+                openArtist={openArtist}
               />
             ))}
           </div>
@@ -826,7 +831,7 @@ export default function LeaderboardPage() {
                   </div>
 
                   {/* Avatar */}
-                  <Link href={`/artist/${artist.id}`} className="shrink-0">
+                  <button onClick={() => openArtist(artist.id)} className="shrink-0 cursor-pointer">
                     {artist.imageUrl ? (
                       <Image
                         src={artist.imageUrl}
@@ -842,16 +847,16 @@ export default function LeaderboardPage() {
                         </span>
                       </div>
                     )}
-                  </Link>
+                  </button>
 
                   {/* Name + platform stats */}
                   <div className="flex-1 min-w-0">
-                    <Link
-                      href={`/artist/${artist.id}`}
-                      className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block"
+                    <button
+                      onClick={() => openArtist(artist.id)}
+                      className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block cursor-pointer text-left"
                     >
                       {artist.name}
-                    </Link>
+                    </button>
                     <div className="flex gap-3 mt-1 flex-wrap">
                       {(() => {
                         // When filtering by platform, show that platform's metric prominently

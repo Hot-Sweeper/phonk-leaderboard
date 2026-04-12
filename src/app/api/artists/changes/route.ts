@@ -14,6 +14,10 @@ type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
 
 const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram"];
 
+// Server-side in-memory cache — cleared on deploy/restart
+const routeCache = new Map<string, { data: unknown; expiresAt: number }>();
+const CACHE_TTL_MS = 90_000; // 90 seconds
+
 function getMetricFromSnapshot(
   snapshot: { monthlyListeners: number; followerCount: number; youtubeSubscribers: number; tiktokFollowers: number; instagramFollowers: number },
   metric: MetricKey
@@ -63,6 +67,17 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid period" }, { status: 400 });
   }
 
+  // Serve from cache if fresh
+  const cacheKey = `${period}:${metric}:${mode}`;
+  const cached = routeCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    const full = cached.data as { artists: unknown[]; totalCount: number; availablePeriods: string[]; period: string; metric: string; mode: string };
+    return NextResponse.json(
+      { ...full, artists: full.artists.slice(skip, skip + take) },
+      { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300", "X-Cache": "HIT" } }
+    );
+  }
+
   const cutoff = new Date(Date.now() - periodMs);
 
   // Determine which periods have data
@@ -88,6 +103,7 @@ export async function GET(req: Request) {
         select: { platform: true, monthlyListeners: true, followerCount: true },
       },
     },
+    orderBy: { name: "asc" },
   });
 
   const totalCount = artists.length;
@@ -100,6 +116,7 @@ export async function GET(req: Request) {
         id: artist.id,
         name: artist.name,
         imageUrl: artist.imageUrl,
+        watchlistCount: artist.watchlistCount,
         currentValue,
         changePercent: 0,
         hasData: false,
@@ -107,16 +124,18 @@ export async function GET(req: Request) {
       };
     });
 
-    result.sort((a, b) => b.currentValue - a.currentValue);
+    const filteredCurrent = metric === "listeners" || metric === "followers"
+      ? result
+      : result.filter((a) => a.currentValue > 0);
 
-    return NextResponse.json({
-      artists: result.slice(skip, skip + take),
-      totalCount,
-      availablePeriods,
-      period,
-      metric,
-      mode,
-    });
+    filteredCurrent.sort((a, b) => b.currentValue - a.currentValue);
+
+    const payload = { artists: filteredCurrent, totalCount: filteredCurrent.length, availablePeriods, period, metric, mode };
+    routeCache.set(cacheKey, { data: payload, expiresAt: Date.now() + CACHE_TTL_MS });
+    return NextResponse.json(
+      { ...payload, artists: filteredCurrent.slice(skip, skip + take) },
+      { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } }
+    );
   }
 
   // Change mode: calculate % change over period
@@ -142,11 +161,39 @@ export async function GET(req: Request) {
 
   const oldMap = new Map(oldSnapshots.map((s) => [s.artistId, s]));
 
-  const result = artists.map((artist) => {
-    const currentValue = getMetricFromLinks(artist.links, metric);
-    const old = oldMap.get(artist.id);
-    const oldValue = old ? getMetricFromSnapshot(old, metric) : currentValue;
+  function calcChange(cur: number, old: number | undefined): number | null {
+    if (old == null || old === 0) return null;
+    return Math.round(((cur - old) / old) * 10000) / 100; // 2 decimal places
+  }
 
+  const result = artists.map((artist) => {
+    const old = oldMap.get(artist.id);
+    const hasData = !!old;
+
+    // Current values for each metric
+    const listeners = getMetricFromLinks(artist.links, "listeners");
+    const followers = getMetricFromLinks(artist.links, "followers");
+    const youtube = getMetricFromLinks(artist.links, "youtube");
+    const tiktok = getMetricFromLinks(artist.links, "tiktok");
+    const instagram = getMetricFromLinks(artist.links, "instagram");
+
+    // All-platform changes
+    const allChanges = {
+      listeners: hasData ? calcChange(listeners, old!.monthlyListeners) : null,
+      followers: hasData ? calcChange(followers, old!.followerCount) : null,
+      youtube: youtube > 0 && hasData ? calcChange(youtube, old!.youtubeSubscribers) : null,
+      tiktok: tiktok > 0 && hasData ? calcChange(tiktok, old!.tiktokFollowers) : null,
+      instagram: instagram > 0 && hasData ? calcChange(instagram, old!.instagramFollowers) : null,
+      // current values for display
+      listenersCurrent: listeners,
+      followersCurrent: followers,
+      youtubeCurrent: youtube,
+      tiktokCurrent: tiktok,
+      instagramCurrent: instagram,
+    };
+
+    const currentValue = getMetricFromLinks(artist.links, metric);
+    const oldValue = old ? getMetricFromSnapshot(old, metric) : currentValue;
     let changePercent = 0;
     if (oldValue > 0 && old) {
       changePercent = ((currentValue - oldValue) / oldValue) * 100;
@@ -156,22 +203,27 @@ export async function GET(req: Request) {
       id: artist.id,
       name: artist.name,
       imageUrl: artist.imageUrl,
+      watchlistCount: artist.watchlistCount,
       currentValue,
       changePercent: Math.round(changePercent * 100) / 100,
-      hasData: !!old,
+      hasData,
       metric,
+      allChanges,
     };
   });
 
-  // Sort by absolute change (biggest movers first)
-  result.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+  // For non-Spotify metrics, only include artists that actually have that platform
+  const filteredResult = metric === "listeners" || metric === "followers"
+    ? result
+    : result.filter((a) => a.currentValue > 0);
 
-  return NextResponse.json({
-    artists: result.slice(skip, skip + take),
-    totalCount,
-    availablePeriods,
-    period,
-    metric,
-    mode,
-  });
+  // Sort by absolute change of selected metric (biggest movers first)
+  filteredResult.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+
+  const payload = { artists: filteredResult, totalCount: filteredResult.length, availablePeriods, period, metric, mode };
+  routeCache.set(cacheKey, { data: payload, expiresAt: Date.now() + CACHE_TTL_MS });
+  return NextResponse.json(
+    { ...payload, artists: filteredResult.slice(skip, skip + take) },
+    { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } }
+  );
 }

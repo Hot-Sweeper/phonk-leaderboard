@@ -5,62 +5,13 @@ import type { Platform } from "@prisma/client";
 import { fetchPlatformStats, parseSpotifyUrl, fetchSpotifyArtist } from "@/lib/platforms";
 import { recordSnapshot } from "@/lib/snapshots";
 
-async function enrichLink<T extends {
-  id: string;
-  platform: string;
-  url: string;
-  handle: string | null;
-  followerCount: number;
-  monthlyListeners: number;
-  platformId: string | null;
-  artistId: string;
-}>(link: T): Promise<T> {
-  const needsSpotifyRefresh =
-    link.platform === "SPOTIFY" &&
-    (link.followerCount === 0 || link.platformId === null || link.monthlyListeners === 0);
-  const needsSocialRefresh =
-    (link.platform === "TIKTOK" || link.platform === "INSTAGRAM") &&
-    (!link.handle || link.followerCount === 0);
-
-  if (!needsSpotifyRefresh && !needsSocialRefresh) {
-    return link;
-  }
-
-  const stats = await fetchPlatformStats(link.platform, link.url);
-  if (!stats) {
-    return link;
-  }
-
-  const nextLink = {
-    ...link,
-    handle: stats.handle ?? link.handle,
-    followerCount: stats.followerCount || link.followerCount,
-    monthlyListeners: stats.monthlyListeners || link.monthlyListeners,
-    platformId: stats.platformId ?? link.platformId,
-  };
-
-  await prisma.artistLink.update({
-    where: { id: link.id },
-    data: {
-      handle: nextLink.handle,
-      followerCount: nextLink.followerCount,
-      monthlyListeners: nextLink.monthlyListeners,
-      platformId: nextLink.platformId,
-    },
-  });
-
-  // When refreshing a Spotify link, also update the artist's image and name
-  if (link.platform === "SPOTIFY" && stats.imageUrl) {
-    const artistUpdate: Record<string, string> = { imageUrl: stats.imageUrl };
-    if (stats.name) artistUpdate.name = stats.name;
-    await prisma.artist.update({
-      where: { id: link.artistId },
-      data: artistUpdate,
-    });
-  }
-
-  return nextLink;
-}
+// Server-side in-memory cache for artist list
+type ArtistCacheEntry = {
+  artists: Awaited<ReturnType<typeof prisma.artist.findMany<{ include: { links: { orderBy: { platform: "asc" } } } }>>>;
+  timestamp: number;
+};
+const artistListCache = new Map<string, ArtistCacheEntry>();
+const ARTIST_CACHE_TTL = 120_000; // 2 minutes
 
 // GET artists with optional search + platform filter + pagination
 export async function GET(req: Request) {
@@ -83,58 +34,63 @@ export async function GET(req: Request) {
     where.links = { some: { platform } };
   }
 
-  const [artists, totalCount] = await Promise.all([
-    prisma.artist.findMany({
+  const cacheKey = `${q ?? ""}:${platform ?? ""}`;
+  const now = Date.now();
+  const cached = artistListCache.get(cacheKey);
+
+  let artists: ArtistCacheEntry["artists"];
+  let totalCount: number;
+
+  if (cached && now - cached.timestamp < ARTIST_CACHE_TTL) {
+    artists = cached.artists;
+    totalCount = artists.length;
+  } else {
+    artists = await prisma.artist.findMany({
       where,
       include: {
         links: { orderBy: { platform: "asc" } },
       },
-    }),
-    prisma.artist.count({ where }),
-  ]);
+    });
 
-  const enrichedArtists = await Promise.all(
-    artists.map(async (artist) => ({
-      ...artist,
-      links: await Promise.all(artist.links.map((link) => enrichLink(link))),
-    }))
-  );
-
-  const metricForArtist = (artist: (typeof enrichedArtists)[number]) => {
-    if (platform === "YOUTUBE") {
-      return artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
-    }
-
-    if (platform === "SPOTIFY") {
+    const metricForArtist = (artist: (typeof artists)[number]) => {
+      if (platform === "YOUTUBE") {
+        return artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
+      }
+      if (platform === "SPOTIFY") {
+        return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+      }
+      if (platform === "TIKTOK") {
+        return artist.links.find((link) => link.platform === "TIKTOK")?.followerCount ?? 0;
+      }
+      if (platform === "INSTAGRAM") {
+        return artist.links.find((link) => link.platform === "INSTAGRAM")?.followerCount ?? 0;
+      }
       return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+    };
+
+    artists.sort((a, b) => {
+      const metricDelta = metricForArtist(b) - metricForArtist(a);
+      if (metricDelta !== 0) return metricDelta;
+      const watchlistDelta = b.watchlistCount - a.watchlistCount;
+      if (watchlistDelta !== 0) return watchlistDelta;
+      return a.name.localeCompare(b.name);
+    });
+
+    totalCount = artists.length;
+    artistListCache.set(cacheKey, { artists, timestamp: now });
+  }
+
+  return NextResponse.json(
+    {
+      artists: artists.slice(skip, skip + take),
+      totalCount,
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
+      },
     }
-
-    if (platform === "TIKTOK") {
-      return artist.links.find((link) => link.platform === "TIKTOK")?.followerCount ?? 0;
-    }
-
-    if (platform === "INSTAGRAM") {
-      return artist.links.find((link) => link.platform === "INSTAGRAM")?.followerCount ?? 0;
-    }
-
-    // Default: sort by Spotify monthly listeners
-    return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
-  };
-
-  enrichedArtists.sort((a, b) => {
-    const metricDelta = metricForArtist(b) - metricForArtist(a);
-    if (metricDelta !== 0) return metricDelta;
-
-    const watchlistDelta = b.watchlistCount - a.watchlistCount;
-    if (watchlistDelta !== 0) return watchlistDelta;
-
-    return a.name.localeCompare(b.name);
-  });
-
-  return NextResponse.json({
-    artists: enrichedArtists.slice(skip, skip + take),
-    totalCount,
-  });
+  );
 }
 
 // POST — admins/mods add an artist with links

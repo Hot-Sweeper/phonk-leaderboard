@@ -850,6 +850,176 @@ export async function fetchDeezerTrackDetail(deezerTrackId: number): Promise<Dee
   }
 }
 
+/**
+ * Fetch the FULL discography for an artist via Deezer albums → tracks.
+ * Replaces the limited top-50 endpoint with a paginated full-catalog approach.
+ * Skips per-track detail calls (BPM/gain) to keep the request count manageable.
+ */
+export async function fetchDeezerFullCatalog(deezerId: number): Promise<DeezerTrack[] | null> {
+  try {
+    // ── 1. Paginate through all albums ──
+    const albums: Array<{ id: number; title: string; coverBig: string | null; releaseDate: string | null; type: string }> = [];
+    let offset = 0;
+    const albumLimit = 50;
+    while (true) {
+      const res = await fetch(
+        `https://api.deezer.com/artist/${deezerId}/albums?limit=${albumLimit}&index=${offset}`
+      );
+      if (!res.ok) break;
+      const data = await res.json();
+      if (!data.data || data.data.length === 0) break;
+      for (const a of data.data) {
+        albums.push({
+          id: a.id,
+          title: a.title ?? "",
+          coverBig: a.cover_big ?? a.cover_medium ?? null,
+          releaseDate: a.release_date ?? null,
+          type: a.record_type ?? "album",
+        });
+      }
+      if (data.data.length < albumLimit) break;
+      offset += albumLimit;
+      if (albums.length >= 500) break; // hard cap — avoids runaway fetches
+    }
+
+    if (albums.length === 0) {
+      // fall back to top tracks if no albums available
+      return fetchDeezerTopTracks(deezerId);
+    }
+
+    // ── 2. Fetch tracks for each album ──
+    const allTracks: DeezerTrack[] = [];
+    for (const album of albums) {
+      try {
+        const res = await fetch(`https://api.deezer.com/album/${album.id}/tracks?limit=100`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (!data.data) continue;
+
+        for (const t of data.data) {
+          // contributors array is available on album track listing
+          const contributors: Array<{ name: string; id: number }> =
+            Array.isArray(t.contributors) && t.contributors.length > 0
+              ? t.contributors
+              : t.artist
+                ? [t.artist]
+                : [];
+
+          allTracks.push({
+            deezerId: t.id,
+            name: t.title_short ?? t.title,
+            popularity: t.rank ?? 0,
+            durationMs: (t.duration ?? 0) * 1000,
+            explicit: t.explicit_lyrics ?? false,
+            previewUrl: t.preview ?? null,
+            trackNumber: t.track_position ?? 0,
+            deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
+            album: {
+              name: album.title,
+              imageUrl: album.coverBig,
+              releaseDate: album.releaseDate,
+            },
+            artists: contributors.map((c) => ({ name: c.name, deezerId: c.id })),
+            bpm: null,
+            gain: null,
+            releaseDate: album.releaseDate,
+          });
+        }
+      } catch {
+        // individual album failure — keep going
+      }
+    }
+
+    return allTracks.length > 0 ? allTracks : null;
+  } catch (err) {
+    console.error(`[Deezer] Full catalog error for ${deezerId}:`, err);
+    return null;
+  }
+}
+
+/**
+ * Fetch the FULL discography for an artist via Spotify albums → tracks.
+ * Used as a fallback when no Deezer ID is available.
+ */
+export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
+  id: string;
+  name: string;
+  popularity: number;
+  durationMs: number;
+  explicit: boolean;
+  previewUrl: string | null;
+  trackNumber: number;
+  discNumber: number;
+  spotifyUrl: string;
+  album: { name: string; imageUrl: string | null; releaseDate: string | null };
+  artists: { name: string; id: string }[];
+}[] | null> {
+  const token = await getSpotifyToken();
+  if (!token) return null;
+
+  try {
+    // ── 1. Paginate albums (album + single + compilation) ──
+    const albumIds: string[] = [];
+    let nextUrl: string | null =
+      `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single&limit=50&market=US`;
+
+    while (nextUrl && albumIds.length < 500) {
+      const albumRes = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!albumRes.ok) break;
+      const albumData = await albumRes.json() as { items?: { id: string }[]; next?: string | null };
+      for (const a of albumData.items ?? []) albumIds.push(a.id);
+      nextUrl = albumData.next ?? null;
+    }
+
+    if (albumIds.length === 0) {
+      // fall back to top tracks
+      return fetchSpotifyTopTracks(spotifyId);
+    }
+
+    // ── 2. Fetch tracks per album (batch albums in groups of 20) ──
+    const allTracks: Awaited<ReturnType<typeof fetchSpotifyTopTracks>> = [];
+    // Fetch album details in batches of 20 (Spotify limit)
+    for (let i = 0; i < albumIds.length; i += 20) {
+      const batch = albumIds.slice(i, i + 20);
+      const res = await fetch(
+        `https://api.spotify.com/v1/albums?ids=${batch.join(",")}&market=US`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      for (const album of data.albums ?? []) {
+        if (!album) continue;
+        const albumInfo = {
+          name: album.name ?? "",
+          imageUrl: album.images?.[0]?.url ?? null,
+          releaseDate: album.release_date ?? null,
+        };
+        for (const t of album.tracks?.items ?? []) {
+          if (!t) continue;
+          allTracks!.push({
+            id: t.id,
+            name: t.name,
+            popularity: 0, // tracks endpoint doesn't include popularity; acceptably 0
+            durationMs: t.duration_ms ?? 0,
+            explicit: t.explicit ?? false,
+            previewUrl: t.preview_url ?? null,
+            trackNumber: t.track_number ?? 0,
+            discNumber: t.disc_number ?? 0,
+            spotifyUrl: t.external_urls?.spotify ?? "",
+            album: albumInfo,
+            artists: (t.artists ?? []).map((a: { name: string; id: string }) => ({ name: a.name, id: a.id })),
+          });
+        }
+      }
+    }
+
+    return allTracks && allTracks.length > 0 ? allTracks : null;
+  } catch (err) {
+    console.error(`[Spotify] Full catalog error for ${spotifyId}:`, err);
+    return null;
+  }
+}
+
 /** Fetch top tracks for an artist from Deezer */
 export async function fetchDeezerTopTracks(deezerId: number): Promise<DeezerTrack[] | null> {
   try {

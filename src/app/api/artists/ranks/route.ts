@@ -34,5 +34,9 @@ export async function GET() {
     };
   }
 
-  return NextResponse.json(result);
+  return NextResponse.json(result, {
+    headers: {
+      "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+    },
+  });
 }

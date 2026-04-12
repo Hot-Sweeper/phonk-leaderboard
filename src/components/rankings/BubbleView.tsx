@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Skeleton } from "@/components/Skeleton";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { fetchJsonWithSessionCache } from "@/lib/client-cache";
+import { useDetailPanel } from "@/lib/detail-panel";
 
 type BubbleItem = {
   id: string;
@@ -47,9 +48,11 @@ interface BubbleViewProps {
   mode: string;
   period: string;
   songMode?: string;
+  searchQuery?: string;
 }
 
-export default function BubbleView({ entity, metric, mode, period, songMode }: BubbleViewProps) {
+export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery }: BubbleViewProps) {
+  const { openArtist, openSong } = useDetailPanel();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const bubblesRef = useRef<Bubble[]>([]);
@@ -64,16 +67,79 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
   const [loading, setLoading] = useState(true);
   const [hovered, setHovered] = useState<Bubble | null>(null);
   const [watchlist, setWatchlist] = useState<Set<string>>(new Set());
+  const [searchStatus, setSearchStatus] = useState<"not-found" | null>(null);
+  const searchMatchIdsRef = useRef<Set<string>>(new Set());
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  // Search query: highlight matching bubbles and auto-jump to correct page
+  useEffect(() => {
+    if (!searchQuery?.trim()) {
+      searchMatchIdsRef.current = new Set();
+      setSearchStatus(null);
+      return;
+    }
+    const q = searchQuery.toLowerCase().trim();
+
+    // Check currently loaded items first
+    const matches = items.filter(item => item.name.toLowerCase().includes(q));
+    if (matches.length > 0) {
+      searchMatchIdsRef.current = new Set(matches.map(m => m.id));
+      setSearchStatus(null);
+      return;
+    }
+
+    // Not on current page — search across pages
+    searchMatchIdsRef.current = new Set();
+    setSearchStatus(null);
+
+    if (entity === "songs") {
+      const sMode = songMode || "popularity";
+      fetch(`/api/songs?search=${encodeURIComponent(q)}&skip=0&take=1&mode=${sMode}&collapseVersions=true`)
+        .then(r => r.json())
+        .then((data: { tracks?: Array<{ rank?: number }> }) => {
+          const track = data.tracks?.[0];
+          if (track?.rank != null) {
+            const targetPage = Math.floor((track.rank - 1) / PAGE_SIZE);
+            if (targetPage !== page) setPage(targetPage);
+          } else {
+            setSearchStatus("not-found");
+          }
+        })
+        .catch(() => { setSearchStatus("not-found"); });
+    } else {
+      // Artists: scan pages sequentially up to 5
+      const scan = async () => {
+        for (let p = 0; p < Math.min(totalPages, 5); p++) {
+          if (p === page) continue;
+          const skip = p * PAGE_SIZE;
+          const url = `/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`;
+          const data = await fetch(url).then(r => r.json()).catch(() => null);
+          if (!data) continue;
+          const artists: Array<{ name: string }> = data.artists ?? [];
+          if (artists.some(a => a.name.toLowerCase().includes(q))) {
+            setPage(p);
+            return;
+          }
+        }
+        setSearchStatus("not-found");
+      };
+      scan();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, items]);
 
   // Load watchlist
   useEffect(() => {
     if (entity !== "artists") return;
-    fetch("/api/watchlist")
-      .then((r) => r.ok ? r.json() : [])
-      .then((ids: string[]) => setWatchlist(new Set(ids)))
-      .catch(() => {});
+    const loadWatchlist = () => {
+      fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 30_000)
+        .then((ids) => setWatchlist(new Set(ids)))
+        .catch(() => {});
+    };
+    loadWatchlist();
+    window.addEventListener("watchlist-changed", loadWatchlist);
+    return () => window.removeEventListener("watchlist-changed", loadWatchlist);
   }, [entity]);
 
   // Fetch data
@@ -82,8 +148,12 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
     const skip = page * PAGE_SIZE;
 
     if (entity === "artists") {
-      fetch(`/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`)
-        .then((r) => r.json())
+      const url = `/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`;
+      fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
+        `rank:bubbles:artists:${period}:${metric}:${mode}:${skip}`,
+        url,
+        45_000
+      )
         .then((data) => {
           const artists = (data.artists ?? []).map((a: { id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }, idx: number) => ({
             id: a.id,
@@ -103,8 +173,12 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
     } else {
       // Songs bubble mode
       const sMode = songMode || "popularity";
-      fetch(`/api/songs?skip=${skip}&take=${PAGE_SIZE}&mode=${sMode}&collapseVersions=true`)
-        .then((r) => r.json())
+      const url = `/api/songs?skip=${skip}&take=${PAGE_SIZE}&mode=${sMode}&collapseVersions=true`;
+      fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }>; totalCount?: number }>(
+        `rank:bubbles:songs:${sMode}:${skip}`,
+        url,
+        45_000
+      )
         .then((data) => {
           const tracks = (data.tracks ?? []).map((t: { id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }, idx: number) => ({
             id: t.id,
@@ -398,6 +472,34 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
         ctx.restore();
       }
 
+      // === Search match pulse rings ===
+      const sMatchIds = searchMatchIdsRef.current;
+      if (sMatchIds.size > 0) {
+        const pulse = Math.sin(Date.now() * 0.006) * 0.5 + 0.5;
+        for (const b of bubbles) {
+          if (!sMatchIds.has(b.id)) continue;
+          // Outer glow ring
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.r + 5 + pulse * 8, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(192, 38, 211, ${0.45 + pulse * 0.55})`;
+          ctx.lineWidth = 2;
+          ctx.shadowColor = "rgba(192, 38, 211, 0.9)";
+          ctx.shadowBlur = 10 + pulse * 20;
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.restore();
+          // Inner shimmer ring
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.r + 2 + pulse * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 + pulse * 0.3})`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
       animRef.current = requestAnimationFrame(tick);
     }
 
@@ -465,12 +567,14 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
       const dy = pos.y - b.y;
       if (dx * dx + dy * dy < b.r * b.r) {
         if (entity === "artists") {
-          window.location.href = `/artist/${b.id}`;
+          openArtist(b.id);
+        } else {
+          openSong(b.id);
         }
         return;
       }
     }
-  }, [getCanvasPos, entity]);
+  }, [getCanvasPos, entity, openArtist, openSong]);
 
   const wasDragging = useRef(false);
   const handleMouseDownWrap = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -498,22 +602,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
       {/* Canvas */}
       <div ref={containerRef} className="flex-1 relative px-2 pb-1 min-h-0">
         {loading && (
-          <div className="absolute inset-0 z-10 rounded-2xl border border-[var(--muted)] bg-[#050507]/80 backdrop-blur-sm flex items-center justify-center">
-            <div className="relative w-full h-full overflow-hidden">
-              {/* Fake bubble circles */}
-              <Skeleton className="absolute w-28 h-28 rounded-full top-[15%] left-[20%] opacity-40" />
-              <Skeleton className="absolute w-20 h-20 rounded-full top-[30%] left-[55%] opacity-30" />
-              <Skeleton className="absolute w-36 h-36 rounded-full top-[40%] left-[35%] opacity-50" />
-              <Skeleton className="absolute w-16 h-16 rounded-full top-[20%] left-[70%] opacity-25" />
-              <Skeleton className="absolute w-24 h-24 rounded-full top-[55%] left-[15%] opacity-35" />
-              <Skeleton className="absolute w-14 h-14 rounded-full top-[60%] left-[65%] opacity-20" />
-              <Skeleton className="absolute w-10 h-10 rounded-full top-[10%] left-[42%] opacity-20" />
-              <Skeleton className="absolute w-18 h-18 rounded-full top-[65%] left-[45%] opacity-30" />
-              {/* Centered loading text */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm text-[var(--muted-foreground)] animate-pulse">Loading bubbles...</span>
-              </div>
-            </div>
+          <div className="absolute top-3 right-3 z-10 flex items-center gap-2 bg-[var(--secondary)]/80 border border-[var(--muted)] rounded-full px-3 py-1.5 pointer-events-none">
+            <span className="w-3 h-3 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin shrink-0" />
+            <span className="text-xs text-[var(--muted-foreground)]">Loading...</span>
           </div>
         )}
         <canvas
@@ -525,6 +616,13 @@ export default function BubbleView({ entity, metric, mode, period, songMode }: B
           onMouseUp={handleClickWrap}
           onMouseLeave={handleMouseLeave}
         />
+        {/* Search not-found badge */}
+        {searchStatus === "not-found" && searchQuery && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[var(--secondary)] border border-[var(--muted)] rounded-full px-3 py-1 text-xs text-[var(--muted-foreground)] pointer-events-none z-20 whitespace-nowrap">
+            Not found in top {totalPages * PAGE_SIZE}
+          </div>
+        )}
+
         {/* Tooltip */}
         {hovered && !dragRef.current && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-[var(--secondary)] border border-[var(--muted)] rounded-xl px-4 py-2.5 flex items-center gap-3 shadow-2xl pointer-events-none z-20">

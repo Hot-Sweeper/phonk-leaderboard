@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
-import Link from "next/link";
+import { useDetailPanel } from "@/lib/detail-panel";
 import {
   Package,
   Star,
@@ -69,11 +69,13 @@ function PackCard({
   onWatchlistToggle,
   isWatched,
   onClickTrack,
+  openPack,
 }: {
   pack: SamplePack;
   onWatchlistToggle: (packId: string) => void;
   isWatched: boolean;
   onClickTrack: (packId: string, platform: string) => void;
+  openPack: (id: string) => void;
 }) {
   const hasVersions = pack.versions.length > 0;
   const priceRange = hasVersions
@@ -90,8 +92,8 @@ function PackCard({
 
   return (
     <div className="group rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 overflow-hidden hover:border-cyan-800/50 transition-all flex flex-col">
-      {/* Clickable area — links to detail page */}
-      <Link href={`/samples/${pack.id}`} className="text-left w-full">
+      {/* Clickable area — opens detail panel */}
+      <button onClick={() => openPack(pack.id)} className="text-left w-full cursor-pointer">
         {/* Cover */}
         <div className="relative w-full aspect-square bg-[var(--background)]">
           {pack.imageUrl ? (
@@ -127,7 +129,7 @@ function PackCard({
             <div className="text-xs text-[var(--muted-foreground)]">by {pack.seller}</div>
           )}
         </div>
-      </Link>
+      </button>
 
       {/* Versions */}
       {hasVersions && (
@@ -217,6 +219,7 @@ function PackCard({
 /* ------------------------------------------------------------------ */
 
 export default function SamplesPage() {
+  const { openPack } = useDetailPanel();
   const [packs, setPacks] = useState<SamplePack[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -278,11 +281,11 @@ export default function SamplesPage() {
     : packs;
 
   return (
-    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans relative">
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-6 py-8 md:p-12 font-sans relative">
       {/* Grid overlay */}
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-5xl mx-auto relative z-10">
+      <div className="relative z-10">
         <h1 className="text-3xl md:text-4xl font-black tracking-tighter flex items-center gap-3 mb-2">
           <Package className="w-8 h-8 text-cyan-400" />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-cyan-400">
@@ -330,6 +333,7 @@ export default function SamplesPage() {
                 onWatchlistToggle={handleWatchlistToggle}
                 isWatched={watchedIds.has(pack.id)}
                 onClickTrack={handleClickTrack}
+                openPack={openPack}
               />
             ))}
           </div>

@@ -21,7 +21,11 @@ export async function GET(_req: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json(pack);
+  return NextResponse.json(pack, {
+    headers: {
+      "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+    },
+  });
 }
 
 /**

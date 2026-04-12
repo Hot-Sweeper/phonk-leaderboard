@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks } from "@/lib/platforms";
+import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyFullCatalog, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks, fetchDeezerFullCatalog } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 
@@ -66,13 +66,20 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
 
   let updated = 0;
   let failed = 0;
-  const details: { name: string; status: string; durationMs: number; error?: string }[] = [];
+  const details: {
+    name: string;
+    status: string;
+    durationMs: number;
+    error?: string;
+    platforms?: { platform: string; value: number; metric: string }[];
+  }[] = [];
 
   try {
     for (const artist of artists) {
       const artistStart = Date.now();
       try {
         let newImageUrl = artist.imageUrl;
+        const platformStats: { platform: string; value: number; metric: string }[] = [];
 
         for (const link of artist.links) {
           const stats = await fetchPlatformStats(link.platform, link.url);
@@ -91,6 +98,18 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
           if (link.platform === "SPOTIFY" && stats.imageUrl) {
             newImageUrl = stats.imageUrl;
           }
+
+          // Record what was fetched for admin display
+          if (link.platform === "SPOTIFY") {
+            if (stats.monthlyListeners > 0) platformStats.push({ platform: "SPOTIFY", value: stats.monthlyListeners, metric: "listeners" });
+            if (stats.followerCount > 0) platformStats.push({ platform: "SPOTIFY_FOLLOWERS", value: stats.followerCount, metric: "followers" });
+          } else if (link.platform === "YOUTUBE") {
+            platformStats.push({ platform: "YOUTUBE", value: stats.followerCount, metric: "subscribers" });
+          } else if (link.platform === "TIKTOK") {
+            platformStats.push({ platform: "TIKTOK", value: stats.followerCount, metric: "followers" });
+          } else if (link.platform === "INSTAGRAM") {
+            platformStats.push({ platform: "INSTAGRAM", value: stats.followerCount, metric: "followers" });
+          }
         }
 
         if (newImageUrl !== artist.imageUrl) {
@@ -103,7 +122,7 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
         await recordSnapshot(artist.id);
 
         updated++;
-        details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart });
+        details.push({ name: artist.name, status: "ok", durationMs: Date.now() - artistStart, platforms: platformStats });
       } catch (err) {
         failed++;
         details.push({ name: artist.name, status: "failed", durationMs: Date.now() - artistStart, error: String(err) });
@@ -254,7 +273,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         // ── Fetch tracks from Deezer ──
         let trackCount = 0;
         if (deezerId) {
-          const deezerTracks = await fetchDeezerTopTracks(deezerId);
+          // fetchDeezerFullCatalog paginates all albums → tracks; falls back to top-tracks on failure
+          const deezerTracks = await fetchDeezerFullCatalog(deezerId);
           const dedupedDeezerTracks = deezerTracks ? dedupeArtistTracks(deezerTracks) : null;
           if (dedupedDeezerTracks && dedupedDeezerTracks.length > 0) {
             for (const t of dedupedDeezerTracks) {
@@ -293,8 +313,8 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
             await deduplicateStoredTracksForArtist(artist.id);
           }
         } else if (spotifyId) {
-          // No Deezer ID found — try Spotify as fallback
-          const topTracks = await fetchSpotifyTopTracks(spotifyId);
+          // No Deezer ID found — use Spotify full catalog (all albums → tracks)
+          const topTracks = await fetchSpotifyFullCatalog(spotifyId);
           const dedupedSpotifyTracks = topTracks ? dedupeArtistTracks(topTracks) : null;
           if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
             for (const t of dedupedSpotifyTracks) {

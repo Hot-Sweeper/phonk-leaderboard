@@ -1229,42 +1229,84 @@ export default function AdminPage() {
                           </div>
                         </button>
                         {expanded && details.length > 0 && (
-                          <div className="border-t border-[var(--muted)] px-4 py-2 max-h-60 overflow-y-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="text-[var(--muted-foreground)] text-left">
-                                  <th className="pb-1 font-semibold">Artist</th>
-                                  <th className="pb-1 font-semibold">Status</th>
-                                  <th className="pb-1 font-semibold text-right">Time</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {details.map((d, i) => (
-                                  <tr key={i} className="border-t border-[var(--muted)]/30">
-                                    <td className="py-1 truncate max-w-[180px]">{d.name}</td>
-                                    <td className={`py-1 ${d.status === "ok" ? "text-green-400" : d.status === "skipped" || d.status === "no-tracks" ? "text-yellow-400" : "text-red-400"}`}>
-                                      {d.status === "ok" ? "OK" : d.status === "skipped" ? "Skipped" : d.status === "no-tracks" ? "No tracks" : "Failed"}
-                                      {d.error && (
-                                        <span className="block text-[10px] text-red-400/70 truncate max-w-[300px]" title={d.error}>
-                                          {d.error.substring(0, 80)}
-                                        </span>
-                                      )}
-                                    </td>
-                                    <td className="py-1 text-right text-[var(--muted-foreground)]">
-                                      {(d.durationMs / 1000).toFixed(1)}s
-                                    </td>
+                          <div className="border-t border-[var(--muted)] px-4 py-2 max-h-72 overflow-y-auto">
+                            {/* Stats update: show per-platform values */}
+                            {log.updateType === "stats" ? (
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[var(--muted-foreground)] text-left">
+                                    <th className="pb-1 font-semibold w-[160px]">Artist</th>
+                                    <th className="pb-1 font-semibold text-[#1DB954]">Spotify</th>
+                                    <th className="pb-1 font-semibold text-red-400">YouTube</th>
+                                    <th className="pb-1 font-semibold text-cyan-400">TikTok</th>
+                                    <th className="pb-1 font-semibold text-fuchsia-400">Instagram</th>
+                                    <th className="pb-1 font-semibold text-right">Time</th>
                                   </tr>
-                                ))}
-                                {/* Show CRASH error if present */}
-                                {log.error && (
-                                  <tr className="border-t border-red-800/40">
-                                    <td colSpan={3} className="py-2 text-red-400 text-xs break-all">
-                                      {log.error}
-                                    </td>
+                                </thead>
+                                <tbody>
+                                  {details.map((d, i) => {
+                                    const plats = (d as { platforms?: { platform: string; value: number; metric: string }[] }).platforms ?? [];
+                                    const get = (key: string) => plats.find(p => p.platform === key);
+                                    const fmtV = (n: number) => n >= 1_000_000 ? `${(n/1_000_000).toFixed(1)}M` : n >= 1_000 ? `${(n/1_000).toFixed(0)}K` : String(n);
+                                    const spotify = get("SPOTIFY");
+                                    const yt = get("YOUTUBE");
+                                    const tt = get("TIKTOK");
+                                    const ig = get("INSTAGRAM");
+                                    return (
+                                      <tr key={i} className="border-t border-[var(--muted)]/30">
+                                        <td className="py-1 truncate max-w-[160px] font-medium">
+                                          <span className={d.status === "ok" ? "" : d.status === "failed" ? "text-red-400" : "text-yellow-400"}>{d.name}</span>
+                                          {d.error && <span className="block text-[9px] text-red-400/70 truncate" title={d.error}>{d.error.substring(0, 60)}</span>}
+                                        </td>
+                                        <td className="py-1 tabular-nums text-white/50">{spotify ? fmtV(spotify.value) : <span className="text-white/20">—</span>}</td>
+                                        <td className="py-1 tabular-nums text-white/50">{yt ? fmtV(yt.value) : <span className="text-white/20">—</span>}</td>
+                                        <td className="py-1 tabular-nums text-white/50">{tt ? fmtV(tt.value) : <span className="text-white/20">—</span>}</td>
+                                        <td className="py-1 tabular-nums text-white/50">{ig ? fmtV(ig.value) : <span className="text-white/20">—</span>}</td>
+                                        <td className="py-1 text-right text-[var(--muted-foreground)]">{(d.durationMs / 1000).toFixed(1)}s</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {log.error && (
+                                    <tr className="border-t border-red-800/40">
+                                      <td colSpan={6} className="py-2 text-red-400 text-xs break-all">{log.error}</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            ) : (
+                              /* Song update: show track counts per artist */
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-[var(--muted-foreground)] text-left">
+                                    <th className="pb-1 font-semibold">Artist</th>
+                                    <th className="pb-1 font-semibold text-center">Tracks</th>
+                                    <th className="pb-1 font-semibold">Status</th>
+                                    <th className="pb-1 font-semibold text-right">Time</th>
                                   </tr>
-                                )}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {details.map((d, i) => {
+                                    const tracks = (d as { tracks?: number }).tracks;
+                                    return (
+                                      <tr key={i} className="border-t border-[var(--muted)]/30">
+                                        <td className="py-1 truncate max-w-[180px]">{d.name}</td>
+                                        <td className="py-1 text-center tabular-nums text-white/60">{tracks != null ? tracks : <span className="text-white/20">—</span>}</td>
+                                        <td className={`py-1 ${d.status === "ok" ? "text-green-400" : d.status === "skipped" || d.status === "no-tracks" ? "text-yellow-400" : "text-red-400"}`}>
+                                          {d.status === "ok" ? "OK" : d.status === "skipped" ? "Skipped" : d.status === "no-tracks" ? "No tracks" : "Failed"}
+                                          {d.error && <span className="block text-[10px] text-red-400/70 truncate max-w-[260px]" title={d.error}>{d.error.substring(0, 80)}</span>}
+                                        </td>
+                                        <td className="py-1 text-right text-[var(--muted-foreground)]">{(d.durationMs / 1000).toFixed(1)}s</td>
+                                      </tr>
+                                    );
+                                  })}
+                                  {log.error && (
+                                    <tr className="border-t border-red-800/40">
+                                      <td colSpan={4} className="py-2 text-red-400 text-xs break-all">{log.error}</td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            )}
                           </div>
                         )}
                       </div>

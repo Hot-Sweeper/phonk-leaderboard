@@ -23,17 +23,17 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--muted)] bg-[var(--background)]/80 backdrop-blur-md">
-      <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+      <div className="px-4 lg:px-6 h-14 flex items-center justify-between gap-4">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 font-black text-xl tracking-tighter">
+        <Link href="/" className="flex items-center gap-2 font-black text-xl tracking-tighter shrink-0">
           <Flame className="w-6 h-6 text-[var(--accent)]" />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-[var(--accent)]">
             Phonk Forum
           </span>
         </Link>
 
-        {/* Nav links */}
-        <div className="hidden sm:flex items-center gap-1">
+        {/* Nav links — only shown when sidebar is hidden (below lg) */}
+        <div className="hidden sm:flex lg:hidden items-center gap-1">
           <Link href="/rankings" className={linkClass("/rankings", isRankings)}>
             <Trophy className="w-4 h-4" /> Rankings
           </Link>

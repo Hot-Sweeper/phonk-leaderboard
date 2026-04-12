@@ -1,11 +1,28 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import {
   fetchYouTubeChannelFull,
   extractSpotifyUrl,
   fetchSpotifyArtist,
   searchYouTubeChannels,
 } from "@/lib/platforms";
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// GET /api/artists/lookup?slug=yanic — find artist by name slug (public, for shareable URLs)
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const slug = searchParams.get("slug")?.trim();
+  if (!slug) return NextResponse.json({ error: "slug required" }, { status: 400 });
+
+  const artists = await prisma.artist.findMany({ select: { id: true, name: true } });
+  const match = artists.find((a) => slugify(a.name) === slug);
+  if (!match) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ id: match.id, name: match.name });
+}
 
 // POST — lookup a YouTube URL: get channel info + try to find Spotify
 // Also supports ?mode=search&q=... for searching YouTube channels

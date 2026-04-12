@@ -64,16 +64,26 @@ export async function DELETE(req: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session) {
     return NextResponse.json([]);
+  }
+
+  const { searchParams } = new URL(req.url);
+  const details = searchParams.get("details") === "true";
+
+  if (details) {
+    const items = await prisma.watchlist.findMany({
+      where: { userId: session.user.id },
+      select: { artist: { select: { id: true, name: true, imageUrl: true } } },
+    });
+    return NextResponse.json(items.map((w) => w.artist));
   }
 
   const items = await prisma.watchlist.findMany({
     where: { userId: session.user.id },
     select: { artistId: true },
   });
-
   return NextResponse.json(items.map((w) => w.artistId));
 }

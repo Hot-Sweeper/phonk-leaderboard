@@ -90,10 +90,11 @@ function PlayerBar({ track }: { track: TrackInfo }) {
       widget.bind(SC.Widget.Events.PAUSE, () => setIsPlaying(false));
       widget.bind(
         SC.Widget.Events.PLAY_PROGRESS,
-        (data: { currentPosition: number; relativePosition: number }) => {
+        (data: unknown) => {
+          const d = data as { currentPosition: number; relativePosition: number };
           if (!isDragging.current) {
-            setProgress(data.relativePosition * 100);
-            setCurrentTime(data.currentPosition);
+            setProgress(d.relativePosition * 100);
+            setCurrentTime(d.currentPosition);
           }
         }
       );
@@ -371,7 +372,7 @@ export default function SubmitPage() {
 
       {/* ── Search bar (always visible) ── */}
       <div className="sticky top-0 z-30 bg-[var(--background)]/80 backdrop-blur-xl border-b border-[var(--muted)]">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex gap-2">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--muted-foreground)]" />
             <input
@@ -396,7 +397,7 @@ export default function SubmitPage() {
           </button>
         </div>
         {error && (
-          <div className="max-w-4xl mx-auto px-4 pb-2">
+          <div className="max-w-6xl mx-auto px-6 pb-2">
             <p className="text-xs text-red-400">{error}</p>
           </div>
         )}
@@ -428,7 +429,7 @@ export default function SubmitPage() {
 
       {/* ── Release page ── */}
       {track && (
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           {/* Hero: gradient backdrop + artwork + info */}
           <div className="relative overflow-hidden">
             {/* Blurred background from artwork */}

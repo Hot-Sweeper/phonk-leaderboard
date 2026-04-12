@@ -1,8 +1,7 @@
 "use client";
-import { Suspense, useState, useEffect, useRef } from "react";
+import React, { Suspense, useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
-  Flame,
   Search,
   List,
   Circle,
@@ -12,16 +11,17 @@ import {
 import ArtistListView from "@/components/rankings/ArtistListView";
 import SongListView from "@/components/rankings/SongListView";
 import BubbleView from "@/components/rankings/BubbleView";
+import { SpotifyIcon, YouTubeIcon, InstagramIcon, TikTokIcon } from "@/components/platform-icons";
 
 type Entity = "artists" | "songs";
 type ViewMode = "list" | "bubbles";
 type SongMode = "popularity" | "day" | "week" | "month";
 
-const ARTIST_PLATFORMS = [
-  { key: "", label: "Spotify Listeners" },
-  { key: "YOUTUBE", label: "YouTube" },
-  { key: "INSTAGRAM", label: "Instagram" },
-  { key: "TIKTOK", label: "TikTok" },
+const ARTIST_PLATFORMS: Array<{ key: string; Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = [
+  { key: "",          Icon: SpotifyIcon,   color: "#1DB954", label: "Spotify Listeners" },
+  { key: "YOUTUBE",   Icon: YouTubeIcon,   color: "#FF0000", label: "YouTube" },
+  { key: "INSTAGRAM", Icon: InstagramIcon, color: "#E4405F", label: "Instagram" },
+  { key: "TIKTOK",    Icon: TikTokIcon,    color: "#00f2ea", label: "TikTok" },
 ];
 
 const SONG_MODES: Array<{ key: SongMode; label: string }> = [
@@ -29,14 +29,6 @@ const SONG_MODES: Array<{ key: SongMode; label: string }> = [
   { key: "day", label: "24H" },
   { key: "week", label: "7D" },
   { key: "month", label: "30D" },
-];
-
-const BUBBLE_METRICS = [
-  { key: "listeners", label: "Listeners" },
-  { key: "followers", label: "Followers" },
-  { key: "youtube", label: "YouTube" },
-  { key: "tiktok", label: "TikTok" },
-  { key: "instagram", label: "Instagram" },
 ];
 
 const BUBBLE_MODES = [
@@ -75,10 +67,31 @@ function RankingsInner() {
 
   // Bubble-specific
   const [metric, setMetric] = useState(searchParams.get("metric") || "listeners");
-  const [bubbleMode, setBubbleMode] = useState(searchParams.get("bmode") || "change");
+  const [bubbleMode, setBubbleMode] = useState(searchParams.get("bmode") || "current");
   const [period, setPeriod] = useState(searchParams.get("period") || "day");
 
+  // Song options
+  const [collapseVersions, setCollapseVersions] = useState(true);
+
+  // Change sort order (artists, change mode)
+  const [changeSortOrder, setChangeSortOrder] = useState<"desc" | "asc" | "abs">("desc");
+
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Restore from localStorage on first mount if no URL params present
+  useEffect(() => {
+    if (searchParams.toString()) return;
+    try {
+      const s = JSON.parse(localStorage.getItem("rankings:state") ?? "{}");
+      if (s.entity) setEntity(s.entity as Entity);
+      if (s.viewMode) setViewMode(s.viewMode as ViewMode);
+      if ("platform" in s) setPlatform(s.platform);
+      if (s.songMode) setSongMode(s.songMode as SongMode);
+      if (s.bubbleMode) setBubbleMode(s.bubbleMode);
+      if (s.period) setPeriod(s.period);
+    } catch { /**/ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -107,155 +120,212 @@ function RankingsInner() {
     if (currentPath !== target) {
       router.replace(target, { scroll: false });
     }
+    // Persist to localStorage
+    try {
+      localStorage.setItem("rankings:state", JSON.stringify({ entity, viewMode, platform, songMode, bubbleMode, period }));
+    } catch { /**/ }
   }, [entity, viewMode, platform, songMode, metric, bubbleMode, period, router]);
 
   const isBubbles = viewMode === "bubbles";
   const isArtists = entity === "artists";
+  const [artistListMounted, setArtistListMounted] = useState(true);
+  const [songListMounted, setSongListMounted] = useState(entity === "songs" && viewMode === "list");
+  const [artistBubblesMounted, setArtistBubblesMounted] = useState(entity === "artists" && viewMode === "bubbles");
+  const [songBubblesMounted, setSongBubblesMounted] = useState(entity === "songs" && viewMode === "bubbles");
+
+  useEffect(() => {
+    if (viewMode === "list") {
+      if (entity === "artists") setArtistListMounted(true);
+      if (entity === "songs") setSongListMounted(true);
+      return;
+    }
+    if (entity === "artists") setArtistBubblesMounted(true);
+    if (entity === "songs") setSongBubblesMounted(true);
+  }, [entity, viewMode]);
 
   return (
-    <main className={`bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col ${isBubbles ? "h-[calc(100vh-3.5rem)] overflow-hidden" : "min-h-screen"}`}>
+    <main className={`bg-[var(--background)] text-[var(--foreground)] font-sans flex flex-col ${isBubbles ? "h-full overflow-hidden" : "min-h-full"}`}>
       {/* Grid overlay (list only) */}
       {!isBubbles && (
         <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
       )}
 
-      {/* Unified header + filter bar */}
-      <div className={`shrink-0 relative z-10 ${isBubbles ? "px-4 pt-3 pb-2" : "px-4 pt-8 md:pt-12 pb-0"}`}>
-        <div className={isBubbles ? "max-w-[1400px] mx-auto" : "max-w-5xl mx-auto"}>
-          {/* Title */}
-          <div className={isBubbles ? "mb-2" : "mb-6"}>
-            <h1 className={`font-black tracking-tighter flex items-center gap-3 ${isBubbles ? "text-2xl" : "text-3xl md:text-5xl"}`}>
-              <Flame className={`text-[var(--accent)] ${isBubbles ? "w-7 h-7" : "w-9 h-9 md:w-12 md:h-12"}`} />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-[var(--accent)]">
-                Phonk Rankings
-              </span>
-            </h1>
+      {/* Filter header */}
+      <div className="shrink-0 relative z-10 px-4 pt-3 pb-0 border-b border-[var(--muted)]">
+
+        {/* Row 1: What you're viewing + Search */}
+        <div className="flex items-center gap-2 pb-2.5">
+          {/* Entity toggle */}
+          <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+            <button onClick={() => setEntity("artists")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${isArtists ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+              <Users className="w-3.5 h-3.5" /> Artists
+            </button>
+            <button onClick={() => setEntity("songs")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${!isArtists ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+              <Music className="w-3.5 h-3.5" /> Songs
+            </button>
           </div>
 
-          {/* Filter bar */}
-          <div className={`flex items-center gap-2 flex-wrap ${isBubbles ? "" : "mb-8"}`}>
-            {/* Entity toggle */}
-            <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-              <button onClick={() => setEntity("artists")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${isArtists ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                <Users className="w-3.5 h-3.5" /> Artists
-              </button>
-              <button onClick={() => setEntity("songs")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${!isArtists ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                <Music className="w-3.5 h-3.5" /> Songs
-              </button>
-            </div>
+          {/* View mode toggle */}
+          <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+            <button onClick={() => setViewMode("list")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${!isBubbles ? "bg-white/10 text-white" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+              <List className="w-3.5 h-3.5" /> List
+            </button>
+            <button onClick={() => setViewMode("bubbles")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${isBubbles ? "bg-white/10 text-white" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+              <Circle className="w-3.5 h-3.5" /> Bubbles
+            </button>
+          </div>
 
-            {/* View mode toggle */}
-            <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-              <button onClick={() => setViewMode("list")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${!isBubbles ? "bg-white/10 text-white" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                <List className="w-3.5 h-3.5" /> List
-              </button>
-              <button onClick={() => setViewMode("bubbles")} className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition-all ${isBubbles ? "bg-white/10 text-white" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                <Circle className="w-3.5 h-3.5" /> Bubbles
-              </button>
-            </div>
-
-            {/* Divider */}
-            <div className="w-px h-6 bg-[var(--muted)] hidden sm:block" />
-
-            {/* Context filters */}
-            {!isBubbles && isArtists && (
-              <div className="flex gap-1 overflow-x-auto">
-                {ARTIST_PLATFORMS.map((p) => (
-                  <button key={p.key} onClick={() => setPlatform(p.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${platform === p.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {!isBubbles && !isArtists && (
-              <div className="flex gap-1">
-                {SONG_MODES.map((m) => (
-                  <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${songMode === m.key ? "border-green-500/50 bg-green-500/15 text-green-300 border" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {isBubbles && isArtists && (
-              <>
-                <select value={metric} onChange={(e) => setMetric(e.target.value)} className="bg-[var(--secondary)] border border-[var(--muted)] rounded-lg px-2.5 py-1.5 text-xs font-bold outline-none focus:ring-1 focus:ring-[var(--accent)] text-white">
-                  {BUBBLE_METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                </select>
-
-                <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                  {BUBBLE_MODES.map((m) => (
-                    <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-
-                {bubbleMode === "change" && (
-                  <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                    {ALL_PERIODS.map((p) => (
-                      <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                        {PERIOD_LABELS[p] ?? p}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {isBubbles && !isArtists && (
-              <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                {SONG_MODES.map((m) => (
-                  <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${songMode === m.key ? "bg-green-500/80 text-white" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Search (list mode only) */}
-            {!isBubbles && (
-              <>
-                <div className="w-px h-6 bg-[var(--muted)] hidden sm:block" />
-                <div className="relative flex-1 min-w-[180px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--muted-foreground)]" />
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder={isArtists ? "Search artists..." : "Search songs..."}
-                    className="w-full bg-[var(--secondary)] border border-[var(--muted)] rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-600"
-                  />
-                </div>
-              </>
-            )}
+          {/* Search — right side */}
+          <div className="relative flex-1 min-w-[160px] ml-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--muted-foreground)]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={isBubbles ? (isArtists ? "Find artist..." : "Find song...") : (isArtists ? "Search artists..." : "Search songs...")}
+              className="w-full bg-[var(--secondary)] border border-[var(--muted)] rounded-lg pl-9 pr-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-[var(--accent)] placeholder:text-zinc-600"
+            />
           </div>
         </div>
+
+        {/* Row 2: Contextual filters */}
+        {(isArtists || !isBubbles) && (
+          <div className="flex items-center gap-2 pb-2.5 flex-wrap">
+
+            {/* Platform icons — artists */}
+            {isArtists && (
+              <div className="flex gap-1">
+                {ARTIST_PLATFORMS.map((p) => {
+                  const platformMetricMap: Record<string, string> = { "": "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
+                  const active = isBubbles ? metric === platformMetricMap[p.key] : platform === p.key;
+                  return (
+                    <button
+                      key={p.key}
+                      onClick={() => { setPlatform(p.key); if (isBubbles) setMetric(platformMetricMap[p.key]); }}
+                      title={p.label}
+                      aria-label={p.label}
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${active ? "border-white/30 bg-white/10" : "border-[var(--muted)] bg-[var(--secondary)] hover:bg-white/10"}`}
+                    >
+                      <p.Icon className="w-3.5 h-3.5" style={{ color: active ? p.color : undefined }} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Divider */}
+            {isArtists && <div className="w-px h-5 bg-[var(--muted)]" />}
+
+            {/* Change/Current toggle — artists */}
+            {isArtists && (
+              <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                {BUBBLE_MODES.map((m) => (
+                  <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Period — artists change mode */}
+            {isArtists && bubbleMode === "change" && (
+              <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                {ALL_PERIODS.map((p) => (
+                  <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                    {PERIOD_LABELS[p] ?? p}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Sort order — artists, list, change mode */}
+            {isArtists && !isBubbles && bubbleMode === "change" && (
+              <>
+                <div className="w-px h-5 bg-[var(--muted)]" />
+                <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                  {(["desc", "abs", "asc"] as const).map((o) => {
+                    const label = o === "desc" ? "Gainers" : o === "asc" ? "Losers" : "Biggest";
+                    return (
+                      <button key={o} onClick={() => setChangeSortOrder(o)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${changeSortOrder === o ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* Song modes */}
+            {!isArtists && (
+              <div className="flex gap-1">
+                {SONG_MODES.map((m) => (
+                  <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${songMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Group toggle — songs list */}
+            {!isArtists && !isBubbles && (
+              <button
+                onClick={() => setCollapseVersions(c => !c)}
+                aria-pressed={collapseVersions}
+                title="Group song versions together"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border border-[var(--muted)] bg-[var(--secondary)] transition-all text-[var(--muted-foreground)] hover:text-white"
+              >
+                <span>Group</span>
+                <span className={`relative inline-flex h-[14px] w-[26px] items-center rounded-full transition-colors shrink-0 ${collapseVersions ? "bg-[var(--accent)]" : "bg-[var(--muted)]"}`}>
+                  <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${collapseVersions ? "translate-x-[13px]" : "translate-x-0.5"}`} />
+                </span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Content area */}
-      {isBubbles ? (
-        <div className="flex-1 min-h-0">
-          <BubbleView
-            entity={entity}
-            metric={metric}
-            mode={bubbleMode}
-            period={period}
-            songMode={songMode}
-          />
-        </div>
-      ) : (
-        <div className="flex-1 relative z-10">
-          <div className="max-w-5xl mx-auto px-4 pb-12">
-            {isArtists ? (
-              <ArtistListView platform={platform} search={debouncedSearch} />
-            ) : (
-              <SongListView mode={songMode} search={debouncedSearch} />
-            )}
+      <div className={isBubbles ? "flex-1 min-h-0" : "hidden"}>
+        {artistBubblesMounted && (
+          <div className={isBubbles && isArtists ? "h-full" : "hidden"}>
+            <BubbleView
+              entity="artists"
+              metric={metric}
+              mode={bubbleMode}
+              period={period}
+              songMode={songMode}
+              searchQuery={debouncedSearch}
+            />
           </div>
+        )}
+        {songBubblesMounted && (
+          <div className={isBubbles && !isArtists ? "h-full" : "hidden"}>
+            <BubbleView
+              entity="songs"
+              metric={metric}
+              mode={bubbleMode}
+              period={period}
+              songMode={songMode}
+              searchQuery={debouncedSearch}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className={isBubbles ? "hidden" : "flex-1 relative z-10"}>
+        <div className="px-6 pb-12">
+          {artistListMounted && (
+            <div className={!isArtists ? "hidden" : ""}>
+              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode as "current" | "change"} period={period} changeSortOrder={changeSortOrder} />
+            </div>
+          )}
+          {songListMounted && (
+            <div className={isArtists ? "hidden" : ""}>
+              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} />
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </main>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { Skeleton } from "@/components/Skeleton";
+import { useDetailPanel } from "@/lib/detail-panel";
 import { isValidPreviewUrl, toPreviewProxyUrl } from "@/lib/preview";
 import {
   Music,
@@ -327,6 +327,8 @@ function PodiumTrackCard({
   onTogglePreview,
   showOriginalVersion,
   mode,
+  onOpenSong,
+  onOpenArtist,
 }: {
   track: Track;
   rank: number;
@@ -334,6 +336,8 @@ function PodiumTrackCard({
   onTogglePreview: (trackId: string, previewUrl: string, deezerId?: string | null) => void;
   showOriginalVersion: boolean;
   mode: LeaderboardMode;
+  onOpenSong: (id: string, data?: Track) => void;
+  onOpenArtist: (id: string) => void;
 }) {
   const accent = rank === 1 ? "text-yellow-400 border-yellow-500/30" : rank === 2 ? "text-zinc-300 border-zinc-500/30" : "text-amber-600 border-amber-700/30";
   const artists = getTrackArtists(track);
@@ -359,14 +363,16 @@ function PodiumTrackCard({
           ) : null}
         </div>
         <div className="flex flex-col items-center text-center">
-          {track.albumImageUrl ? (
-            <Image src={track.albumImageUrl} alt={track.name} width={rank === 1 ? 180 : 140} height={rank === 1 ? 180 : 140} className="rounded-2xl object-cover shadow-2xl mb-4" />
-          ) : (
-            <div className="rounded-2xl bg-[var(--muted)] flex items-center justify-center mb-4" style={{ width: rank === 1 ? 180 : 140, height: rank === 1 ? 180 : 140 }}>
-              <Music className="w-8 h-8 text-[var(--muted-foreground)]" />
-            </div>
-          )}
-          <div className="font-black text-lg text-white leading-tight line-clamp-2">{track.name}</div>
+          <button type="button" onClick={() => onOpenSong(track.id, track)} className="flex flex-col items-center cursor-pointer">
+            {track.albumImageUrl ? (
+              <Image src={track.albumImageUrl} alt={track.name} width={rank === 1 ? 180 : 140} height={rank === 1 ? 180 : 140} className="rounded-2xl object-cover shadow-2xl mb-4" />
+            ) : (
+              <div className="rounded-2xl bg-[var(--muted)] flex items-center justify-center mb-4" style={{ width: rank === 1 ? 180 : 140, height: rank === 1 ? 180 : 140 }}>
+                <Music className="w-8 h-8 text-[var(--muted-foreground)]" />
+              </div>
+            )}
+            <div className="font-black text-lg text-white leading-tight line-clamp-2 hover:text-[var(--accent)] transition-colors">{track.name}</div>
+          </button>
           <div className="text-sm mt-1 max-w-full leading-snug text-center">
             {artists.map((artist, index) => (
               <span key={artist.key}>
@@ -381,9 +387,9 @@ function PodiumTrackCard({
                     {artist.name}
                   </a>
                 ) : (
-                  <Link href={artist.href} className={artistTextClass()}>
+                  <button type="button" onClick={() => onOpenArtist(artist.key)} className={artistTextClass()}>
                     {artist.name}
-                  </Link>
+                  </button>
                 )}
               </span>
             ))}
@@ -407,6 +413,7 @@ function PodiumTrackCard({
 }
 
 export default function SongsPage() {
+  const { openArtist, openSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -526,11 +533,11 @@ export default function SongsPage() {
   const maxTrendMetric = tracks.reduce((max, track) => Math.max(max, Math.abs(track.metricValue)), 0);
 
   return (
-    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-8 md:p-12 font-sans relative">
+    <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-6 py-8 md:p-12 font-sans relative">
       {/* Grid overlay */}
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-5xl mx-auto relative z-10">
+      <div className="relative z-10">
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
           <div>
@@ -605,9 +612,9 @@ export default function SongsPage() {
 
         {!loading && podiumTracks.length === 3 && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8 items-end">
-            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
-            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
-            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} />
+            <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} onOpenSong={openSong} onOpenArtist={openArtist} />
+            <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} onOpenSong={openSong} onOpenArtist={openArtist} />
+            <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={leaderboardMode} onOpenSong={openSong} onOpenArtist={openArtist} />
           </div>
         )}
 
@@ -707,9 +714,13 @@ export default function SongsPage() {
                     )}
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-sm truncate">
+                        <button
+                          type="button"
+                          onClick={() => openSong(track.id, track)}
+                          className="font-bold text-sm truncate hover:text-[var(--accent)] transition-colors cursor-pointer text-left"
+                        >
                           {track.name}
-                        </span>
+                        </button>
                         {track.explicit && (
                           <span className="shrink-0 text-[9px] font-bold bg-zinc-700 text-zinc-300 px-1 py-px rounded">
                             E
@@ -730,9 +741,9 @@ export default function SongsPage() {
                                 {artist.name}
                               </a>
                             ) : (
-                              <Link href={artist.href} className={artistTextClass()}>
+                              <button type="button" onClick={() => openArtist(artist.key)} className={artistTextClass()}>
                                 {artist.name}
-                              </Link>
+                              </button>
                             )}
                           </span>
                         ))}

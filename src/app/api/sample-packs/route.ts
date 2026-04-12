@@ -21,7 +21,13 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json(packs);
+  return NextResponse.json(packs, {
+    headers: {
+      "Cache-Control": isAdmin
+        ? "private, max-age=15, stale-while-revalidate=60"
+        : "public, max-age=60, stale-while-revalidate=300",
+    },
+  });
 }
 
 /**

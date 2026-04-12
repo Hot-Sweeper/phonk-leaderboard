@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Skeleton } from "@/components/Skeleton";
 import { toPreviewProxyUrl } from "@/lib/preview";
+import { claimAudio } from "@/lib/global-audio";
 import {
   ArrowLeft,
   Star,
@@ -154,7 +155,7 @@ function ArtistPageSkeleton() {
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans">
       <div className="h-48 md:h-64 relative overflow-hidden bg-[var(--secondary)]/60 rounded-b-[2rem]" />
-      <div className="max-w-5xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6 space-y-8">
+      <div className="max-w-7xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6 space-y-8">
         <div className="flex items-end gap-5 md:gap-7">
           <Skeleton className="w-32 h-32 md:w-40 md:h-40 rounded-2xl shrink-0" />
           <div className="flex-1 space-y-3 pb-3">
@@ -239,6 +240,7 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
       setPlaying(false);
     } else {
       try {
+        claimAudio(audio);
         await audio.play();
         setPlaying(true);
       } catch {
@@ -254,6 +256,7 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
         ref={audioRef}
         src={toPreviewProxyUrl(url, deezerId)}
         onEnded={() => setPlaying(false)}
+        onPause={() => setPlaying(false)}
         onError={() => {
           setPlaying(false);
         }}
@@ -266,7 +269,7 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
           void toggle();
         }}
         title={playing ? "Pause preview" : "Play preview"}
-        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all shrink-0 ${playing ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"}`}
+        className={`w-7 h-7 rounded-full flex items-center justify-center transition-all shrink-0 ${playing ? "bg-[var(--accent)] text-white shadow-[0_0_10px_var(--accent-glow)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-white"}`}
       >
         {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
       </button>
@@ -556,6 +559,7 @@ export default function ArtistPage() {
       if (res.ok && artist) {
         setIsWatched(!isWatched);
         setArtist({ ...artist, watchlistCount: artist.watchlistCount + (isWatched ? -1 : 1) });
+        window.dispatchEvent(new Event("watchlist-changed"));
       }
     } finally {
       setToggling(false);
@@ -675,7 +679,7 @@ export default function ArtistPage() {
         </div>
 
         {/* Artist info overlay */}
-        <div className="max-w-5xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6">
+        <div className="max-w-7xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6">
           {/* Back link */}
           <Link
             href="/leaderboard"
@@ -782,7 +786,7 @@ export default function ArtistPage() {
       </div>
 
       {/* ─── Content ─── */}
-      <div className="max-w-5xl mx-auto px-4 md:px-8 pb-16">
+      <div className="max-w-7xl mx-auto px-4 md:px-8 pb-16">
         {/* Action buttons */}
         <div className="flex items-center gap-3 flex-wrap mb-8">
           <button
