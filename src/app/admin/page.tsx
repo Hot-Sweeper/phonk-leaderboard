@@ -106,7 +106,7 @@ function AdminPageSkeleton() {
   return (
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
-      <div className="max-w-3xl mx-auto relative z-10 space-y-8">
+      <div className="max-w-5xl mx-auto relative z-10 space-y-8">
         <div className="space-y-3">
           <Skeleton className="h-10 w-56 max-w-full" />
           <Skeleton className="h-4 w-40 max-w-full" />
@@ -224,12 +224,13 @@ export default function AdminPage() {
   const isAdmin = session?.user?.role === "ADMIN";
 
   const load = useCallback(async () => {
-    const [invRes, reqRes, staffRes, settingsRes, packsRes] = await Promise.all([
+    const [invRes, reqRes, staffRes, settingsRes, packsRes, labelsRes] = await Promise.all([
       fetch("/api/mod-invites"),
       fetch("/api/mod-requests"),
       fetch("/api/staff"),
       fetch("/api/admin/settings"),
       fetch("/api/sample-packs"),
+      fetch("/api/labels"),
     ]);
     if (invRes.ok) setInvites(await invRes.json());
     if (reqRes.ok) setModRequests(await reqRes.json());
@@ -244,7 +245,6 @@ export default function AdminPage() {
       setUpdateLogs(s.logs ?? []);
     }
     if (packsRes.ok) setPacks(await packsRes.json());
-    const labelsRes = await fetch("/api/labels");
     if (labelsRes.ok) setAdminLabels(await labelsRes.json());
     setLoading(false);
   }, []);
@@ -600,11 +600,7 @@ export default function AdminPage() {
   }
 
   if (status === "loading" || loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-[var(--muted-foreground)]">
-        Loading...
-      </div>
-    );
+    return <AdminPageSkeleton />;
   }
 
   if (!isAdmin) {
@@ -623,7 +619,7 @@ export default function AdminPage() {
     <main className="min-h-screen bg-[var(--background)] text-[var(--foreground)] px-4 py-10 font-sans relative">
       <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:40px_40px]" />
 
-      <div className="max-w-3xl mx-auto relative z-10">
+      <div className="max-w-5xl mx-auto relative z-10">
         <div className="mb-8">
           <h1 className="text-3xl md:text-4xl font-black tracking-tighter flex items-center gap-3">
             <Shield className="w-8 h-8 text-[var(--accent)]" />
@@ -634,14 +630,14 @@ export default function AdminPage() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1.5 mb-8">
+        <div className="flex flex-wrap gap-1.5 mb-8">
           {[
-            { key: "staff" as const, label: "Staff Management", icon: Crown },
-            { key: "invites" as const, label: "Mod Invites", icon: Key },
+            { key: "staff" as const, label: "Staff", icon: Crown },
+            { key: "invites" as const, label: "Invites", icon: Key },
             { key: "settings" as const, label: "Settings", icon: Settings },
             { key: "debug" as const, label: "Debug", icon: Bug },
-            { key: "packs" as const, label: "Sample Packs", icon: Package },
-            { key: "labels" as const, label: "Submit Labels", icon: Tag },
+            { key: "packs" as const, label: "Packs", icon: Package },
+            { key: "labels" as const, label: "Labels", icon: Tag },
           ].map((tab) => (
             <button
               key={tab.key}

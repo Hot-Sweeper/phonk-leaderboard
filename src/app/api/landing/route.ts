@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export const revalidate = 120; // ISR-style in Next 14+
+export const dynamic = "force-dynamic"; // Prevent static prerendering at build time
 
 export async function GET() {
   const [
