@@ -43,3 +43,27 @@ body {
     radial-gradient(circle at 90% 10%, rgba(239, 68, 68, 0.1) 0%, transparent 40%);
   min-height: 100vh;
 }
+
+/* Custom scrollbar — site-wide */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}

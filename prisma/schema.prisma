@@ -54,6 +54,9 @@ model User {
   linkSuggestions LinkSuggestion[]
   modInvites      ModInvite[]
   modRequests     ModRequest[]
+  samplePacks     SamplePack[]
+  packClicks      PackClick[]
+  packWatchlists  PackWatchlist[]
   createdAt       DateTime         @default(now())
 }
 
@@ -270,4 +273,84 @@ model UpdateLog {
   error          String?
   createdAt      DateTime @default(now())
   completedAt    DateTime?
+}
+
+model SamplePack {
+  id            String        @id @default(cuid())
+  name          String
+  description   String?       @db.Text
+  imageUrl      String?
+  seller        String?
+  payhipUrl     String?
+  gumroadUrl    String?
+  priceCents    Int           @default(0)
+  currency      String        @default("USD")
+  ratingAverage Float?
+  ratingCount   Int           @default(0)
+  salesCount    Int?
+  tags          String[]      @default([])
+  published     Boolean       @default(true)
+  clickCount    Int           @default(0)
+  watchlistCount Int          @default(0)
+  addedById     String
+  addedBy       User          @relation(fields: [addedById], references: [id])
+  versions      PackVersion[]
+  clicks        PackClick[]
+  watchlistedBy PackWatchlist[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model PackVersion {
+  id          String     @id @default(cuid())
+  packId      String
+  name        String
+  priceCents  Int        @default(0)
+  currency    String     @default("USD")
+  description String?    @db.Text
+  sortOrder   Int        @default(0)
+  pack        SamplePack @relation(fields: [packId], references: [id], onDelete: Cascade)
+
+  @@index([packId, sortOrder])
+}
+
+model PackClick {
+  id        String     @id @default(cuid())
+  packId    String
+  platform  String     // "payhip" or "gumroad"
+  userId    String?
+  ipHash    String?
+  pack      SamplePack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime   @default(now())
+
+  @@unique([packId, userId])
+  @@unique([packId, ipHash])
+  @@index([packId])
+}
+
+model PackWatchlist {
+  id        String     @id @default(cuid())
+  packId    String
+  userId    String?
+  ipHash    String?
+  pack      SamplePack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime   @default(now())
+
+  @@unique([packId, userId])
+  @@unique([packId, ipHash])
+  @@index([packId])
+}
+
+model SubmitLabel {
+  id        String   @id @default(cuid())
+  name      String
+  email     String
+  iconUrl   String?
+  color     String   @default("#c026d3")
+  active    Boolean  @default(true)
+  addedById String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

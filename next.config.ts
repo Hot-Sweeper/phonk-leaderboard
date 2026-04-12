@@ -9,6 +9,11 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "*.googleusercontent.com" },
       { protocol: "https", hostname: "cdn-images.dzcdn.net" },
       { protocol: "https", hostname: "api.deezer.com" },
+      { protocol: "https", hostname: "payhip.com" },
+      { protocol: "https", hostname: "*.s3.amazonaws.com" },
+      { protocol: "https", hostname: "public-files.gumroad.com" },
+      { protocol: "https", hostname: "i1.sndcdn.com" },
+      { protocol: "https", hostname: "*.sndcdn.com" },
     ],
   },
   async redirects() {

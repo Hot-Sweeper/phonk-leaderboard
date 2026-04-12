@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package } from "lucide-react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -39,6 +39,9 @@ export default function Navbar() {
           </Link>
           <Link href="/samples" className={linkClass("/samples")}>
             <Package className="w-4 h-4" /> Samples
+          </Link>
+          <Link href="/submit" className={linkClass("/submit")}>
+            <Send className="w-4 h-4" /> Submit
           </Link>
           {session && (
             <Link href="/moderation" className={linkClass("/moderation", isModeration)}>

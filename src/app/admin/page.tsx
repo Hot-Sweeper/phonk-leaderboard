@@ -29,6 +29,14 @@ import {
   Play,
   Database,
   Zap,
+  Package,
+  Star,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Tag,
+  Pencil,
+  Save,
 } from "lucide-react";
 
 type ModInvite = {
@@ -141,7 +149,45 @@ export default function AdminPage() {
   const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings" | "debug">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings" | "debug" | "packs" | "labels">("staff");
+
+  // Sample packs state
+  const [packs, setPacks] = useState<Array<{
+    id: string; name: string; description: string | null; imageUrl: string | null;
+    seller: string | null; payhipUrl: string | null; gumroadUrl: string | null;
+    priceCents: number; currency: string; ratingAverage: number | null;
+    ratingCount: number; salesCount: number | null; tags: string[]; published: boolean;
+    createdAt: string;
+    versions: Array<{ id: string; name: string; priceCents: number; currency: string; description: string | null }>;
+  }>>([]);
+  const [packPayhipUrl, setPackPayhipUrl] = useState("");
+  const [packGumroadUrl, setPackGumroadUrl] = useState("");
+  const [packTags, setPackTags] = useState("");
+  const [packPreview, setPackPreview] = useState<{
+    name: string; description: string | null; imageUrl: string | null;
+    seller: string | null; priceCents: number; currency: string;
+    ratingAverage: number | null; ratingCount: number; salesCount: number | null;
+    variants: Array<{ name: string; priceCents: number; currency: string; description: string | null }>;
+  } | null>(null);
+  const [packPreviewing, setPackPreviewing] = useState(false);
+  const [packSaving, setPackSaving] = useState(false);
+  const [packError, setPackError] = useState<string | null>(null);
+  const [packRescraping, setPackRescraping] = useState<string | null>(null);
+  const [editingPackId, setEditingPackId] = useState<string | null>(null);
+  const [editPackName, setEditPackName] = useState("");
+  const [editPackPayhipUrl, setEditPackPayhipUrl] = useState("");
+  const [editPackGumroadUrl, setEditPackGumroadUrl] = useState("");
+  const [editPackTags, setEditPackTags] = useState("");
+  const [editPackSaving, setEditPackSaving] = useState(false);
+
+  // Labels state
+  type LabelItem = { id: string; name: string; email: string; iconUrl: string | null; color: string; active: boolean };
+  const [adminLabels, setAdminLabels] = useState<LabelItem[]>([]);
+  const [newLabelName, setNewLabelName] = useState("");
+  const [newLabelEmail, setNewLabelEmail] = useState("");
+  const [newLabelIconUrl, setNewLabelIconUrl] = useState("");
+  const [newLabelColor, setNewLabelColor] = useState("#c026d3");
+  const [labelSaving, setLabelSaving] = useState(false);
 
   // Debug state
   const [debugChecks, setDebugChecks] = useState<{ name: string; status: "ok" | "warn" | "error"; message: string; detail?: string }[]>([]);
@@ -178,11 +224,12 @@ export default function AdminPage() {
   const isAdmin = session?.user?.role === "ADMIN";
 
   const load = useCallback(async () => {
-    const [invRes, reqRes, staffRes, settingsRes] = await Promise.all([
+    const [invRes, reqRes, staffRes, settingsRes, packsRes] = await Promise.all([
       fetch("/api/mod-invites"),
       fetch("/api/mod-requests"),
       fetch("/api/staff"),
       fetch("/api/admin/settings"),
+      fetch("/api/sample-packs"),
     ]);
     if (invRes.ok) setInvites(await invRes.json());
     if (reqRes.ok) setModRequests(await reqRes.json());
@@ -196,6 +243,9 @@ export default function AdminPage() {
       setScheduledUpdaters(s.updaters ?? []);
       setUpdateLogs(s.logs ?? []);
     }
+    if (packsRes.ok) setPacks(await packsRes.json());
+    const labelsRes = await fetch("/api/labels");
+    if (labelsRes.ok) setAdminLabels(await labelsRes.json());
     setLoading(false);
   }, []);
 
@@ -590,6 +640,8 @@ export default function AdminPage() {
             { key: "invites" as const, label: "Mod Invites", icon: Key },
             { key: "settings" as const, label: "Settings", icon: Settings },
             { key: "debug" as const, label: "Debug", icon: Bug },
+            { key: "packs" as const, label: "Sample Packs", icon: Package },
+            { key: "labels" as const, label: "Submit Labels", icon: Tag },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -1365,6 +1417,520 @@ export default function AdminPage() {
                 )}
               </div>
             )}
+          </>
+        )}
+
+        {/* ── Sample Packs Tab ── */}
+        {activeTab === "packs" && (
+          <>
+            <div className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-6 space-y-4 mb-6">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Package className="w-5 h-5 text-cyan-400" /> Add Sample Pack
+              </h2>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Paste a Payhip and/or Gumroad product link. Metadata will be scraped automatically.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-[var(--muted-foreground)] block mb-1">Payhip URL</label>
+                  <input
+                    value={packPayhipUrl}
+                    onChange={(e) => setPackPayhipUrl(e.target.value)}
+                    placeholder="https://payhip.com/b/..."
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-[var(--muted-foreground)] block mb-1">Gumroad URL</label>
+                  <input
+                    value={packGumroadUrl}
+                    onChange={(e) => setPackGumroadUrl(e.target.value)}
+                    placeholder="https://....gumroad.com/l/..."
+                    className="w-full px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-[var(--muted-foreground)] block mb-1">Tags (comma-separated)</label>
+                <input
+                  value={packTags}
+                  onChange={(e) => setPackTags(e.target.value)}
+                  placeholder="drums, bass, fx, phonk"
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={async () => {
+                    setPackPreviewing(true);
+                    setPackError(null);
+                    setPackPreview(null);
+                    try {
+                      const res = await fetch("/api/sample-packs/preview", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          payhipUrl: packPayhipUrl || undefined,
+                          gumroadUrl: packGumroadUrl || undefined,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) { setPackError(data.error ?? "Preview failed"); return; }
+                      setPackPreview(data);
+                    } catch { setPackError("Network error"); }
+                    finally { setPackPreviewing(false); }
+                  }}
+                  disabled={packPreviewing || (!packPayhipUrl && !packGumroadUrl)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[var(--secondary)] border border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all disabled:opacity-40 flex items-center gap-2"
+                >
+                  {packPreviewing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                  Preview
+                </button>
+                <button
+                  onClick={async () => {
+                    setPackSaving(true);
+                    setPackError(null);
+                    try {
+                      const tags = packTags.split(",").map((t) => t.trim()).filter(Boolean);
+                      const res = await fetch("/api/sample-packs", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          payhipUrl: packPayhipUrl || undefined,
+                          gumroadUrl: packGumroadUrl || undefined,
+                          tags,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (!res.ok) { setPackError(data.error ?? "Save failed"); return; }
+                      setPackPayhipUrl("");
+                      setPackGumroadUrl("");
+                      setPackTags("");
+                      setPackPreview(null);
+                      load();
+                    } catch { setPackError("Network error"); }
+                    finally { setPackSaving(false); }
+                  }}
+                  disabled={packSaving || (!packPayhipUrl && !packGumroadUrl)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)] hover:brightness-110 transition-all disabled:opacity-40 flex items-center gap-2"
+                >
+                  {packSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  Add Pack
+                </button>
+              </div>
+
+              {packError && (
+                <div className="text-sm text-red-400 bg-red-950/20 border border-red-800/40 rounded-lg px-3 py-2">
+                  {packError}
+                </div>
+              )}
+
+              {packPreview && (
+                <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/10 p-4 space-y-3">
+                  <div className="flex gap-4">
+                    {packPreview.imageUrl && (
+                      <img src={packPreview.imageUrl} alt="" className="w-20 h-20 rounded-lg object-cover shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm">{packPreview.name}</div>
+                      {packPreview.seller && <div className="text-xs text-[var(--muted-foreground)]">by {packPreview.seller}</div>}
+                      <div className="text-xs text-cyan-400 mt-1">
+                        {packPreview.priceCents === 0
+                          ? "Free"
+                          : `${(packPreview.priceCents / 100).toFixed(2)} ${packPreview.currency}`}
+                        {packPreview.ratingAverage != null && (
+                          <span className="ml-2 text-yellow-400">
+                            {packPreview.ratingAverage.toFixed(1)} ({packPreview.ratingCount})
+                          </span>
+                        )}
+                        {packPreview.salesCount != null && (
+                          <span className="ml-2 text-green-400">{packPreview.salesCount} sales</span>
+                        )}
+                      </div>
+                      {packPreview.description && (
+                        <p className="text-xs text-[var(--muted-foreground)] mt-1 line-clamp-2">{packPreview.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  {packPreview.variants.length > 0 && (
+                    <div className="space-y-1.5 pt-1 border-t border-cyan-800/20">
+                      <div className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-widest">
+                        {packPreview.variants.length} Version{packPreview.variants.length !== 1 ? "s" : ""} found
+                      </div>
+                      {packPreview.variants.map((v, i) => (
+                        <div key={i} className="flex items-center justify-between text-xs px-2 py-1.5 rounded-lg bg-[var(--background)]/50">
+                          <span className="font-medium truncate">{v.name}</span>
+                          <span className={`font-bold shrink-0 ml-2 ${v.priceCents === 0 ? "text-green-400" : "text-cyan-400"}`}>
+                            {v.priceCents === 0 ? "Free" : `${(v.priceCents / 100).toFixed(2)} ${v.currency}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Pack list */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-[var(--muted-foreground)] uppercase tracking-widest">
+                {packs.length} Pack{packs.length !== 1 ? "s" : ""}
+              </h3>
+              {packs.map((pack) => {
+                const isEditing = editingPackId === pack.id;
+                return (
+                <div key={pack.id} className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4">
+                  <div className="flex gap-4">
+                    {pack.imageUrl && (
+                      <img src={pack.imageUrl} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        {isEditing ? (
+                          <input
+                            value={editPackName}
+                            onChange={(e) => setEditPackName(e.target.value)}
+                            className="font-bold text-sm bg-[var(--background)] border border-[var(--muted)] rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-cyan-500/50 flex-1"
+                          />
+                        ) : (
+                          <span className="font-bold text-sm truncate">{pack.name}</span>
+                        )}
+                        {!pack.published && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">
+                            Hidden
+                          </span>
+                        )}
+                      </div>
+                      {pack.seller && <div className="text-xs text-[var(--muted-foreground)]">by {pack.seller}</div>}
+                      <div className="flex items-center gap-3 text-xs mt-1">
+                        <span className="text-cyan-400">
+                          {pack.priceCents === 0 ? "Free" : `${(pack.priceCents / 100).toFixed(2)} ${pack.currency}`}
+                        </span>
+                        {pack.ratingAverage != null && (
+                          <span className="flex items-center gap-0.5 text-yellow-400">
+                            <Star className="w-3 h-3" /> {pack.ratingAverage.toFixed(1)} ({pack.ratingCount})
+                          </span>
+                        )}
+                        {pack.salesCount != null && (
+                          <span className="text-green-400">{pack.salesCount} sales</span>
+                        )}
+                      </div>
+
+                      {/* Edit mode: URL fields + tags */}
+                      {isEditing ? (
+                        <div className="mt-3 space-y-2">
+                          <div>
+                            <label className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-widest">Payhip URL</label>
+                            <input
+                              value={editPackPayhipUrl}
+                              onChange={(e) => setEditPackPayhipUrl(e.target.value)}
+                              placeholder="https://payhip.com/b/..."
+                              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-xs outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-widest">Gumroad URL</label>
+                            <input
+                              value={editPackGumroadUrl}
+                              onChange={(e) => setEditPackGumroadUrl(e.target.value)}
+                              placeholder="https://...gumroad.com/l/..."
+                              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-xs outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-widest">Tags (comma-separated)</label>
+                            <input
+                              value={editPackTags}
+                              onChange={(e) => setEditPackTags(e.target.value)}
+                              placeholder="phonk, drums, 808"
+                              className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-xs outline-none focus:ring-1 focus:ring-cyan-500/50"
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {pack.tags.length > 0 && (
+                            <div className="flex gap-1 mt-1.5 flex-wrap">
+                              {pack.tags.map((tag) => (
+                                <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--muted)] text-[var(--muted-foreground)]">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 mt-2">
+                            {pack.payhipUrl && (
+                              <a href={pack.payhipUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[var(--muted-foreground)] hover:text-white flex items-center gap-0.5">
+                                <ExternalLink className="w-3 h-3" /> Payhip
+                              </a>
+                            )}
+                            {pack.gumroadUrl && (
+                              <a href={pack.gumroadUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] text-[var(--muted-foreground)] hover:text-white flex items-center gap-0.5">
+                                <ExternalLink className="w-3 h-3" /> Gumroad
+                              </a>
+                            )}
+                          </div>
+                        </>
+                      )}
+
+                      {pack.versions.length > 0 && (
+                        <div className="flex gap-1.5 mt-2 flex-wrap">
+                          {pack.versions.map((v) => (
+                            <span key={v.id} className="text-[10px] px-2 py-1 rounded-lg bg-[var(--background)] border border-[var(--muted)] inline-flex items-center gap-1.5">
+                              <span className="text-[var(--muted-foreground)]">{v.name}</span>
+                              <span className={`font-bold ${v.priceCents === 0 ? "text-green-400" : "text-cyan-400"}`}>
+                                {v.priceCents === 0 ? "Free" : `${(v.priceCents / 100).toFixed(2)} ${v.currency}`}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1.5 shrink-0">
+                      {/* Edit / Save / Cancel */}
+                      {isEditing ? (
+                        <>
+                          <button
+                            onClick={async () => {
+                              setEditPackSaving(true);
+                              await fetch(`/api/sample-packs/${pack.id}`, {
+                                method: "PATCH",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  name: editPackName,
+                                  payhipUrl: editPackPayhipUrl,
+                                  gumroadUrl: editPackGumroadUrl,
+                                  tags: editPackTags.split(",").map((t) => t.trim()).filter(Boolean),
+                                }),
+                              });
+                              setEditPackSaving(false);
+                              setEditingPackId(null);
+                              load();
+                            }}
+                            disabled={editPackSaving}
+                            className="p-1.5 rounded-lg bg-[var(--background)] border border-green-800/40 text-green-400 hover:bg-green-950/30 transition-all disabled:opacity-40"
+                            title="Save changes"
+                          >
+                            {editPackSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                          </button>
+                          <button
+                            onClick={() => setEditingPackId(null)}
+                            className="p-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all"
+                            title="Cancel"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setEditingPackId(pack.id);
+                            setEditPackName(pack.name);
+                            setEditPackPayhipUrl(pack.payhipUrl || "");
+                            setEditPackGumroadUrl(pack.gumroadUrl || "");
+                            setEditPackTags(pack.tags.join(", "));
+                          }}
+                          className="p-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all"
+                          title="Edit pack"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        onClick={async () => {
+                          setPackRescraping(pack.id);
+                          await fetch(`/api/sample-packs/${pack.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ rescrape: true }),
+                          });
+                          setPackRescraping(null);
+                          load();
+                        }}
+                        disabled={packRescraping === pack.id}
+                        className="p-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all disabled:opacity-40"
+                        title="Re-scrape metadata"
+                      >
+                        {packRescraping === pack.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await fetch(`/api/sample-packs/${pack.id}`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ published: !pack.published }),
+                          });
+                          load();
+                        }}
+                        className="p-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white transition-all"
+                        title={pack.published ? "Hide" : "Show"}
+                      >
+                        {pack.published ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!window.confirm(`Delete "${pack.name}"?`)) return;
+                          await fetch(`/api/sample-packs/${pack.id}`, { method: "DELETE" });
+                          load();
+                        }}
+                        className="p-1.5 rounded-lg bg-[var(--background)] border border-red-800/40 text-red-400 hover:bg-red-950/30 transition-all"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                );
+              })}
+              {packs.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)] text-center py-8">No sample packs added yet.</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ── Labels Tab ── */}
+        {activeTab === "labels" && (
+          <>
+            <h2 className="text-xl font-black tracking-tight mb-6 flex items-center gap-2">
+              <Tag className="w-5 h-5 text-fuchsia-400" /> Submit Labels
+            </h2>
+
+            {/* Add label form */}
+            <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 mb-6 space-y-3">
+              <p className="text-xs font-bold text-[var(--muted-foreground)] uppercase tracking-wider">Add New Label</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  value={newLabelName}
+                  onChange={(e) => setNewLabelName(e.target.value)}
+                  placeholder="Label name"
+                  className="px-3 py-2 rounded-xl bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-fuchsia-500/50"
+                />
+                <input
+                  value={newLabelEmail}
+                  onChange={(e) => setNewLabelEmail(e.target.value)}
+                  placeholder="demos@label.com"
+                  className="px-3 py-2 rounded-xl bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-fuchsia-500/50"
+                />
+                <input
+                  value={newLabelIconUrl}
+                  onChange={(e) => setNewLabelIconUrl(e.target.value)}
+                  placeholder="Icon URL (optional)"
+                  className="px-3 py-2 rounded-xl bg-[var(--background)] border border-[var(--muted)] text-sm outline-none focus:ring-1 focus:ring-fuchsia-500/50"
+                />
+                <div className="flex gap-2 items-center">
+                  <input
+                    type="color"
+                    value={newLabelColor}
+                    onChange={(e) => setNewLabelColor(e.target.value)}
+                    className="w-10 h-10 rounded-lg border border-[var(--muted)] cursor-pointer bg-transparent"
+                  />
+                  <span className="text-xs text-[var(--muted-foreground)]">{newLabelColor}</span>
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!newLabelName.trim() || !newLabelEmail.trim()) return;
+                  setLabelSaving(true);
+                  const res = await fetch("/api/labels", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      name: newLabelName.trim(),
+                      email: newLabelEmail.trim(),
+                      iconUrl: newLabelIconUrl.trim() || null,
+                      color: newLabelColor,
+                    }),
+                  });
+                  if (res.ok) {
+                    const label = await res.json();
+                    setAdminLabels((prev) => [...prev, label]);
+                    setNewLabelName("");
+                    setNewLabelEmail("");
+                    setNewLabelIconUrl("");
+                    setNewLabelColor("#c026d3");
+                  }
+                  setLabelSaving(false);
+                }}
+                disabled={labelSaving || !newLabelName.trim() || !newLabelEmail.trim()}
+                className="px-4 py-2 rounded-xl bg-fuchsia-500/15 border border-fuchsia-500/30 text-sm font-bold text-fuchsia-400 hover:bg-fuchsia-500/25 disabled:opacity-40 transition-all flex items-center gap-2"
+              >
+                {labelSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                Add Label
+              </button>
+            </div>
+
+            {/* Labels list */}
+            <div className="space-y-2">
+              {adminLabels.map((label) => (
+                <div
+                  key={label.id}
+                  className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                    label.active
+                      ? "bg-[var(--secondary)] border-[var(--muted)]"
+                      : "bg-[var(--secondary)]/50 border-[var(--muted)] opacity-60"
+                  }`}
+                >
+                  {label.iconUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={label.iconUrl} alt="" className="w-8 h-8 rounded" />
+                  ) : (
+                    <div
+                      className="w-8 h-8 rounded flex items-center justify-center text-xs font-black text-white"
+                      style={{ backgroundColor: label.color }}
+                    >
+                      {label.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold truncate">{label.name}</p>
+                    <p className="text-xs text-[var(--muted-foreground)] truncate">{label.email}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={async () => {
+                        const res = await fetch(`/api/labels/${label.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ active: !label.active }),
+                        });
+                        if (res.ok) {
+                          setAdminLabels((prev) =>
+                            prev.map((l) => (l.id === label.id ? { ...l, active: !l.active } : l))
+                          );
+                        }
+                      }}
+                      className={`p-1.5 rounded-lg border transition-all ${
+                        label.active
+                          ? "bg-green-950/30 border-green-800/40 text-green-400 hover:bg-green-900/30"
+                          : "bg-[var(--background)] border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"
+                      }`}
+                      title={label.active ? "Deactivate" : "Activate"}
+                    >
+                      {label.active ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Delete label "${label.name}"?`)) return;
+                        await fetch(`/api/labels/${label.id}`, { method: "DELETE" });
+                        setAdminLabels((prev) => prev.filter((l) => l.id !== label.id));
+                      }}
+                      className="p-1.5 rounded-lg bg-[var(--background)] border border-red-800/40 text-red-400 hover:bg-red-950/30 transition-all"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {adminLabels.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)] text-center py-8">No labels added yet.</p>
+              )}
+            </div>
           </>
         )}
       </div>
