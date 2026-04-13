@@ -352,9 +352,10 @@ interface SongListViewProps {
   mode: LeaderboardMode;
   search: string;
   collapseVersions: boolean;
+  sortOrder?: "desc" | "asc" | "abs";
 }
 
-export default function SongListView({ mode, search, collapseVersions }: SongListViewProps) {
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc" }: SongListViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -391,7 +392,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search]);
 
-  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode) => {
+  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode, trendSortOrder: "desc" | "asc" | "abs") => {
     if (append) {
       setLoadingMore(true);
       try {
@@ -399,6 +400,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
         if (searchQuery) params.set("search", searchQuery);
         params.set("collapseVersions", groupedVersions ? "true" : "false");
         params.set("mode", trackMode);
+        params.set("sort", trendSortOrder);
         const qs = params.toString();
         const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
           `rank:songs:more:${qs}`,
@@ -423,6 +425,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
       if (searchQuery) podiumParams.set("search", searchQuery);
       podiumParams.set("collapseVersions", groupedVersions ? "true" : "false");
       podiumParams.set("mode", trackMode);
+      podiumParams.set("sort", trendSortOrder);
       const podiumQs = podiumParams.toString();
       const podiumData = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
         `rank:songs:podium:${podiumQs}`,
@@ -439,6 +442,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
       if (searchQuery) params.set("search", searchQuery);
       params.set("collapseVersions", groupedVersions ? "true" : "false");
       params.set("mode", trackMode);
+      params.set("sort", trendSortOrder);
       const qs = params.toString();
       const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
         `rank:songs:list:${qs}`,
@@ -455,10 +459,10 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
     }
   }, []);
 
-  // Reload when mode/search/collapse changes
+  // Reload when mode/search/collapse/sortOrder changes
   useEffect(() => {
-    fetchTracks(0, debouncedSearch, false, collapseVersions, mode);
-  }, [collapseVersions, debouncedSearch, fetchTracks, mode]);
+    fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder);
+  }, [collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -553,7 +557,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
   const loadMoreRef = useRef(() => {});
 
   function loadMore() {
-    fetchTracks(tracks.length, debouncedSearch, true, collapseVersions, mode);
+    fetchTracks(tracks.length, debouncedSearch, true, collapseVersions, mode, sortOrder);
   }
   loadMoreRef.current = loadMore;
 

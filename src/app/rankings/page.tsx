@@ -332,6 +332,23 @@ function RankingsInner() {
             </>
           )}
 
+          {/* Song sort order — list trends */}
+          {!isArtists && !isBubbles && songMode !== "popularity" && (
+            <>
+              <div className="w-px h-5 bg-[var(--muted)]" />
+              <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                {(["desc", "abs", "asc"] as const).map((o) => {
+                  const label = o === "desc" ? "Gainers" : o === "asc" ? "Losers" : "Biggest";
+                  return (
+                    <button key={o} onClick={() => setChangeSortOrder(o)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${changeSortOrder === o ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
           {/* Group toggle — songs */}
           {!isArtists && (
             <button
@@ -390,7 +407,7 @@ function RankingsInner() {
           )}
           {songListMounted && (
             <div className={isArtists ? "hidden" : ""}>
-              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} />
+              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} />
             </div>
           )}
         </div>

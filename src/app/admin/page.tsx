@@ -149,7 +149,7 @@ export default function AdminPage() {
   const [expiresInDays, setExpiresInDays] = useState<number | "">("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
-  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings" | "debug" | "packs" | "labels">("staff");
+  const [activeTab, setActiveTab] = useState<"staff" | "invites" | "settings" | "debug" | "packs" | "labels" | "catalog">("staff");
 
   // Sample packs state
   const [packs, setPacks] = useState<Array<{
@@ -188,6 +188,31 @@ export default function AdminPage() {
   const [newLabelIconUrl, setNewLabelIconUrl] = useState("");
   const [newLabelColor, setNewLabelColor] = useState("#c026d3");
   const [labelSaving, setLabelSaving] = useState(false);
+
+  // Catalog report state
+  type CatalogArtistHit = { id: string; name: string; imageUrl: string | null; spotifyId: string | null; deezerId: number | null };
+  type CatalogTrack = { id: string; name: string; albumName: string | null; inDb: boolean; inDbById: boolean; inDbByName: boolean; deezerUrl?: string | null; spotifyUrl?: string };
+  type CatalogDbTrack = { id: string; name: string; albumName: string | null; spotifyId: string | null; deezerId: string | null; popularity: number };
+  type CatalogReport = {
+    artist: { id: string; name: string; spotifyId: string | null; deezerId: number | null };
+    db: CatalogDbTrack[];
+    deezer: CatalogTrack[];
+    spotify: CatalogTrack[];
+    summary: { dbCount: number; deezerTotal: number; deezerMissing: number; spotifyTotal: number; spotifyMissing: number };
+    fetchedAt: string;
+  };
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogResults, setCatalogResults] = useState<CatalogArtistHit[]>([]);
+  const [catalogResultsLoading, setCatalogResultsLoading] = useState(false);
+  const [catalogSelectedArtist, setCatalogSelectedArtist] = useState<CatalogArtistHit | null>(null);
+  const [catalogReport, setCatalogReport] = useState<CatalogReport | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [catalogSyncing, setCatalogSyncing] = useState(false);
+  const [catalogSyncResult, setCatalogSyncResult] = useState<string | null>(null);
+  const [catalogShowDb, setCatalogShowDb] = useState(false);
+  const [catalogDbFilter, setCatalogDbFilter] = useState("");
+  const [catalogMissingFilter, setCatalogMissingFilter] = useState("");
 
   // Debug state
   const [debugChecks, setDebugChecks] = useState<{ name: string; status: "ok" | "warn" | "error"; message: string; detail?: string }[]>([]);
@@ -638,6 +663,7 @@ export default function AdminPage() {
             { key: "debug" as const, label: "Debug", icon: Bug },
             { key: "packs" as const, label: "Packs", icon: Package },
             { key: "labels" as const, label: "Labels", icon: Tag },
+            { key: "catalog" as const, label: "Catalog Report", icon: Music },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -1969,6 +1995,308 @@ export default function AdminPage() {
                 <p className="text-sm text-[var(--muted-foreground)] text-center py-8">No labels added yet.</p>
               )}
             </div>
+          </>
+        )}
+
+        {/* ── Catalog Report Tab ── */}
+        {activeTab === "catalog" && (
+          <>
+            <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <Music className="w-5 h-5 text-[var(--accent)]" />
+              Catalog Report
+            </h2>
+            <p className="text-sm text-[var(--muted-foreground)] mb-6">
+              Run a live comparison between an artist&apos;s DB tracks and what Deezer + Spotify currently return. Useful for diagnosing missing songs.
+            </p>
+
+            {/* Artist search */}
+            <div className="mb-6">
+              <label className="block text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Search Artist</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={catalogSearch}
+                  onChange={async (e) => {
+                    const q = e.target.value;
+                    setCatalogSearch(q);
+                    setCatalogSelectedArtist(null);
+                    setCatalogReport(null);
+                    setCatalogError(null);
+                    setCatalogSyncResult(null);
+                    if (q.trim().length < 2) { setCatalogResults([]); return; }
+                    setCatalogResultsLoading(true);
+                    try {
+                      const res = await fetch(`/api/artists?q=${encodeURIComponent(q.trim())}&take=8`);
+                      if (res.ok) {
+                        const data = await res.json();
+                        setCatalogResults((data.artists ?? data ?? []).slice(0, 8));
+                      }
+                    } finally {
+                      setCatalogResultsLoading(false);
+                    }
+                  }}
+                  placeholder="e.g. ariis"
+                  className="flex-1 px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-white text-sm focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]"
+                />
+              </div>
+
+              {/* Results dropdown */}
+              {catalogResults.length > 0 && !catalogSelectedArtist && (
+                <div className="mt-1 rounded-xl border border-[var(--muted)] bg-[var(--secondary)] overflow-hidden">
+                  {catalogResultsLoading ? (
+                    <div className="px-4 py-3 text-sm text-[var(--muted-foreground)] flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Searching…</div>
+                  ) : (
+                    catalogResults.map((a) => (
+                      <button
+                        key={a.id}
+                        onClick={() => {
+                          setCatalogSelectedArtist(a);
+                          setCatalogSearch(a.name);
+                          setCatalogResults([]);
+                          setCatalogReport(null);
+                          setCatalogError(null);
+                          setCatalogSyncResult(null);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--muted)]/30 transition-colors border-t border-[var(--muted)]/30 first:border-0"
+                      >
+                        {a.imageUrl ? (
+                          <img src={a.imageUrl} alt={a.name} className="w-8 h-8 rounded-full object-cover" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-[var(--muted)] flex items-center justify-center text-xs font-bold text-white">{a.name.charAt(0)}</div>
+                        )}
+                        <div>
+                          <p className="text-sm font-bold text-white">{a.name}</p>
+                          <p className="text-xs text-[var(--muted-foreground)]">
+                            {a.spotifyId ? `Spotify ✓` : "No Spotify"} · {a.deezerId ? `Deezer ✓` : "No Deezer"}
+                          </p>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Selected artist + run report */}
+            {catalogSelectedArtist && (
+              <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="flex-1 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/5 px-4 py-3">
+                  <p className="text-sm font-bold text-white">{catalogSelectedArtist.name}</p>
+                  <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
+                    Spotify: <span className="text-white">{catalogSelectedArtist.spotifyId ?? "—"}</span>
+                    &nbsp;·&nbsp;Deezer: <span className="text-white">{catalogSelectedArtist.deezerId ?? "—"}</span>
+                  </p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={async () => {
+                      setCatalogLoading(true);
+                      setCatalogReport(null);
+                      setCatalogError(null);
+                      setCatalogSyncResult(null);
+                      setCatalogShowDb(false);
+                      setCatalogMissingFilter("");
+                      setCatalogDbFilter("");
+                      try {
+                        const res = await fetch(`/api/admin/catalog-report?artistId=${catalogSelectedArtist.id}`);
+                        const data = await res.json();
+                        if (!res.ok) { setCatalogError(data.error ?? "Report failed"); return; }
+                        setCatalogReport(data);
+                      } catch {
+                        setCatalogError("Network error");
+                      } finally {
+                        setCatalogLoading(false);
+                      }
+                    }}
+                    disabled={catalogLoading}
+                    className="px-4 py-2 rounded-lg bg-[var(--accent)] text-white text-sm font-bold hover:brightness-110 transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {catalogLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                    {catalogLoading ? "Fetching…" : "Run Report"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Force-sync catalog for ${catalogSelectedArtist.name}? This fetches fresh data from Deezer + Spotify and can take 30–60s.`)) return;
+                      setCatalogSyncing(true);
+                      setCatalogSyncResult(null);
+                      try {
+                        const res = await fetch("/api/admin/catalog-report", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ artistId: catalogSelectedArtist.id }),
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                          setCatalogSyncResult(`Sync complete — ${data.trackCount} tracks upserted. Re-run the report to see updated results.`);
+                        } else {
+                          setCatalogSyncResult(`Sync error: ${data.error}`);
+                        }
+                      } catch {
+                        setCatalogSyncResult("Sync failed — network error");
+                      } finally {
+                        setCatalogSyncing(false);
+                      }
+                    }}
+                    disabled={catalogSyncing || catalogLoading}
+                    className="px-4 py-2 rounded-lg bg-[var(--secondary)] border border-[var(--muted)] text-white text-sm font-bold hover:border-green-600 transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {catalogSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4 text-green-400" />}
+                    {catalogSyncing ? "Syncing…" : "Force Sync"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {catalogSyncResult && (
+              <div className="mb-4 rounded-xl border border-green-800/40 bg-green-950/20 px-4 py-3 text-sm text-green-400 flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{catalogSyncResult}</span>
+              </div>
+            )}
+
+            {catalogError && (
+              <div className="mb-4 rounded-xl border border-red-800/40 bg-red-950/20 px-4 py-3 text-sm text-red-400 flex items-start gap-2">
+                <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{catalogError}</span>
+              </div>
+            )}
+
+            {catalogLoading && (
+              <div className="flex items-center gap-3 py-12 justify-center text-[var(--muted-foreground)]">
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--accent)]" />
+                <span className="text-sm">Fetching live catalogs from Deezer + Spotify — this may take 10–30s…</span>
+              </div>
+            )}
+
+            {/* Report */}
+            {catalogReport && !catalogLoading && (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                  {[
+                    { label: "In Database", value: catalogReport.summary.dbCount, color: "text-white" },
+                    { label: "Deezer Total", value: catalogReport.summary.deezerTotal, color: "text-blue-400" },
+                    { label: "Deezer Missing", value: catalogReport.summary.deezerMissing, color: catalogReport.summary.deezerMissing > 0 ? "text-red-400" : "text-green-400" },
+                    { label: "Spotify Missing", value: catalogReport.summary.spotifyMissing, color: catalogReport.summary.spotifyMissing > 0 ? "text-red-400" : "text-green-400" },
+                  ].map((card) => (
+                    <div key={card.label} className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4 text-center">
+                      <p className={`text-3xl font-black ${card.color}`}>{card.value}</p>
+                      <p className="text-xs text-[var(--muted-foreground)] mt-1 font-semibold uppercase tracking-wide">{card.label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <p className="text-xs text-[var(--muted-foreground)] mb-4">
+                  Fetched at {new Date(catalogReport.fetchedAt).toLocaleString()}.
+                  {(catalogReport.summary.deezerMissing === 0 && catalogReport.summary.spotifyMissing === 0)
+                    ? " All tracks appear to be in the DB."
+                    : " Use Force Sync to pull missing tracks into the DB."}
+                </p>
+
+                {/* Missing from Deezer */}
+                {catalogReport.summary.deezerMissing > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <XCircle className="w-4 h-4" />
+                      Missing from DB — Deezer ({catalogReport.summary.deezerMissing})
+                    </h3>
+                    <input
+                      type="text"
+                      placeholder="Filter by name…"
+                      value={catalogMissingFilter}
+                      onChange={(e) => setCatalogMissingFilter(e.target.value)}
+                      className="mb-2 w-full px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-white text-xs focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]"
+                    />
+                    <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/30 max-h-72 overflow-y-auto">
+                      {catalogReport.deezer
+                        .filter((t) => !t.inDb)
+                        .filter((t) => !catalogMissingFilter || t.name.toLowerCase().includes(catalogMissingFilter.toLowerCase()))
+                        .map((t) => (
+                          <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                            <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-white truncate">{t.name}</p>
+                              <p className="text-xs text-[var(--muted-foreground)] truncate">{t.albumName}</p>
+                            </div>
+                            {t.deezerUrl && (
+                              <a href={t.deezerUrl} target="_blank" rel="noopener noreferrer" title="Open on Deezer" className="text-[var(--muted-foreground)] hover:text-white transition-colors shrink-0">
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      {catalogReport.deezer.filter((t) => !t.inDb && (!catalogMissingFilter || t.name.toLowerCase().includes(catalogMissingFilter.toLowerCase()))).length === 0 && (
+                        <p className="px-4 py-3 text-sm text-[var(--muted-foreground)]">No matches.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Missing from Spotify */}
+                {catalogReport.summary.spotifyMissing > 0 && (
+                  <div className="mb-4">
+                    <h3 className="text-sm font-bold text-orange-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <XCircle className="w-4 h-4" />
+                      Missing from DB — Spotify ({catalogReport.summary.spotifyMissing})
+                    </h3>
+                    <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/30 max-h-72 overflow-y-auto">
+                      {catalogReport.spotify
+                        .filter((t) => !t.inDb)
+                        .map((t) => (
+                          <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                            <XCircle className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-white truncate">{t.name}</p>
+                              <p className="text-xs text-[var(--muted-foreground)] truncate">{t.albumName}</p>
+                            </div>
+                            {t.spotifyUrl && (
+                              <a href={t.spotifyUrl} target="_blank" rel="noopener noreferrer" title="Open on Spotify" className="text-[var(--muted-foreground)] hover:text-white transition-colors shrink-0">
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* DB tracks (collapsible) */}
+                <div>
+                  <button
+                    onClick={() => setCatalogShowDb((v) => !v)}
+                    className="flex items-center gap-2 text-sm font-bold text-[var(--muted-foreground)] hover:text-white transition-colors mb-2"
+                  >
+                    <Database className="w-4 h-4" />
+                    {catalogShowDb ? "Hide" : "Show"} All DB Tracks ({catalogReport.summary.dbCount})
+                  </button>
+                  {catalogShowDb && (
+                    <>
+                      <input
+                        type="text"
+                        placeholder="Filter by name…"
+                        value={catalogDbFilter}
+                        onChange={(e) => setCatalogDbFilter(e.target.value)}
+                        className="mb-2 w-full px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-white text-xs focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]"
+                      />
+                      <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/30 max-h-96 overflow-y-auto">
+                        {catalogReport.db
+                          .filter((t) => !catalogDbFilter || t.name.toLowerCase().includes(catalogDbFilter.toLowerCase()))
+                          .map((t) => (
+                            <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                              <CheckCircle className="w-3.5 h-3.5 text-green-400 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-white truncate">{t.name}</p>
+                                <p className="text-xs text-[var(--muted-foreground)] truncate">{t.albumName ?? "—"}</p>
+                              </div>
+                              <span className="text-xs text-[var(--muted-foreground)] shrink-0 tabular-nums">Pop {t.popularity}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
