@@ -304,7 +304,9 @@ export function collapseFeedTrackVersions<T extends TrackLike & { artistId: stri
 ) {
   return collapseTracks(
     tracks,
-    (track) => `${getFeedArtistSignature(track)}::${getCanonicalTrackTitle(track.name)}`,
+    // Group by primary artist + canonical title only — different versions of a song
+    // can have slightly different contributor/featured lists, but they're still the same song.
+    (track) => `${track.artistId}::${getCanonicalTrackTitle(track.name)}`,
     chooseTrack ?? preferHighestScoringTrack,
   );
 }
