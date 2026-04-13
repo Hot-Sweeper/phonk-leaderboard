@@ -604,10 +604,11 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
         </div>
       ) : (
       <>
-      <div className="hidden md:grid grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
-        <span /><span>#</span><span>Title</span><span>Version</span>
-        <span className="text-right">Released</span>
-        <span className="text-right"><Clock className="w-3 h-3 inline" /></span>
+      <div className="hidden md:grid md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1fr)_7rem_7rem_3.5rem_5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+        <span /><span>#</span><span>Title</span>
+        <span className="hidden lg:block">Version</span>
+        <span className="hidden lg:block text-right">Released</span>
+        <span className="hidden lg:block text-right"><Clock className="w-3 h-3 inline" /></span>
         <span className="text-right">{getMetricHeaderLabel(mode)}</span>
         <span />
       </div>
@@ -635,7 +636,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
               : maxTrendMetric > 0 && track.hasTrendData ? Math.max(8, (Math.abs(track.metricValue) / maxTrendMetric) * 100) : 0;
 
             return (
-              <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
+              <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1fr)_7rem_7rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
                 {/* Play */}
                 <div className="flex justify-center">
                   {isValidPreviewUrl(track.previewUrl) ? (
@@ -660,7 +661,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
                       <button type="button" onClick={() => openSong(track.id, track)} className="font-bold text-sm truncate text-left hover:text-[var(--accent)] transition-colors cursor-pointer">{track.name}</button>
                       {track.explicit && <span className="shrink-0 text-[9px] font-bold bg-zinc-700 text-zinc-300 px-1 py-px rounded">E</span>}
                     </div>
-                    <div className="text-xs leading-relaxed whitespace-normal break-words">
+                    <div className="text-xs truncate">
                       {artists.map((artist, idx) => (
                         <span key={artist.key}>
                           {idx > 0 && <span className="text-[var(--muted-foreground)]">, </span>}
@@ -668,18 +669,18 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
                         </span>
                       ))}
                     </div>
-                    <div className="md:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
+                    <div className="lg:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
                       {versionLabel && <>{versionLabel}<span className="mx-1.5">&bull;</span></>}
                       {track.releaseDate ?? "Unknown date"}
                     </div>
                   </div>
                 </div>
 
-                <span className="hidden md:block text-xs text-[var(--muted-foreground)] truncate font-medium">{versionLabel ?? "-"}</span>
-                <span className="hidden md:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
+                <span className="hidden lg:block text-xs text-[var(--muted-foreground)] truncate font-medium">{versionLabel ?? "-"}</span>
+                <span className="hidden lg:flex items-center justify-end gap-1 text-xs text-[var(--muted-foreground)] tabular-nums">
                   <CalendarDays className="w-3 h-3 opacity-50" />{track.releaseDate ?? "--"}
                 </span>
-                <span className="hidden md:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">{formatDuration(track.durationMs)}</span>
+                <span className="hidden lg:block text-xs text-[var(--muted-foreground)] text-right tabular-nums">{formatDuration(track.durationMs)}</span>
 
                 {/* Metric */}
                 <div className="flex flex-col items-end gap-0.5">
@@ -691,7 +692,7 @@ export default function SongListView({ mode, search, collapseVersions }: SongLis
                 </div>
 
                 {/* External link */}
-                <div className="hidden md:flex justify-end">
+                <div className="hidden md:flex justify-center">
                   {(track.deezerUrl || track.spotifyUrl) && (
                     <a href={track.deezerUrl ?? track.spotifyUrl!} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}>
                       <ExternalLink className="w-3.5 h-3.5" />

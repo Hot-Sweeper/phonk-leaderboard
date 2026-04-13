@@ -21,68 +21,69 @@ export async function GET(req: Request) {
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "50", 10) || 50, 100);
 
-  const where: Record<string, unknown> = {};
+  const metricForArtist = (artist: ArtistCacheEntry["artists"][number], plat?: string) => {
+    if (plat === "YOUTUBE") return artist.links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
+    if (plat === "SPOTIFY") return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+    if (plat === "TIKTOK") return artist.links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
+    if (plat === "INSTAGRAM") return artist.links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
+    return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+  };
 
-  if (q) {
-    where.OR = [
-      { name: { contains: q, mode: "insensitive" } },
-      { links: { some: { handle: { contains: q, mode: "insensitive" } } } },
-    ];
-  }
-
-  if (platform && ["YOUTUBE", "SPOTIFY", "TIKTOK", "INSTAGRAM"].includes(platform)) {
-    where.links = { some: { platform } };
-  }
-
-  const cacheKey = `${q ?? ""}:${platform ?? ""}`;
-  const now = Date.now();
-  const cached = artistListCache.get(cacheKey);
-
-  let artists: ArtistCacheEntry["artists"];
-  let totalCount: number;
-
-  if (cached && now - cached.timestamp < ARTIST_CACHE_TTL) {
-    artists = cached.artists;
-    totalCount = artists.length;
-  } else {
-    artists = await prisma.artist.findMany({
-      where,
-      include: {
-        links: { orderBy: { platform: "asc" } },
-      },
-    });
-
-    const metricForArtist = (artist: (typeof artists)[number]) => {
-      if (platform === "YOUTUBE") {
-        return artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
-      }
-      if (platform === "SPOTIFY") {
-        return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
-      }
-      if (platform === "TIKTOK") {
-        return artist.links.find((link) => link.platform === "TIKTOK")?.followerCount ?? 0;
-      }
-      if (platform === "INSTAGRAM") {
-        return artist.links.find((link) => link.platform === "INSTAGRAM")?.followerCount ?? 0;
-      }
-      return artist.links.find((link) => link.platform === "SPOTIFY")?.monthlyListeners ?? 0;
-    };
-
-    artists.sort((a, b) => {
-      const metricDelta = metricForArtist(b) - metricForArtist(a);
+  const sortArtists = (list: ArtistCacheEntry["artists"], plat?: string) => {
+    list.sort((a, b) => {
+      const metricDelta = metricForArtist(b, plat) - metricForArtist(a, plat);
       if (metricDelta !== 0) return metricDelta;
       const watchlistDelta = b.watchlistCount - a.watchlistCount;
       if (watchlistDelta !== 0) return watchlistDelta;
       return a.name.localeCompare(b.name);
     });
+  };
 
-    totalCount = artists.length;
-    artistListCache.set(cacheKey, { artists, timestamp: now });
+  // Always have the full global leaderboard available for true rank lookup
+  const globalKey = `:${platform ?? ""}`;
+  const now = Date.now();
+  const cachedGlobal = artistListCache.get(globalKey);
+  let globalList: ArtistCacheEntry["artists"];
+
+  if (cachedGlobal && now - cachedGlobal.timestamp < ARTIST_CACHE_TTL) {
+    globalList = cachedGlobal.artists;
+  } else {
+    const globalWhere: Record<string, unknown> = {};
+    if (platform && ["YOUTUBE", "SPOTIFY", "TIKTOK", "INSTAGRAM"].includes(platform)) {
+      globalWhere.links = { some: { platform } };
+    }
+    globalList = await prisma.artist.findMany({
+      where: globalWhere,
+      include: { links: { orderBy: { platform: "asc" } } },
+    });
+    sortArtists(globalList, platform ?? undefined);
+    artistListCache.set(globalKey, { artists: globalList, timestamp: now });
+  }
+
+  // Build a rank lookup from the global list (1-based)
+  const globalRankMap = new Map<string, number>();
+  globalList.forEach((a, i) => globalRankMap.set(a.id, i + 1));
+
+  let resultList: ArtistCacheEntry["artists"];
+  let totalCount: number;
+
+  if (q) {
+    // Filter the global list by search query to preserve global rank ordering
+    const lowerQ = q.toLowerCase();
+    resultList = globalList.filter((a) => {
+      if (a.name.toLowerCase().includes(lowerQ)) return true;
+      if (a.links.some((l) => l.handle?.toLowerCase().includes(lowerQ))) return true;
+      return false;
+    });
+    totalCount = resultList.length;
+  } else {
+    resultList = globalList;
+    totalCount = resultList.length;
   }
 
   return NextResponse.json(
     {
-      artists: artists.slice(skip, skip + take),
+      artists: resultList.slice(skip, skip + take).map((a) => ({ ...a, globalRank: globalRankMap.get(a.id) ?? 0 })),
       totalCount,
     },
     {

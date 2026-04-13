@@ -304,9 +304,10 @@ export function collapseFeedTrackVersions<T extends TrackLike & { artistId: stri
 ) {
   return collapseTracks(
     tracks,
-    // Group by primary artist + canonical title only — different versions of a song
-    // can have slightly different contributor/featured lists, but they're still the same song.
-    (track) => `${track.artistId}::${getCanonicalTrackTitle(track.name)}`,
+    // Group by canonical title only — Spotify can assign different primary artists
+    // to different versions of the same song (e.g. "NO BATIDÃO" has artistId=slxughter
+    // on one version and artistId=ZXKAI on another). They're still the same song.
+    (track) => getCanonicalTrackTitle(track.name),
     chooseTrack ?? preferHighestScoringTrack,
   );
 }

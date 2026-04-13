@@ -51,6 +51,7 @@ type Artist = {
   imageUrl: string | null;
   watchlistCount: number;
   links: ArtistLink[];
+  globalRank?: number;
 };
 
 const ALL_PLATFORMS = [
@@ -314,9 +315,8 @@ function ChangePodiumCard({
         <div
           className={`w-[92%] md:w-[96%] ${sizes.height} relative overflow-hidden flex flex-col items-center justify-center z-10 border-x border-white/[0.08] group-hover:brightness-125 transition-all duration-500`}
           style={{
-            background: `linear-gradient(to bottom, rgba(${accentHex}, 0.3), rgba(${accentHex}, 0.12), rgba(${accentHex}, 0.05))`,
-            backgroundImage: `radial-gradient(circle at center, rgba(255,255,255,0.12) 1px, transparent 1px)`,
-            backgroundSize: `10px 10px`,
+            backgroundImage: `linear-gradient(to bottom, rgba(${accentHex}, 0.3), rgba(${accentHex}, 0.12), rgba(${accentHex}, 0.05)), radial-gradient(circle at center, rgba(255,255,255,0.12) 1px, transparent 1px)`,
+            backgroundSize: `100% 100%, 10px 10px`,
             WebkitMaskImage: `linear-gradient(to bottom, black 0%, black ${sizes.fadeStop}, transparent 100%)`,
             maskImage: `linear-gradient(to bottom, black 0%, black ${sizes.fadeStop}, transparent 100%)`,
           }}
@@ -347,6 +347,7 @@ function ChangePodiumCard({
 function PodiumCard({
   artist,
   rank,
+  displayRank,
   isWatched,
   onToggle,
   toggling,
@@ -355,6 +356,7 @@ function PodiumCard({
 }: {
   artist: Artist;
   rank: number;
+  displayRank?: number;
   isWatched: boolean;
   onToggle: () => void;
   toggling: boolean;
@@ -489,7 +491,7 @@ function PodiumCard({
           {/* Giant Rank Number */}
           <div className={`absolute inset-x-0 top-0 bottom-0 flex items-start justify-center pt-2 md:pt-3 select-none pointer-events-none ${theme.numberColor}`}>
             <span className={`font-black italic ${theme.numberSize} leading-none tracking-tighter`} style={{ textShadow: `0 0 40px rgba(${theme.accentHex}, 0.5), 0 0 80px rgba(${theme.accentHex}, 0.2)`, WebkitTextStroke: `1px rgba(${theme.accentHex}, 0.08)` }}>
-              {rank + 1}
+              {displayRank ?? (rank + 1)}
             </span>
           </div>
 
@@ -890,9 +892,9 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       {/* Podium */}
       {showPodium && (
         <div className="flex flex-row items-end justify-center h-[520px] md:h-[620px] gap-2 md:gap-5 mb-16 px-2 md:px-0 max-w-5xl mx-auto">
-          <PodiumCard key={top3[1].id} artist={top3[1]} rank={1} isWatched={watchlistedIds.has(top3[1].id)} onToggle={() => toggleWatchlist(top3[1].id)} toggling={togglingIds.has(top3[1].id)} platform={platform} openArtist={openArtist} />
-          <PodiumCard key={top3[0].id} artist={top3[0]} rank={0} isWatched={watchlistedIds.has(top3[0].id)} onToggle={() => toggleWatchlist(top3[0].id)} toggling={togglingIds.has(top3[0].id)} platform={platform} openArtist={openArtist} />
-          <PodiumCard key={top3[2].id} artist={top3[2]} rank={2} isWatched={watchlistedIds.has(top3[2].id)} onToggle={() => toggleWatchlist(top3[2].id)} toggling={togglingIds.has(top3[2].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[1].id} artist={top3[1]} rank={1} displayRank={top3[1].globalRank ?? 2} isWatched={watchlistedIds.has(top3[1].id)} onToggle={() => toggleWatchlist(top3[1].id)} toggling={togglingIds.has(top3[1].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[0].id} artist={top3[0]} rank={0} displayRank={top3[0].globalRank ?? 1} isWatched={watchlistedIds.has(top3[0].id)} onToggle={() => toggleWatchlist(top3[0].id)} toggling={togglingIds.has(top3[0].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[2].id} artist={top3[2]} rank={2} displayRank={top3[2].globalRank ?? 3} isWatched={watchlistedIds.has(top3[2].id)} onToggle={() => toggleWatchlist(top3[2].id)} toggling={togglingIds.has(top3[2].id)} platform={platform} openArtist={openArtist} />
         </div>
       )}
 
@@ -1023,13 +1025,13 @@ export default function ArtistListView({ platform, search, sortMode = "current",
         <div className="flex flex-col gap-2">
           {(showPodium ? rest : artists).map((artist, idx) => {
             const rc = rankChanges[artist.id];
-            const rank = showPodium ? idx + 3 : idx;
+            const displayRank = artist.globalRank ?? (showPodium ? idx + 4 : idx + 1);
             const isWatched = watchlistedIds.has(artist.id);
             return (
               <div key={artist.id} className="group flex items-center gap-4 px-5 py-3.5 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all">
                 {/* Rank + Change */}
                 <div className="w-12 flex flex-col items-center shrink-0">
-                  <span className="font-black text-lg tabular-nums text-[var(--muted-foreground)]">{rank + 1}</span>
+                  <span className="font-black text-lg tabular-nums text-[var(--muted-foreground)]">{displayRank}</span>
                   {rc && rc.rankChange !== 0 && (
                     <span className={`flex items-center gap-0.5 text-[10px] font-bold leading-none ${rc.rankChange > 0 ? "text-green-400" : "text-red-400"}`}>
                       {rc.rankChange > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}

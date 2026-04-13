@@ -5,7 +5,7 @@ import { toPreviewProxyUrl } from "@/lib/preview";
 import { claimAudio } from "@/lib/global-audio";
 import { fetchJsonWithSessionCache } from "@/lib/client-cache";
 import {
-  Music, Play, Pause, ExternalLink, User, X, TrendingUp, ArrowUpRight, ArrowDownRight,
+  Music, Play, Pause, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2,
 } from "lucide-react";
 import { useDetailPanel } from "@/lib/detail-panel";
 
@@ -27,17 +27,16 @@ function fmtDate(d: string) {
 function SpotifyIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>;
 }
-function DeezerIcon({ className }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M18.81 4.16v3.03H24V4.16h-5.19zM6.27 8.38v3.027h5.189V8.38H6.27zm12.54 0v3.027H24V8.38h-5.19zM6.27 12.594v3.027h5.189v-3.027H6.27zm6.27 0v3.027h5.19v-3.027h-5.19zm6.27 0v3.027H24v-3.027h-5.19zM0 16.81v3.029h5.19v-3.03H0zm6.27 0v3.029h5.189v-3.03H6.27zm6.27 0v3.029h5.19v-3.03h-5.19zm6.27 0v3.029H24v-3.03h-5.19z"/></svg>;
-}
 
 /* ── types ── */
+type ArtistInfo = { id: string; name: string; imageUrl: string | null };
 type SongData = {
   id: string; name: string; albumName: string | null; albumImageUrl: string | null;
   previewUrl: string | null; deezerUrl: string | null; deezerId: string | null;
   spotifyUrl: string | null; durationMs: number; popularity: number; explicit: boolean;
   releaseDate: string | null; primaryVersion?: string; featuredArtists: string[];
-  artist: { id: string; name: string; imageUrl: string | null };
+  artist: ArtistInfo;
+  allArtists?: ArtistInfo[];
 };
 type TrackSnap = { popularity: number; createdAt: string };
 type ChartPeriod = "week" | "month" | "year";
@@ -74,21 +73,35 @@ function SparkChart({ id, points, height = 80 }: { id: string; points: ChartPoin
 /* ── MAIN ── */
 export default function SongPanel({ id, data }: { id: string; data?: SongData }) {
   const { close, openArtist } = useDetailPanel();
-  const song = data ?? null;
+  const [fetched, setFetched] = useState<SongData | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [snaps, setSnaps] = useState<TrackSnap[]>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("month");
 
-  useEffect(() => { setPlaying(false); }, [id]);
+  useEffect(() => { setPlaying(false); setFetched(null); setLoadError(false); }, [id]);
+
+  // Self-load song data when not provided inline
+  useEffect(() => {
+    if (data || !id) return;
+    fetchJsonWithSessionCache<SongData>(`song:${id}:detail`, `/api/songs/${id}`, 120_000)
+      .then(d => { if (d) setFetched(d); else setLoadError(true); })
+      .catch(() => setLoadError(true));
+  }, [id, data]);
 
   useEffect(() => {
     if (!id) return;
     fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
   }, [id, chartPeriod]);
 
+  const song = data ?? fetched;
+
+  if (!song && loadError) return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3"><Music className="w-10 h-10 text-[var(--muted-foreground)]" /><p className="text-sm font-bold text-[var(--muted-foreground)]">Song not found</p></div>
+  );
   if (!song) return (
-    <div className="flex flex-col items-center justify-center py-20 gap-3"><Music className="w-10 h-10 text-[var(--muted-foreground)]" /><p className="text-sm font-bold text-[var(--muted-foreground)]">Select a song</p></div>
+    <div className="flex flex-col items-center justify-center py-20 gap-3"><Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin" /><p className="text-sm font-bold text-[var(--muted-foreground)]">Loading song…</p></div>
   );
 
   async function togglePlay() {
@@ -107,7 +120,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
 
       {/* ── HERO: tall blurred backdrop + large centered cover ── */}
       <div className="relative shrink-0">
-        <div className="relative h-52 overflow-hidden">
+        <div className="relative h-32 overflow-hidden">
           {song.albumImageUrl ? (
             <Image src={song.albumImageUrl} alt="" fill className="object-cover scale-[1.6] blur-3xl opacity-50" />
           ) : (
@@ -119,13 +132,13 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
         </div>
 
         {/* Album cover - large, centered, overlapping the fade */}
-        <div className="relative z-10 flex flex-col items-center -mt-24 px-5">
+        <div className="relative z-10 flex flex-col items-center -mt-28 px-5">
           <div className="relative group">
-            <div className="w-40 h-40 rounded-2xl overflow-hidden ring-2 ring-white/15 shadow-[0_16px_60px_rgba(0,0,0,0.8)] shrink-0">
+            <div className="w-56 h-56 rounded-2xl overflow-hidden ring-2 ring-white/15 shadow-[0_16px_60px_rgba(0,0,0,0.8)] shrink-0">
               {song.albumImageUrl ? (
-                <Image src={song.albumImageUrl} alt={song.albumName ?? ""} width={160} height={160} className="w-full h-full object-cover" />
+                <Image src={song.albumImageUrl} alt={song.albumName ?? ""} width={224} height={224} className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full bg-[var(--secondary)] flex items-center justify-center"><Music className="w-12 h-12 text-[var(--muted-foreground)]" /></div>
+                <div className="w-full h-full bg-[var(--secondary)] flex items-center justify-center"><Music className="w-16 h-16 text-[var(--muted-foreground)]" /></div>
               )}
             </div>
             {/* Play button overlaid on cover */}
@@ -139,38 +152,24 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
             )}
           </div>
 
-          {/* Song title + artist */}
+          {/* Song title */}
           <div className="text-center mt-4 w-full">
             <h2 className="text-xl font-black tracking-tight leading-tight line-clamp-2">{song.name}</h2>
-            {song.primaryVersion && <p className="text-[10px] text-white/40 mt-0.5">{song.primaryVersion}</p>}
-            <div className="flex flex-wrap items-center justify-center gap-x-1 mt-1.5">
-              <button onClick={() => openArtist(song.artist.id)} className="text-sm text-[var(--accent)] hover:text-white font-bold transition-colors">{song.artist.name}</button>
-              {song.featuredArtists.map(name => (
-                <span key={name} className="text-xs text-white/30">, {name}</span>
-              ))}
-            </div>
+            {song.primaryVersion && <span className="inline-block mt-1 px-2 py-0.5 rounded-md bg-white/[0.08] text-[10px] font-bold text-white/50 uppercase tracking-wider">{song.primaryVersion}</span>}
             {/* Meta row: duration, release, explicit */}
             <div className="flex items-center justify-center gap-3 mt-2 text-[10px] text-white/35 font-medium">
               <span>{fmtDur(song.durationMs)}</span>
               {song.releaseDate && <><span className="w-px h-3 bg-white/10" /><span>{song.releaseDate}</span></>}
               {song.explicit && <><span className="w-px h-3 bg-white/10" /><span className="font-black text-white/45 border border-white/15 px-1.5 py-px rounded text-[8px]">E</span></>}
-              {song.albumName && <><span className="w-px h-3 bg-white/10" /><span className="truncate max-w-[120px]">{song.albumName}</span></>}
             </div>
           </div>
 
-          {/* Platform links as icons */}
-          <div className="flex items-center gap-2 mt-3">
-            {song.spotifyUrl && (
-              <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/[0.07] border border-white/[0.08] flex items-center justify-center hover:bg-white/15 transition-all" title="Open in Spotify">
-                <SpotifyIcon className="w-4 h-4 text-[#1DB954]" />
-              </a>
-            )}
-            {song.deezerUrl && (
-              <a href={song.deezerUrl} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/[0.07] border border-white/[0.08] flex items-center justify-center hover:bg-white/15 transition-all" title="Open in Deezer">
-                <DeezerIcon className="w-4 h-4 text-[#A238FF]" />
-              </a>
-            )}
-          </div>
+          {/* Spotify link */}
+          {song.spotifyUrl && (
+            <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer" className="mt-3 w-9 h-9 rounded-full bg-white/[0.07] border border-white/[0.08] flex items-center justify-center hover:bg-white/15 transition-all" title="Open in Spotify">
+              <SpotifyIcon className="w-4 h-4 text-[#1DB954]" />
+            </a>
+          )}
         </div>
 
         <div className="h-4" />
@@ -194,20 +193,35 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
           <div className="px-1 pb-1"><SparkChart id={id} points={chartPoints} height={80} /></div>
         </div>
 
-        {/* ARTIST CARD - circular avatar */}
+        {/* ARTISTS */}
         <div className="mx-4 mt-3">
-          <button onClick={() => openArtist(song.artist.id)} className="w-full flex items-center gap-3 rounded-xl border border-[var(--muted)]/35 bg-white/[0.025] p-3 hover:bg-white/[0.05] hover:border-[var(--muted)]/50 transition-all text-left">
-            {song.artist.imageUrl ? (
-              <Image src={song.artist.imageUrl} alt={song.artist.name} width={44} height={44} className="w-11 h-11 rounded-full object-cover shrink-0 ring-1 ring-white/10" />
-            ) : (
-              <div className="w-11 h-11 rounded-full bg-white/[0.06] flex items-center justify-center shrink-0"><User className="w-4 h-4 text-white/30" /></div>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-black truncate">{song.artist.name}</div>
-              <div className="text-[10px] text-[var(--accent)] mt-0.5">View profile</div>
-            </div>
-            <ArrowUpRight className="w-4 h-4 text-white/20 shrink-0" />
-          </button>
+          <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-2">Artists</h3>
+          <div className="space-y-1.5">
+            {(song.allArtists ?? [song.artist]).map(a => (
+              <button key={a.id} onClick={() => openArtist(a.id)} className="w-full flex items-center gap-3 rounded-xl border border-[var(--muted)]/35 bg-white/[0.025] p-2.5 hover:bg-white/[0.06] hover:border-[var(--accent)]/30 transition-all text-left group">
+                {a.imageUrl ? (
+                  <Image src={a.imageUrl} alt={a.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-white/10 group-hover:ring-[var(--accent)]/40 transition-all" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-white/[0.06] flex items-center justify-center shrink-0"><User className="w-4 h-4 text-white/30" /></div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold truncate group-hover:text-[var(--accent)] transition-colors">{a.name}</div>
+                  <div className="text-[10px] text-white/30">View profile</div>
+                </div>
+                <ArrowUpRight className="w-3.5 h-3.5 text-white/15 group-hover:text-[var(--accent)]/60 shrink-0 transition-colors" />
+              </button>
+            ))}
+            {/* Featured artists without profiles */}
+            {song.featuredArtists.map(name => (
+              <div key={name} className="w-full flex items-center gap-3 rounded-xl border border-[var(--muted)]/20 bg-white/[0.015] p-2.5 text-left">
+                <div className="w-10 h-10 rounded-full bg-white/[0.04] flex items-center justify-center shrink-0"><User className="w-4 h-4 text-white/20" /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-white/50 truncate">{name}</div>
+                  <div className="text-[10px] text-white/20">Featured</div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="h-6" />

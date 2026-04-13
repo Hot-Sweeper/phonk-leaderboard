@@ -122,8 +122,8 @@ function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
           </div>
         )}
       </div>
-      <button onClick={onOpen} className="mt-1.5 px-0.5 w-full text-left">
-        <div className="text-[11px] font-bold truncate leading-snug group-hover:text-white transition-colors">{track.displayName ?? track.name}</div>
+      <button onClick={onOpen} className="mt-1.5 px-0.5 w-full text-left cursor-pointer">
+        <div className="text-[11px] font-bold truncate leading-snug group-hover:text-[var(--accent)] transition-colors">{track.displayName ?? track.name}</div>
         <div className="text-[9px] text-white/25 tabular-nums">{fmtDur(track.durationMs)}</div>
       </button>
     </div>
@@ -231,9 +231,9 @@ export default function ArtistPanel({ id }: { id: string }) {
   /* ── loading skeleton ── */
   if (loading) return (
     <div className="flex flex-col h-full bg-[#08080c]">
-      <div className="relative h-52 bg-[var(--secondary)]"><Skeleton className="absolute inset-0" /><div className="absolute bottom-0 inset-x-0 h-28 bg-gradient-to-t from-[#08080c] to-transparent" /></div>
-      <div className="flex flex-col items-center -mt-20 z-10 px-5">
-        <Skeleton className="w-36 h-36 rounded-full" />
+      <div className="relative h-32 bg-[var(--secondary)]"><Skeleton className="absolute inset-0" /><div className="absolute bottom-0 inset-x-0 h-20 bg-gradient-to-t from-[#08080c] to-transparent" /></div>
+      <div className="flex flex-col items-center -mt-14 z-10 px-5">
+        <Skeleton className="w-28 h-28 rounded-full" />
         <Skeleton className="h-5 w-36 mt-3" />
         <Skeleton className="h-3 w-24 mt-2" />
       </div>
@@ -273,7 +273,7 @@ export default function ArtistPanel({ id }: { id: string }) {
       {/* ── HERO ── */}
       <div className="relative shrink-0">
         {/* Banner / blurred backdrop */}
-        <div className={`relative overflow-hidden ${hasBanner ? "h-48" : "h-52"}`}>
+        <div className={`relative overflow-hidden ${hasBanner ? "h-28" : "h-32"}`}>
           {hasBanner ? (
             <Image src={artist.bannerUrl!} alt="" fill className="object-cover" />
           ) : artist.imageUrl ? (
@@ -293,12 +293,12 @@ export default function ArtistPanel({ id }: { id: string }) {
         </div>
 
         {/* Centered avatar + name */}
-        <div className="relative z-10 flex flex-col items-center -mt-20 px-5">
+        <div className="relative z-10 flex flex-col items-center -mt-14 px-5">
           <div className="relative">
             {artist.imageUrl ? (
-              <Image src={artist.imageUrl} alt={artist.name} width={144} height={144} className="w-36 h-36 rounded-full object-cover ring-4 ring-[#08080c] shadow-[0_12px_50px_rgba(0,0,0,0.7)]" />
+              <Image src={artist.imageUrl} alt={artist.name} width={112} height={112} className="w-28 h-28 rounded-full object-cover ring-4 ring-[#08080c] shadow-[0_12px_50px_rgba(0,0,0,0.7)]" />
             ) : (
-              <div className="w-36 h-36 rounded-full bg-[var(--secondary)] ring-4 ring-[#08080c] flex items-center justify-center shadow-2xl"><User className="w-12 h-12 text-[var(--muted-foreground)]" /></div>
+              <div className="w-28 h-28 rounded-full bg-[var(--secondary)] ring-4 ring-[#08080c] flex items-center justify-center shadow-2xl"><User className="w-10 h-10 text-[var(--muted-foreground)]" /></div>
             )}
             {rankData?.currentRank != null && (
               <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-[var(--accent)] text-white text-[10px] font-black shadow-lg shadow-[var(--accent)]/40 tabular-nums whitespace-nowrap">#{rankData.currentRank}</div>
@@ -334,7 +334,7 @@ export default function ArtistPanel({ id }: { id: string }) {
           )}
         </div>
 
-        <div className="h-5" />
+        <div className="h-3" />
       </div>
 
       {/* ── SCROLLABLE BODY ── */}
