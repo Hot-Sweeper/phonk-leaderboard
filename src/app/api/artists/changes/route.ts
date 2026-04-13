@@ -106,8 +106,15 @@ export async function GET(req: Request) {
     }
   }
 
+  // Platform lookup for metric → filter artists that actually have the link
+  const PLATFORM_FOR_METRIC: Partial<Record<MetricKey, string>> = {
+    youtube: "YOUTUBE",
+    tiktok: "TIKTOK",
+    instagram: "INSTAGRAM",
+  };
+
   // Get all artists with their current stats
-  const artists = await prisma.artist.findMany({
+  const allArtists = await prisma.artist.findMany({
     include: {
       links: {
         select: { platform: true, monthlyListeners: true, followerCount: true },
@@ -115,6 +122,12 @@ export async function GET(req: Request) {
     },
     orderBy: { name: "asc" },
   });
+
+  // For platform-specific metrics, only include artists that actually have that platform linked
+  const filterPlatform = PLATFORM_FOR_METRIC[metric];
+  const artists = filterPlatform
+    ? allArtists.filter(a => a.links.some(l => l.platform === filterPlatform))
+    : allArtists;
 
   if (mode === "current") {
     // Current mode: just sort by absolute value, no change calculation
@@ -132,9 +145,7 @@ export async function GET(req: Request) {
       };
     });
 
-    const filteredCurrent = metric === "listeners" || metric === "followers"
-      ? result
-      : result.filter((a) => a.currentValue > 0);
+    const filteredCurrent = result;
 
     filteredCurrent.sort((a, b) => b.currentValue - a.currentValue);
 
@@ -220,10 +231,8 @@ export async function GET(req: Request) {
     };
   });
 
-  // For non-Spotify metrics, only include artists that actually have that platform
-  const filteredResult = metric === "listeners" || metric === "followers"
-    ? result
-    : result.filter((a) => a.currentValue > 0);
+  // Artists were pre-filtered by platform link — use result directly
+  const filteredResult = result;
 
   // Sort by absolute change of selected metric (biggest movers first)
   if (sort === "asc") {

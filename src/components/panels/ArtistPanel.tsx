@@ -253,7 +253,8 @@ export default function ArtistPanel({ id }: { id: string }) {
   const changePercent = chartPoints.length >= 2 ? ((chartPoints[chartPoints.length-1].value - chartPoints[0].value) / Math.max(1, chartPoints[0].value)) * 100 : null;
   const metricLabels: Record<ChartMetric, string> = { listeners: "Listeners", followers: "Followers", youtube: "YouTube", tiktok: "TikTok" };
   const hasYT = artist.links.some(l => l.platform === "YOUTUBE"), hasTT = artist.links.some(l => l.platform === "TIKTOK");
-  const metricOpts: ChartMetric[] = ["listeners", "followers", ...(hasYT ? ["youtube" as ChartMetric] : []), ...(hasTT ? ["tiktok" as ChartMetric] : [])];
+  // Spotify % change is based on monthly listeners (not followers) — omit "followers" tab
+  const metricOpts: ChartMetric[] = ["listeners", ...(hasYT ? ["youtube" as ChartMetric] : []), ...(hasTT ? ["tiktok" as ChartMetric] : [])];
   const periodOpts: { key: ChartPeriod; label: string }[] = [{ key: "week", label: "7d" }, { key: "month", label: "30d" }, { key: "year", label: "1y" }];
 
   /* platform pills data */
