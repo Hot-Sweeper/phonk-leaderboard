@@ -887,24 +887,71 @@ export async function fetchDeezerFullCatalog(deezerId: number): Promise<DeezerTr
       return fetchDeezerTopTracks(deezerId);
     }
 
-    // ── 2. Fetch tracks for each album ──
+    // ── 2. Fetch tracks for each album (paginated to catch albums with >100 tracks) ──
     const allTracks: DeezerTrack[] = [];
     for (const album of albums) {
       try {
-        const res = await fetch(`https://api.deezer.com/album/${album.id}/tracks?limit=100`);
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (!data.data) continue;
+        let trackOffset = 0;
+        const trackBatchSize = 100;
+        while (true) {
+          const res = await fetch(
+            `https://api.deezer.com/album/${album.id}/tracks?limit=${trackBatchSize}&index=${trackOffset}`
+          );
+          if (!res.ok) break;
+          const data = await res.json();
+          if (!data.data || data.data.length === 0) break;
 
-        for (const t of data.data) {
-          // contributors array is available on album track listing
+          for (const t of data.data) {
+            // contributors array is available on album track listing
+            const contributors: Array<{ name: string; id: number }> =
+              Array.isArray(t.contributors) && t.contributors.length > 0
+                ? t.contributors
+                : t.artist
+                  ? [t.artist]
+                  : [];
+
+            allTracks.push({
+              deezerId: t.id,
+              name: t.title_short ?? t.title,
+              popularity: t.rank ?? 0,
+              durationMs: (t.duration ?? 0) * 1000,
+              explicit: t.explicit_lyrics ?? false,
+              previewUrl: t.preview ?? null,
+              trackNumber: t.track_position ?? 0,
+              deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
+              album: {
+                name: album.title,
+                imageUrl: album.coverBig,
+                releaseDate: album.releaseDate,
+              },
+              artists: contributors.map((c) => ({ name: c.name, deezerId: c.id })),
+              bpm: null,
+              gain: null,
+              releaseDate: album.releaseDate,
+            });
+          }
+          if (data.data.length < trackBatchSize) break;
+          trackOffset += trackBatchSize;
+        }
+      } catch {
+        // individual album failure — keep going
+      }
+    }
+
+    // ── 3. Supplement with artist's top tracks (catches featured appearances not in own albums) ──
+    try {
+      const topRes = await fetch(`https://api.deezer.com/artist/${deezerId}/top?limit=200`);
+      if (topRes.ok) {
+        const topData = await topRes.json();
+        const seenIds = new Set(allTracks.map((t) => t.deezerId));
+        for (const t of topData.data ?? []) {
+          if (seenIds.has(t.id)) continue;
           const contributors: Array<{ name: string; id: number }> =
             Array.isArray(t.contributors) && t.contributors.length > 0
               ? t.contributors
               : t.artist
                 ? [t.artist]
                 : [];
-
           allTracks.push({
             deezerId: t.id,
             name: t.title_short ?? t.title,
@@ -915,19 +962,19 @@ export async function fetchDeezerFullCatalog(deezerId: number): Promise<DeezerTr
             trackNumber: t.track_position ?? 0,
             deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
             album: {
-              name: album.title,
-              imageUrl: album.coverBig,
-              releaseDate: album.releaseDate,
+              name: t.album?.title ?? "",
+              imageUrl: t.album?.cover_big ?? t.album?.cover_medium ?? null,
+              releaseDate: t.album?.release_date ?? null,
             },
             artists: contributors.map((c) => ({ name: c.name, deezerId: c.id })),
             bpm: null,
             gain: null,
-            releaseDate: album.releaseDate,
+            releaseDate: null,
           });
         }
-      } catch {
-        // individual album failure — keep going
       }
+    } catch {
+      // supplement failed — album catalog is still used
     }
 
     return allTracks.length > 0 ? allTracks : null;
@@ -958,16 +1005,20 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
   if (!token) return null;
 
   try {
-    // ── 1. Paginate albums (album + single + compilation) ──
+    // ── 1. Paginate albums (album + single + compilation + appears_on for full coverage) ──
     const albumIds: string[] = [];
+    const appearsOnAlbumIds = new Set<string>(); // albums from other artists where this artist features
     let nextUrl: string | null =
-      `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single&limit=50&market=US`;
+      `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single,compilation,appears_on&limit=50&market=US`;
 
     while (nextUrl && albumIds.length < 500) {
       const albumRes = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
       if (!albumRes.ok) break;
-      const albumData = await albumRes.json() as { items?: { id: string }[]; next?: string | null };
-      for (const a of albumData.items ?? []) albumIds.push(a.id);
+      const albumData = await albumRes.json() as { items?: { id: string; album_group?: string }[]; next?: string | null };
+      for (const a of albumData.items ?? []) {
+        albumIds.push(a.id);
+        if (a.album_group === "appears_on") appearsOnAlbumIds.add(a.id);
+      }
       nextUrl = albumData.next ?? null;
     }
 
@@ -989,6 +1040,7 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
       const data = await res.json();
       for (const album of data.albums ?? []) {
         if (!album) continue;
+        const isAppearsOn = appearsOnAlbumIds.has(album.id);
         const albumInfo = {
           name: album.name ?? "",
           imageUrl: album.images?.[0]?.url ?? null,
@@ -996,6 +1048,11 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
         };
         for (const t of album.tracks?.items ?? []) {
           if (!t) continue;
+          // For appears_on albums, only include tracks where the target artist is actually credited
+          if (isAppearsOn) {
+            const trackArtistIds = (t.artists ?? []).map((a: { id: string }) => a.id);
+            if (!trackArtistIds.includes(spotifyId)) continue;
+          }
           allTracks!.push({
             id: t.id,
             name: t.name,

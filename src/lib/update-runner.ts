@@ -229,6 +229,64 @@ async function refreshArtistCatalogInternal(
 
       await deduplicateStoredTracksForArtist(artist.id);
     }
+
+    // ── Supplement: also fetch Spotify catalog to catch any tracks exclusive to Spotify ──
+    if (spotifyId) {
+      try {
+        const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
+        const dedupedSpotifyTracks = spotifyTracks ? dedupeArtistTracks(spotifyTracks) : null;
+
+        if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
+          for (const track of dedupedSpotifyTracks) {
+            const featured = dedupeNames(
+              track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
+            );
+
+            const savedTrack = await prisma.track.upsert({
+              where: { spotifyId: track.id },
+              update: {
+                name: track.name,
+                albumName: track.album.name,
+                albumImageUrl: track.album.imageUrl,
+                previewUrl: track.previewUrl,
+                durationMs: track.durationMs,
+                popularity: track.popularity,
+                trackNumber: track.trackNumber,
+                discNumber: track.discNumber,
+                explicit: track.explicit,
+                releaseDate: track.album.releaseDate,
+                spotifyUrl: track.spotifyUrl,
+                featuredArtists: featured,
+              },
+              create: {
+                spotifyId: track.id,
+                artistId: artist.id,
+                name: track.name,
+                albumName: track.album.name,
+                albumImageUrl: track.album.imageUrl,
+                previewUrl: track.previewUrl,
+                durationMs: track.durationMs,
+                popularity: track.popularity,
+                trackNumber: track.trackNumber,
+                discNumber: track.discNumber,
+                explicit: track.explicit,
+                releaseDate: track.album.releaseDate,
+                spotifyUrl: track.spotifyUrl,
+                featuredArtists: featured,
+              },
+              select: { id: true },
+            });
+
+            touchedTrackIds.push(savedTrack.id);
+            trackCount++;
+          }
+
+          await deduplicateStoredTracksForArtist(artist.id);
+        }
+      } catch (err) {
+        console.error(`[Catalog] Spotify supplement failed for ${artist.name}:`, err);
+      }
+    }
   } else if (spotifyId) {
     const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
     const dedupedSpotifyTracks = spotifyTracks ? dedupeArtistTracks(spotifyTracks) : null;
