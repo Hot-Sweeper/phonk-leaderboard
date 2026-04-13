@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchDeezerTrackDetail } from "@/lib/platforms";
-import { collapseFeedTrackVersions, dedupeNames, getDisplayTrackTitle } from "@/lib/track-dedupe";
+import { collapseArtistTracks, collapseFeedTrackVersions, dedupeNames, getDisplayTrackTitle } from "@/lib/track-dedupe";
 
 const PUBLIC_SONG_LEADERBOARD_LIMIT = 50;
 
@@ -79,7 +79,7 @@ export async function GET(
   );
   const normalizedArtistName = normalizeName(artist.name);
 
-  const tracks = leaderboardTracks
+  const matchingTracks = leaderboardTracks
     .filter(({ track }) => {
       if (track.artistId === id || track.contributorIds.includes(id)) return true;
 
@@ -95,16 +95,19 @@ export async function GET(
         || normalizeName(credit.name) === normalizedArtistName
       ));
     })
-    .map(({ track, versions, primaryVersion }) => {
-      return {
-        ...track,
-        displayName: getDisplayTrackTitle(track.name),
-        versions,
-        primaryVersion,
-        featuredArtists: dedupeNames(track.featuredArtists),
-        recentGrowth: track.recentGrowth ?? null,
-      };
-    });
+    .map(({ track }) => ({
+      ...track,
+      displayName: getDisplayTrackTitle(track.name),
+      featuredArtists: dedupeNames(track.featuredArtists),
+      recentGrowth: track.recentGrowth ?? null,
+    }));
+
+  const tracks = collapseArtistTracks(matchingTracks)
+    .map(({ track, versions, primaryVersion }) => ({
+      ...track,
+      versions,
+      primaryVersion,
+    }));
 
   return NextResponse.json({
     tracks,
