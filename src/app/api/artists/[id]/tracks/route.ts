@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { collapseArtistTracks, dedupeNames, getDisplayTrackTitle } from "@/lib/track-dedupe";
+import { collapseFeedTrackVersions, dedupeNames, getDisplayTrackTitle } from "@/lib/track-dedupe";
+
+const PUBLIC_SONG_LEADERBOARD_LIMIT = 50;
 
 // GET — return cached artist tracks from the database, deduplicated for display
 export async function GET(
@@ -20,14 +22,9 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Fetch all tracks where this artist is primary OR a contributor (collabs)
+  // Build from the same grouped global songs leaderboard the public page uses,
+  // then keep only the entries this artist appears on.
   const allTracks = await prisma.track.findMany({
-    where: {
-      OR: [
-        { artistId: id },
-        { contributorIds: { has: id } },
-      ],
-    },
     include: {
       snapshots: {
         select: { popularity: true, createdAt: true },
@@ -53,17 +50,17 @@ export async function GET(
   });
   tracksWithPeak.sort((a, b) => b.peakPopularity - a.peakPopularity);
 
-  const tracks = collapseArtistTracks(tracksWithPeak)
-    .slice(0, 30)
+  const tracks = collapseFeedTrackVersions(tracksWithPeak)
+    .slice(0, PUBLIC_SONG_LEADERBOARD_LIMIT)
+    .filter(({ track }) => track.artistId === id || track.contributorIds.includes(id))
     .map(({ track, versions, primaryVersion }) => {
-      const full = tracksWithPeak.find(t => t.id === track.id);
       return {
         ...track,
         displayName: getDisplayTrackTitle(track.name),
         versions,
         primaryVersion,
         featuredArtists: dedupeNames(track.featuredArtists),
-        recentGrowth: full?.recentGrowth ?? null,
+        recentGrowth: track.recentGrowth ?? null,
       };
     });
 

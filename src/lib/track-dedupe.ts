@@ -108,6 +108,19 @@ function getTrackIdentityTitle(title: string) {
     .trim();
 }
 
+function getFeedArtistSignature(track: Pick<TrackLike, "artistId" | "contributorIds" | "featuredArtists">) {
+  const ids = [track.artistId, ...(track.contributorIds ?? [])]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .map((value) => `id:${value}`);
+
+  const names = (track.featuredArtists ?? [])
+    .map((name) => normalizeText(name))
+    .filter(Boolean)
+    .map((name) => `name:${name}`);
+
+  return [...new Set([...ids, ...names])].sort().join("|");
+}
+
 export function extractTrackVersions(title: string, _albumName?: string | null) {
   const labels: string[] = [];
   const candidates = [title];
@@ -277,7 +290,7 @@ export function collapseFeedTracks<T extends TrackLike & { artistId: string }>(
 ) {
   return collapseTracks(
     tracks,
-    (track) => `${track.artistId}::${getTrackIdentityTitle(track.name)}`,
+    (track) => `${getFeedArtistSignature(track)}::${getTrackIdentityTitle(track.name)}`,
     chooseTrack,
   );
 }
@@ -288,7 +301,7 @@ export function collapseFeedTrackVersions<T extends TrackLike & { artistId: stri
 ) {
   return collapseTracks(
     tracks,
-    (track) => `${track.artistId}::${getCanonicalTrackTitle(track.name)}`,
+    (track) => `${getFeedArtistSignature(track)}::${getCanonicalTrackTitle(track.name)}`,
     chooseTrack ?? preferHighestScoringTrack,
   );
 }

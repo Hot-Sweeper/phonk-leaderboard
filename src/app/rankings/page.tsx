@@ -107,6 +107,12 @@ function RankingsInner() {
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search]);
 
+  useEffect(() => {
+    if (entity === "songs" && songMode === "popularity" && bubbleMode !== "current") {
+      setBubbleMode("current");
+    }
+  }, [entity, songMode, bubbleMode]);
+
   // Sync URL params
   useEffect(() => {
     const params = new URLSearchParams();
@@ -288,12 +294,20 @@ function RankingsInner() {
           )}
 
           {/* Song bubble current/% change */}
-          {!isArtists && isBubbles && songMode !== "popularity" && (
+          {!isArtists && isBubbles && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
                 {BUBBLE_MODES.map((m) => (
-                  <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                  <button
+                    key={m.key}
+                    onClick={() => {
+                      if (songMode === "popularity" && m.key === "change") return;
+                      setBubbleMode(m.key);
+                    }}
+                    disabled={songMode === "popularity" && m.key === "change"}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"} ${songMode === "popularity" && m.key === "change" ? "opacity-40 cursor-not-allowed hover:text-[var(--muted-foreground)]" : ""}`}
+                  >
                     {m.label}
                   </button>
                 ))}
