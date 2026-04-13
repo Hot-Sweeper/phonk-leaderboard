@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
 import { fetchPlatformStats } from "@/lib/platforms";
+import { hydrateArtistNow } from "@/lib/update-runner";
 
 async function enrichLink<T extends {
   id: string;
@@ -128,6 +129,7 @@ export async function PATCH(
     url: string;
     handle: string | null;
     followerCount: number;
+    monthlyListeners: number;
     platformId: string | null;
   }[] = [];
 
@@ -157,6 +159,7 @@ export async function PATCH(
         followerCount: shouldUseProvidedSpotifyStats
           ? link.followerCount ?? 0
           : (stats?.followerCount ?? 0),
+        monthlyListeners: stats?.monthlyListeners ?? 0,
         platformId: stats?.platformId ?? link.platformId ?? null,
       });
 
@@ -187,6 +190,8 @@ export async function PATCH(
       },
     },
   });
+
+  await hydrateArtistNow(updatedArtist.id);
 
   return NextResponse.json(updatedArtist);
 }

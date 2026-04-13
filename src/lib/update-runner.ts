@@ -1,7 +1,26 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyTopTracks, fetchSpotifyFullCatalog, fetchSpotifyArtistDetails, parseSpotifyUrl, getSpotifyToken, resolveArtistToDeezer, fetchDeezerTopTracks, fetchDeezerFullCatalog } from "@/lib/platforms";
+import { fetchPlatformStats, fetchSpotifyFullCatalog, fetchSpotifyArtistDetails, parseSpotifyUrl, resolveArtistToDeezer, fetchDeezerFullCatalog } from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
+
+type ArtistLinkForUpdate = {
+  id: string;
+  platform: string;
+  url: string;
+  handle: string | null;
+  platformId: string | null;
+  followerCount: number;
+  monthlyListeners: number;
+};
+
+type ArtistForUpdate = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  spotifyId: string | null;
+  deezerId: number | null;
+  links: ArtistLinkForUpdate[];
+};
 
 export type UpdateResult = {
   updated: number;
@@ -12,6 +31,280 @@ export type UpdateResult = {
 };
 
 const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes — anything running longer is considered stale
+
+async function getArtistForUpdate(artistId: string): Promise<ArtistForUpdate | null> {
+  return prisma.artist.findUnique({
+    where: { id: artistId },
+    include: { links: true },
+  });
+}
+
+async function buildDeezerArtistMap() {
+  const allArtists = await prisma.artist.findMany({
+    select: { id: true, deezerId: true },
+  });
+
+  const deezerIdToArtistId = new Map<number, string>();
+  for (const artist of allArtists) {
+    if (artist.deezerId) {
+      deezerIdToArtistId.set(artist.deezerId, artist.id);
+    }
+  }
+
+  return deezerIdToArtistId;
+}
+
+async function deduplicateStoredTracksForArtist(artistId: string) {
+  const existingTracks = await prisma.track.findMany({
+    where: { artistId },
+    orderBy: [{ popularity: "desc" }, { updatedAt: "desc" }],
+  });
+
+  if (existingTracks.length <= 1) return;
+
+  const keptTracks = dedupeArtistTracks(existingTracks);
+  const keepIds = new Set(keptTracks.map((track) => track.id));
+  const deleteIds = existingTracks
+    .filter((track) => !keepIds.has(track.id))
+    .map((track) => track.id);
+
+  if (deleteIds.length > 0) {
+    await prisma.track.deleteMany({ where: { id: { in: deleteIds } } });
+  }
+}
+
+async function refreshArtistStatsInternal(artist: ArtistForUpdate) {
+  let newImageUrl = artist.imageUrl;
+  const platformStats: { platform: string; value: number; metric: string }[] = [];
+
+  for (const link of artist.links) {
+    const stats = await fetchPlatformStats(link.platform, link.url);
+    if (!stats) continue;
+
+    await prisma.artistLink.update({
+      where: { id: link.id },
+      data: {
+        followerCount: stats.followerCount,
+        monthlyListeners: stats.monthlyListeners,
+        handle: stats.handle ?? link.handle,
+        platformId: stats.platformId ?? link.platformId,
+      },
+    });
+
+    if (link.platform === "SPOTIFY" && stats.imageUrl) {
+      newImageUrl = stats.imageUrl;
+    }
+
+    if (link.platform === "SPOTIFY") {
+      if (stats.monthlyListeners > 0) {
+        platformStats.push({ platform: "SPOTIFY", value: stats.monthlyListeners, metric: "listeners" });
+      }
+      if (stats.followerCount > 0) {
+        platformStats.push({ platform: "SPOTIFY_FOLLOWERS", value: stats.followerCount, metric: "followers" });
+      }
+    } else if (link.platform === "YOUTUBE") {
+      platformStats.push({ platform: "YOUTUBE", value: stats.followerCount, metric: "subscribers" });
+    } else if (link.platform === "TIKTOK") {
+      platformStats.push({ platform: "TIKTOK", value: stats.followerCount, metric: "followers" });
+    } else if (link.platform === "INSTAGRAM") {
+      platformStats.push({ platform: "INSTAGRAM", value: stats.followerCount, metric: "followers" });
+    }
+  }
+
+  if (newImageUrl !== artist.imageUrl) {
+    await prisma.artist.update({
+      where: { id: artist.id },
+      data: { imageUrl: newImageUrl },
+    });
+  }
+
+  return { platformStats };
+}
+
+async function refreshArtistCatalogInternal(
+  artist: ArtistForUpdate,
+  deezerIdToArtistId: Map<number, string>
+) {
+  const spotifyLink = artist.links.find((link) => link.platform === "SPOTIFY");
+  const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
+  let deezerId = artist.deezerId;
+
+  if (!spotifyId && !deezerId) {
+    return { trackCount: 0, trackIds: [] as string[] };
+  }
+
+  if (spotifyId && !artist.spotifyId) {
+    await prisma.artist.update({
+      where: { id: artist.id },
+      data: { spotifyId },
+    }).catch(() => {});
+  }
+
+  if (!deezerId) {
+    const resolved = await resolveArtistToDeezer(artist.name, spotifyId);
+    deezerId = resolved.deezerId;
+    if (deezerId) {
+      await prisma.artist.update({
+        where: { id: artist.id },
+        data: { deezerId },
+      }).catch(() => {});
+      deezerIdToArtistId.set(deezerId, artist.id);
+    }
+  }
+
+  if (spotifyId) {
+    const artistDetails = await fetchSpotifyArtistDetails(spotifyId);
+    if (artistDetails) {
+      await prisma.artist.update({
+        where: { id: artist.id },
+        data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
+      });
+    }
+  }
+
+  const touchedTrackIds: string[] = [];
+  let trackCount = 0;
+
+  if (deezerId) {
+    const deezerTracks = await fetchDeezerFullCatalog(deezerId);
+    const dedupedDeezerTracks = deezerTracks ? dedupeArtistTracks(deezerTracks) : null;
+
+    if (dedupedDeezerTracks && dedupedDeezerTracks.length > 0) {
+      for (const track of dedupedDeezerTracks) {
+        const deezerTrackId = String(track.deezerId);
+        const featured = dedupeNames(
+          track.artists.filter((artistEntry) => artistEntry.deezerId !== deezerId).map((artistEntry) => artistEntry.name)
+        );
+        const contributorIds = [
+          ...new Set(
+            track.artists
+              .filter((artistEntry) => artistEntry.deezerId !== deezerId)
+              .map((artistEntry) => deezerIdToArtistId.get(artistEntry.deezerId))
+              .filter((id): id is string => !!id)
+          ),
+        ];
+
+        const savedTrack = await prisma.track.upsert({
+          where: { deezerId: deezerTrackId },
+          update: {
+            name: track.name,
+            albumName: track.album.name,
+            albumImageUrl: track.album.imageUrl,
+            previewUrl: track.previewUrl,
+            durationMs: track.durationMs,
+            popularity: track.popularity,
+            trackNumber: track.trackNumber,
+            explicit: track.explicit,
+            releaseDate: track.releaseDate ?? track.album.releaseDate,
+            deezerUrl: track.deezerUrl,
+            bpm: track.bpm,
+            gain: track.gain,
+            featuredArtists: featured,
+            contributorIds,
+          },
+          create: {
+            deezerId: deezerTrackId,
+            artistId: artist.id,
+            name: track.name,
+            albumName: track.album.name,
+            albumImageUrl: track.album.imageUrl,
+            previewUrl: track.previewUrl,
+            durationMs: track.durationMs,
+            popularity: track.popularity,
+            trackNumber: track.trackNumber,
+            explicit: track.explicit,
+            releaseDate: track.releaseDate ?? track.album.releaseDate,
+            deezerUrl: track.deezerUrl,
+            bpm: track.bpm,
+            gain: track.gain,
+            featuredArtists: featured,
+            contributorIds,
+          },
+          select: { id: true },
+        });
+
+        touchedTrackIds.push(savedTrack.id);
+        trackCount++;
+      }
+
+      await deduplicateStoredTracksForArtist(artist.id);
+    }
+  } else if (spotifyId) {
+    const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
+    const dedupedSpotifyTracks = spotifyTracks ? dedupeArtistTracks(spotifyTracks) : null;
+
+    if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
+      for (const track of dedupedSpotifyTracks) {
+        const featured = dedupeNames(
+          track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
+        );
+
+        const savedTrack = await prisma.track.upsert({
+          where: { spotifyId: track.id },
+          update: {
+            name: track.name,
+            albumName: track.album.name,
+            albumImageUrl: track.album.imageUrl,
+            previewUrl: track.previewUrl,
+            durationMs: track.durationMs,
+            popularity: track.popularity,
+            trackNumber: track.trackNumber,
+            discNumber: track.discNumber,
+            explicit: track.explicit,
+            releaseDate: track.album.releaseDate,
+            spotifyUrl: track.spotifyUrl,
+            featuredArtists: featured,
+          },
+          create: {
+            spotifyId: track.id,
+            artistId: artist.id,
+            name: track.name,
+            albumName: track.album.name,
+            albumImageUrl: track.album.imageUrl,
+            previewUrl: track.previewUrl,
+            durationMs: track.durationMs,
+            popularity: track.popularity,
+            trackNumber: track.trackNumber,
+            discNumber: track.discNumber,
+            explicit: track.explicit,
+            releaseDate: track.album.releaseDate,
+            spotifyUrl: track.spotifyUrl,
+            featuredArtists: featured,
+          },
+          select: { id: true },
+        });
+
+        touchedTrackIds.push(savedTrack.id);
+        trackCount++;
+      }
+
+      await deduplicateStoredTracksForArtist(artist.id);
+    }
+  }
+
+  return {
+    trackCount,
+    trackIds: [...new Set(touchedTrackIds)],
+  };
+}
+
+export async function hydrateArtistNow(artistId: string) {
+  const artist = await getArtistForUpdate(artistId);
+  if (!artist) {
+    throw new Error(`Artist not found: ${artistId}`);
+  }
+
+  const deezerIdToArtistId = await buildDeezerArtistMap();
+  const { platformStats } = await refreshArtistStatsInternal(artist);
+  const { trackCount, trackIds } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId);
+
+  await recordSnapshot(artistId);
+  if (trackIds.length > 0) {
+    await recordTrackSnapshots(trackIds);
+  }
+
+  return { platformStats, trackCount };
+}
 
 /** Mark stale "running" logs as failed, then check if a real one is still running */
 async function isUpdateRunning(updateType: string): Promise<boolean> {
@@ -78,47 +371,7 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
     for (const artist of artists) {
       const artistStart = Date.now();
       try {
-        let newImageUrl = artist.imageUrl;
-        const platformStats: { platform: string; value: number; metric: string }[] = [];
-
-        for (const link of artist.links) {
-          const stats = await fetchPlatformStats(link.platform, link.url);
-          if (!stats) continue;
-
-          await prisma.artistLink.update({
-            where: { id: link.id },
-            data: {
-              followerCount: stats.followerCount,
-              monthlyListeners: stats.monthlyListeners,
-              handle: stats.handle ?? link.handle,
-              platformId: stats.platformId ?? link.platformId,
-            },
-          });
-
-          if (link.platform === "SPOTIFY" && stats.imageUrl) {
-            newImageUrl = stats.imageUrl;
-          }
-
-          // Record what was fetched for admin display
-          if (link.platform === "SPOTIFY") {
-            if (stats.monthlyListeners > 0) platformStats.push({ platform: "SPOTIFY", value: stats.monthlyListeners, metric: "listeners" });
-            if (stats.followerCount > 0) platformStats.push({ platform: "SPOTIFY_FOLLOWERS", value: stats.followerCount, metric: "followers" });
-          } else if (link.platform === "YOUTUBE") {
-            platformStats.push({ platform: "YOUTUBE", value: stats.followerCount, metric: "subscribers" });
-          } else if (link.platform === "TIKTOK") {
-            platformStats.push({ platform: "TIKTOK", value: stats.followerCount, metric: "followers" });
-          } else if (link.platform === "INSTAGRAM") {
-            platformStats.push({ platform: "INSTAGRAM", value: stats.followerCount, metric: "followers" });
-          }
-        }
-
-        if (newImageUrl !== artist.imageUrl) {
-          await prisma.artist.update({
-            where: { id: artist.id },
-            data: { imageUrl: newImageUrl },
-          });
-        }
-
+        const { platformStats } = await refreshArtistStatsInternal(artist);
         await recordSnapshot(artist.id);
 
         updated++;
@@ -199,148 +452,17 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
     },
   });
 
-  // Build a lookup of all Deezer IDs already in the DB for contributor matching
-  const allArtists = await prisma.artist.findMany({ select: { id: true, deezerId: true, name: true } });
-  const deezerIdToArtistId = new Map<number, string>();
-  for (const a of allArtists) {
-    if (a.deezerId) deezerIdToArtistId.set(a.deezerId, a.id);
-  }
+  const deezerIdToArtistId = await buildDeezerArtistMap();
 
   let updated = 0;
   let failed = 0;
   const details: { name: string; status: string; durationMs: number; tracks?: number; error?: string }[] = [];
 
-  async function deduplicateStoredTracksForArtist(artistId: string) {
-    const existingTracks = await prisma.track.findMany({
-      where: { artistId },
-      orderBy: [{ popularity: "desc" }, { updatedAt: "desc" }],
-    });
-
-    if (existingTracks.length <= 1) return;
-
-    const keptTracks = dedupeArtistTracks(existingTracks);
-    const keepIds = new Set(keptTracks.map((track) => track.id));
-    const deleteIds = existingTracks.filter((track) => !keepIds.has(track.id)).map((track) => track.id);
-
-    if (deleteIds.length > 0) {
-      await prisma.track.deleteMany({ where: { id: { in: deleteIds } } });
-    }
-  }
-
   try {
     for (const artist of artists) {
       const artistStart = Date.now();
       try {
-        const spotifyLink = artist.links[0];
-        const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
-        let deezerId = artist.deezerId;
-
-        if (!spotifyId && !deezerId) {
-          details.push({ name: artist.name, status: "skipped", durationMs: Date.now() - artistStart });
-          continue;
-        }
-
-        // Persist spotifyId if missing
-        if (spotifyId && !artist.spotifyId) {
-          await prisma.artist.update({ where: { id: artist.id }, data: { spotifyId } }).catch(() => {});
-        }
-
-        // ── Resolve Deezer ID (one-time per artist) ──
-        if (!deezerId) {
-          const resolved = await resolveArtistToDeezer(artist.name, spotifyId);
-          deezerId = resolved.deezerId;
-          if (deezerId) {
-            await prisma.artist.update({
-              where: { id: artist.id },
-              data: { deezerId },
-            }).catch(() => {});
-            deezerIdToArtistId.set(deezerId, artist.id);
-          }
-        }
-
-        // ── Fetch Spotify artist details (genres, popularity) — still works without Premium ──
-        const token = spotifyId ? await getSpotifyToken() : null;
-        if (token && spotifyId) {
-          const artistDetails = await fetchSpotifyArtistDetails(spotifyId);
-          if (artistDetails) {
-            await prisma.artist.update({
-              where: { id: artist.id },
-              data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
-            });
-          }
-        }
-
-        // ── Fetch tracks from Deezer ──
-        let trackCount = 0;
-        if (deezerId) {
-          // fetchDeezerFullCatalog paginates all albums → tracks; falls back to top-tracks on failure
-          const deezerTracks = await fetchDeezerFullCatalog(deezerId);
-          const dedupedDeezerTracks = deezerTracks ? dedupeArtistTracks(deezerTracks) : null;
-          if (dedupedDeezerTracks && dedupedDeezerTracks.length > 0) {
-            for (const t of dedupedDeezerTracks) {
-              const deezerTrackId = String(t.deezerId);
-
-              // Map contributors to forum artist IDs
-              const featured = dedupeNames(t.artists.filter(a => a.deezerId !== deezerId).map(a => a.name));
-              const contributorIds = [...new Set(t.artists
-                .filter(a => a.deezerId !== deezerId)
-                .map(a => deezerIdToArtistId.get(a.deezerId))
-                .filter((id): id is string => !!id))];
-
-              await prisma.track.upsert({
-                where: { deezerId: deezerTrackId },
-                update: {
-                  name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-                  previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-                  trackNumber: t.trackNumber, explicit: t.explicit,
-                  releaseDate: t.releaseDate ?? t.album.releaseDate,
-                  deezerUrl: t.deezerUrl, bpm: t.bpm, gain: t.gain,
-                  featuredArtists: featured, contributorIds,
-                },
-                create: {
-                  deezerId: deezerTrackId, artistId: artist.id,
-                  name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-                  previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-                  trackNumber: t.trackNumber, explicit: t.explicit,
-                  releaseDate: t.releaseDate ?? t.album.releaseDate,
-                  deezerUrl: t.deezerUrl, bpm: t.bpm, gain: t.gain,
-                  featuredArtists: featured, contributorIds,
-                },
-              });
-              trackCount++;
-            }
-
-            await deduplicateStoredTracksForArtist(artist.id);
-          }
-        } else if (spotifyId) {
-          // No Deezer ID found — use Spotify full catalog (all albums → tracks)
-          const topTracks = await fetchSpotifyFullCatalog(spotifyId);
-          const dedupedSpotifyTracks = topTracks ? dedupeArtistTracks(topTracks) : null;
-          if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
-            for (const t of dedupedSpotifyTracks) {
-              const featured = dedupeNames(t.artists.filter(a => a.id !== spotifyId).map(a => a.name));
-              await prisma.track.upsert({
-                where: { spotifyId: t.id },
-                update: {
-                  name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-                  previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-                  trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
-                  releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
-                },
-                create: {
-                  spotifyId: t.id, artistId: artist.id,
-                  name: t.name, albumName: t.album.name, albumImageUrl: t.album.imageUrl,
-                  previewUrl: t.previewUrl, durationMs: t.durationMs, popularity: t.popularity,
-                  trackNumber: t.trackNumber, discNumber: t.discNumber, explicit: t.explicit,
-                  releaseDate: t.album.releaseDate, spotifyUrl: t.spotifyUrl, featuredArtists: featured,
-                },
-              });
-              trackCount++;
-            }
-
-            await deduplicateStoredTracksForArtist(artist.id);
-          }
-        }
+        const { trackCount } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId);
 
         if (trackCount > 0) {
           updated++;

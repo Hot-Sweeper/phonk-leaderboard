@@ -56,6 +56,7 @@ export default function RankingsPage() {
 function RankingsInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const initialSort = searchParams.get("sort");
 
   // Read initial state from URL params
   const [entity, setEntity] = useState<Entity>((searchParams.get("entity") as Entity) || "artists");
@@ -71,10 +72,12 @@ function RankingsInner() {
   const [period, setPeriod] = useState(searchParams.get("period") || "day");
 
   // Song options
-  const [collapseVersions, setCollapseVersions] = useState(true);
+  const [collapseVersions, setCollapseVersions] = useState(searchParams.get("grouped") !== "false");
 
   // Change sort order (artists, change mode)
-  const [changeSortOrder, setChangeSortOrder] = useState<"desc" | "asc" | "abs">("desc");
+  const [changeSortOrder, setChangeSortOrder] = useState<"desc" | "asc" | "abs">(
+    initialSort === "asc" || initialSort === "abs" || initialSort === "desc" ? initialSort : "desc"
+  );
 
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -89,6 +92,10 @@ function RankingsInner() {
       if (s.songMode) setSongMode(s.songMode as SongMode);
       if (s.bubbleMode) setBubbleMode(s.bubbleMode);
       if (s.period) setPeriod(s.period);
+      if (typeof s.collapseVersions === "boolean") setCollapseVersions(s.collapseVersions);
+      if (s.changeSortOrder === "asc" || s.changeSortOrder === "abs" || s.changeSortOrder === "desc") {
+        setChangeSortOrder(s.changeSortOrder);
+      }
     } catch { /**/ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -107,11 +114,17 @@ function RankingsInner() {
     if (viewMode !== "list") params.set("view", viewMode);
     if (viewMode === "list" && entity === "artists" && platform) params.set("platform", platform);
     if (entity === "songs" && songMode !== "popularity") params.set("mode", songMode);
+    if (!collapseVersions) params.set("grouped", "false");
     if (viewMode === "bubbles") {
       if (entity === "artists") {
         if (metric !== "listeners") params.set("metric", metric);
         if (bubbleMode !== "change") params.set("bmode", bubbleMode);
         if (period !== "day") params.set("period", period);
+        if (bubbleMode === "change" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
+      }
+      if (entity === "songs") {
+        if (bubbleMode !== "current") params.set("bmode", bubbleMode);
+        if (songMode !== "popularity" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
       }
     }
     const qs = params.toString();
@@ -122,9 +135,18 @@ function RankingsInner() {
     }
     // Persist to localStorage
     try {
-      localStorage.setItem("rankings:state", JSON.stringify({ entity, viewMode, platform, songMode, bubbleMode, period }));
+      localStorage.setItem("rankings:state", JSON.stringify({
+        entity,
+        viewMode,
+        platform,
+        songMode,
+        bubbleMode,
+        period,
+        collapseVersions,
+        changeSortOrder,
+      }));
     } catch { /**/ }
-  }, [entity, viewMode, platform, songMode, metric, bubbleMode, period, router]);
+  }, [entity, viewMode, platform, songMode, metric, bubbleMode, period, collapseVersions, changeSortOrder, router]);
 
   const isBubbles = viewMode === "bubbles";
   const isArtists = entity === "artists";
@@ -189,35 +211,86 @@ function RankingsInner() {
         </div>
 
         {/* Row 2: Contextual filters */}
-        {(isArtists || !isBubbles) && (
-          <div className="flex items-center gap-2 pb-2.5 flex-wrap">
+        <div className="flex items-center gap-2 pb-2.5 flex-wrap">
 
-            {/* Platform icons — artists */}
-            {isArtists && (
-              <div className="flex gap-1">
-                {ARTIST_PLATFORMS.map((p) => {
-                  const platformMetricMap: Record<string, string> = { "": "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
-                  const active = isBubbles ? metric === platformMetricMap[p.key] : platform === p.key;
+          {/* Platform icons — artists */}
+          {isArtists && (
+            <div className="flex gap-1">
+              {ARTIST_PLATFORMS.map((p) => {
+                const platformMetricMap: Record<string, string> = { "": "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
+                const active = isBubbles ? metric === platformMetricMap[p.key] : platform === p.key;
+                return (
+                  <button
+                    key={p.key}
+                    onClick={() => { setPlatform(p.key); if (isBubbles) setMetric(platformMetricMap[p.key]); }}
+                    title={p.label}
+                    aria-label={p.label}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${active ? "border-white/30 bg-white/10" : "border-[var(--muted)] bg-[var(--secondary)] hover:bg-white/10"}`}
+                  >
+                    <p.Icon className="w-3.5 h-3.5" style={{ color: active ? p.color : undefined }} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Divider */}
+          {isArtists && <div className="w-px h-5 bg-[var(--muted)]" />}
+
+          {/* Change/Current toggle — artists */}
+          {isArtists && (
+            <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+              {BUBBLE_MODES.map((m) => (
+                <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Period — artists change mode */}
+          {isArtists && bubbleMode === "change" && (
+            <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+              {ALL_PERIODS.map((p) => (
+                <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                  {PERIOD_LABELS[p] ?? p}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Sort order — artists change mode */}
+          {isArtists && bubbleMode === "change" && (
+            <>
+              <div className="w-px h-5 bg-[var(--muted)]" />
+              <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+                {(["desc", "abs", "asc"] as const).map((o) => {
+                  const label = o === "desc" ? "Gainers" : o === "asc" ? "Losers" : "Biggest";
                   return (
-                    <button
-                      key={p.key}
-                      onClick={() => { setPlatform(p.key); if (isBubbles) setMetric(platformMetricMap[p.key]); }}
-                      title={p.label}
-                      aria-label={p.label}
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${active ? "border-white/30 bg-white/10" : "border-[var(--muted)] bg-[var(--secondary)] hover:bg-white/10"}`}
-                    >
-                      <p.Icon className="w-3.5 h-3.5" style={{ color: active ? p.color : undefined }} />
+                    <button key={o} onClick={() => setChangeSortOrder(o)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${changeSortOrder === o ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                      {label}
                     </button>
                   );
                 })}
               </div>
-            )}
+            </>
+          )}
 
-            {/* Divider */}
-            {isArtists && <div className="w-px h-5 bg-[var(--muted)]" />}
+          {/* Song modes */}
+          {!isArtists && (
+            <div className="flex gap-1">
+              {SONG_MODES.map((m) => (
+                <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${songMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          )}
 
-            {/* Change/Current toggle — artists */}
-            {isArtists && (
+          {/* Song bubble current/% change */}
+          {!isArtists && isBubbles && songMode !== "popularity" && (
+            <>
+              <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
                 {BUBBLE_MODES.map((m) => (
                   <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
@@ -225,63 +298,42 @@ function RankingsInner() {
                   </button>
                 ))}
               </div>
-            )}
+            </>
+          )}
 
-            {/* Period — artists change mode */}
-            {isArtists && bubbleMode === "change" && (
+          {/* Song sort order — bubble trends */}
+          {!isArtists && isBubbles && songMode !== "popularity" && (
+            <>
+              <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                {ALL_PERIODS.map((p) => (
-                  <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                    {PERIOD_LABELS[p] ?? p}
-                  </button>
-                ))}
+                {(["desc", "abs", "asc"] as const).map((o) => {
+                  const label = o === "desc" ? "Gainers" : o === "asc" ? "Losers" : "Biggest";
+                  return (
+                    <button key={o} onClick={() => setChangeSortOrder(o)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${changeSortOrder === o ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </>
+          )}
 
-            {/* Sort order — artists, list, change mode */}
-            {isArtists && !isBubbles && bubbleMode === "change" && (
-              <>
-                <div className="w-px h-5 bg-[var(--muted)]" />
-                <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                  {(["desc", "abs", "asc"] as const).map((o) => {
-                    const label = o === "desc" ? "Gainers" : o === "asc" ? "Losers" : "Biggest";
-                    return (
-                      <button key={o} onClick={() => setChangeSortOrder(o)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${changeSortOrder === o ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            {/* Song modes */}
-            {!isArtists && (
-              <div className="flex gap-1">
-                {SONG_MODES.map((m) => (
-                  <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${songMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Group toggle — songs list */}
-            {!isArtists && !isBubbles && (
-              <button
-                onClick={() => setCollapseVersions(c => !c)}
-                aria-pressed={collapseVersions}
-                title="Group song versions together"
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border border-[var(--muted)] bg-[var(--secondary)] transition-all text-[var(--muted-foreground)] hover:text-white"
-              >
-                <span>Group</span>
-                <span className={`relative inline-flex h-[14px] w-[26px] items-center rounded-full transition-colors shrink-0 ${collapseVersions ? "bg-[var(--accent)]" : "bg-[var(--muted)]"}`}>
-                  <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${collapseVersions ? "translate-x-[13px]" : "translate-x-0.5"}`} />
-                </span>
-              </button>
-            )}
-          </div>
-        )}
+          {/* Group toggle — songs */}
+          {!isArtists && (
+            <button
+              type="button"
+              onClick={() => setCollapseVersions(c => !c)}
+              aria-label={collapseVersions ? "Grouped song versions enabled" : "Grouped song versions disabled"}
+              title="Group song versions together"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border border-[var(--muted)] bg-[var(--secondary)] transition-all text-[var(--muted-foreground)] hover:text-white"
+            >
+              <span>Group</span>
+              <span className={`relative inline-flex h-[14px] w-[26px] items-center rounded-full transition-colors shrink-0 ${collapseVersions ? "bg-[var(--accent)]" : "bg-[var(--muted)]"}`}>
+                <span className={`inline-block h-3 w-3 rounded-full bg-white shadow transition-transform ${collapseVersions ? "translate-x-[13px]" : "translate-x-0.5"}`} />
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Content area */}
@@ -295,6 +347,7 @@ function RankingsInner() {
               period={period}
               songMode={songMode}
               searchQuery={debouncedSearch}
+              sortOrder={changeSortOrder}
             />
           </div>
         )}
@@ -307,6 +360,8 @@ function RankingsInner() {
               period={period}
               songMode={songMode}
               searchQuery={debouncedSearch}
+              collapseVersions={collapseVersions}
+              sortOrder={changeSortOrder}
             />
           </div>
         )}

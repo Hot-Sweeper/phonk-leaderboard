@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { runFullUpdate } from "@/lib/update-runner";
+import { checkAndRunScheduledUpdate } from "@/lib/update-runner";
 
 /**
  * GET /api/cron/update
@@ -19,30 +19,35 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Check if enough time has passed since last update
+  // Check if any updater is due based on the configured intervals
   const settings = await prisma.siteSetting.findMany();
   const map: Record<string, string> = {};
   for (const s of settings) map[s.key] = s.value;
 
-  const intervalHours = parseInt(map["updateIntervalHours"] ?? "1", 10);
-  const lastUpdate = map["lastFullUpdate"];
+  const statsIntervalMs = parseInt(map["updateIntervalHours"] ?? "1", 10) * 60 * 60 * 1000;
+  const songsIntervalMs = parseInt(map["songUpdateIntervalHours"] ?? "6", 10) * 60 * 60 * 1000;
+  const statsElapsed = map["lastFullUpdate"]
+    ? Date.now() - new Date(map["lastFullUpdate"]).getTime()
+    : Number.POSITIVE_INFINITY;
+  const songsElapsed = map["lastSongUpdate"]
+    ? Date.now() - new Date(map["lastSongUpdate"]).getTime()
+    : Number.POSITIVE_INFINITY;
 
-  if (lastUpdate) {
-    const elapsed = Date.now() - new Date(lastUpdate).getTime();
-    const intervalMs = intervalHours * 60 * 60 * 1000;
-    if (elapsed < intervalMs * 0.9) {
-      return NextResponse.json({
-        skipped: true,
-        reason: `Only ${Math.round(elapsed / 60000)}min since last update. Interval is ${intervalHours}h.`,
-        nextUpdateIn: `${Math.round((intervalMs - elapsed) / 60000)}min`,
-      });
-    }
+  if (statsElapsed < statsIntervalMs * 0.9 && songsElapsed < songsIntervalMs * 0.9) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "No scheduled updater is due yet.",
+      statsNextUpdateIn: `${Math.max(0, Math.round((statsIntervalMs - statsElapsed) / 60000))}min`,
+      songsNextUpdateIn: `${Math.max(0, Math.round((songsIntervalMs - songsElapsed) / 60000))}min`,
+    });
   }
 
-  const result = await runFullUpdate("cron");
+  const didRun = await checkAndRunScheduledUpdate();
 
   return NextResponse.json({
     success: true,
-    ...result,
+    didRun,
+    ranStats: statsElapsed >= statsIntervalMs * 0.9,
+    ranSongs: songsElapsed >= songsIntervalMs * 0.9,
   });
 }

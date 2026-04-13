@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { hydrateArtistNow } from "@/lib/update-runner";
 
 // PATCH — approve or reject an artist request or link suggestion
 export async function PATCH(req: Request) {
@@ -61,6 +62,7 @@ export async function PATCH(req: Request) {
         data: { status: "APPROVED", reviewedBy: session.user.id },
       }),
     ]);
+    await hydrateArtistNow(suggestion.artistId);
     return NextResponse.json({ success: true });
   }
 
@@ -147,6 +149,8 @@ export async function PATCH(req: Request) {
     },
     include: { links: true },
   });
+
+  await hydrateArtistNow(artist.id);
 
   await prisma.artistRequest.update({
     where: { id: requestId },

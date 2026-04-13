@@ -49,9 +49,11 @@ interface BubbleViewProps {
   period: string;
   songMode?: string;
   searchQuery?: string;
+  collapseVersions?: boolean;
+  sortOrder?: "desc" | "abs" | "asc";
 }
 
-export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery }: BubbleViewProps) {
+export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc" }: BubbleViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,7 +97,16 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
 
     if (entity === "songs") {
       const sMode = songMode || "popularity";
-      fetch(`/api/songs?search=${encodeURIComponent(q)}&skip=0&take=1&mode=${sMode}&collapseVersions=true`)
+      const params = new URLSearchParams({
+        search: q,
+        skip: "0",
+        take: "1",
+        mode: sMode,
+        collapseVersions: collapseVersions ? "true" : "false",
+        sort: sortOrder,
+        valueMode: mode,
+      });
+      fetch(`/api/songs?${params.toString()}`)
         .then(r => r.json())
         .then((data: { tracks?: Array<{ rank?: number }> }) => {
           const track = data.tracks?.[0];
@@ -113,7 +124,15 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         for (let p = 0; p < Math.min(totalPages, 5); p++) {
           if (p === page) continue;
           const skip = p * PAGE_SIZE;
-          const url = `/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`;
+          const params = new URLSearchParams({
+            period,
+            metric,
+            mode,
+            sort: sortOrder,
+            skip: String(skip),
+            take: String(PAGE_SIZE),
+          });
+          const url = `/api/artists/changes?${params.toString()}`;
           const data = await fetch(url).then(r => r.json()).catch(() => null);
           if (!data) continue;
           const artists: Array<{ name: string }> = data.artists ?? [];
@@ -148,9 +167,17 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     const skip = page * PAGE_SIZE;
 
     if (entity === "artists") {
-      const url = `/api/artists/changes?period=${period}&metric=${metric}&mode=${mode}&skip=${skip}&take=${PAGE_SIZE}`;
+      const params = new URLSearchParams({
+        period,
+        metric,
+        mode,
+        sort: sortOrder,
+        skip: String(skip),
+        take: String(PAGE_SIZE),
+      });
+      const url = `/api/artists/changes?${params.toString()}`;
       fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
-        `rank:bubbles:artists:${period}:${metric}:${mode}:${skip}`,
+        `rank:bubbles:artists:${period}:${metric}:${mode}:${sortOrder}:${skip}`,
         url,
         45_000
       )
@@ -173,9 +200,17 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     } else {
       // Songs bubble mode
       const sMode = songMode || "popularity";
-      const url = `/api/songs?skip=${skip}&take=${PAGE_SIZE}&mode=${sMode}&collapseVersions=true`;
+      const params = new URLSearchParams({
+        skip: String(skip),
+        take: String(PAGE_SIZE),
+        mode: sMode,
+        collapseVersions: collapseVersions ? "true" : "false",
+        sort: sortOrder,
+        valueMode: mode,
+      });
+      const url = `/api/songs?${params.toString()}`;
       fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }>; totalCount?: number }>(
-        `rank:bubbles:songs:${sMode}:${skip}`,
+        `rank:bubbles:songs:${sMode}:${mode}:${sortOrder}:${collapseVersions}:${skip}`,
         url,
         45_000
       )
@@ -196,7 +231,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         .catch(() => {})
         .finally(() => setLoading(false));
     }
-  }, [entity, page, period, metric, mode, songMode]);
+  }, [entity, page, period, metric, mode, songMode, collapseVersions, sortOrder]);
 
   // Build bubbles from items
   useEffect(() => {
@@ -225,7 +260,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
       const targetR = Math.max(minR, Math.min(maxR, rawR));
 
       let img: HTMLImageElement | null = null;
-      let imgLoaded = false;
+      const imgLoaded = false;
       if (item.imageUrl) {
         img = new window.Image();
         img.crossOrigin = "anonymous";
@@ -347,7 +382,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         const saturation = 0.3 + sizeRatio * 0.7;
 
         const isPodium = b.rank >= 1 && b.rank <= 3;
-        const isChangeMode = b.hasData && b.changePercent !== 0;
+        const isChangeMode = mode === "change" && b.hasData;
         const isPositive = b.changePercent >= 0;
 
         const podiumColors: Record<number, { r: number; g: number; b: number }> = {
@@ -508,7 +543,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
       cancelAnimationFrame(animRef.current);
       window.removeEventListener("resize", resize);
     };
-  }, [items]);
+  }, [items, mode]);
 
   // Mouse handlers
   const getCanvasPos = useCallback((e: React.MouseEvent | MouseEvent) => {
@@ -595,7 +630,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
 
   const metricLabel = entity === "artists"
     ? (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase()
-    : "popularity";
+    : songMode === "popularity"
+      ? "popularity"
+      : mode === "change"
+        ? `${songMode ?? "trend"} % change`
+        : `${songMode ?? "trend"} hype`;
 
   return (
     <div className="flex flex-col h-full">
@@ -654,6 +693,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         <div className="px-4 py-2 shrink-0 flex justify-center">
           <div className="flex items-center gap-1">
             <button
+              type="button"
+              title="Previous page"
+              aria-label="Previous page"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={page === 0}
               className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"
@@ -670,6 +712,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
               </button>
             ))}
             <button
+              type="button"
+              title="Next page"
+              aria-label="Next page"
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
               disabled={page >= totalPages - 1}
               className="p-1.5 rounded-lg border border-[var(--muted)] hover:border-[var(--accent)] bg-[var(--secondary)] disabled:opacity-30 transition-all"

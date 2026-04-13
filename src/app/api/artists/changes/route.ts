@@ -11,6 +11,7 @@ const PERIODS: Record<string, number> = {
 const PERIOD_ORDER = ["day", "week", "month", "year"];
 
 type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
+type SortOrder = "desc" | "abs" | "asc";
 
 const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram"];
 
@@ -44,6 +45,14 @@ function getMetricFromLinks(
   }
 }
 
+function getSortOrder(value: string | null): SortOrder {
+  if (value === "desc" || value === "abs" || value === "asc") {
+    return value;
+  }
+
+  return "abs";
+}
+
 /**
  * GET /api/artists/changes?period=day&metric=listeners&mode=change&skip=0&take=100
  *
@@ -55,6 +64,7 @@ export async function GET(req: Request) {
   const period = searchParams.get("period") ?? "day";
   const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
   const mode = searchParams.get("mode") ?? "change";
+  const sort = getSortOrder(searchParams.get("sort"));
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "100", 10) || 100, 200);
 
@@ -68,7 +78,7 @@ export async function GET(req: Request) {
   }
 
   // Serve from cache if fresh
-  const cacheKey = `${period}:${metric}:${mode}`;
+  const cacheKey = `${period}:${metric}:${mode}:${sort}`;
   const cached = routeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     const full = cached.data as { artists: unknown[]; totalCount: number; availablePeriods: string[]; period: string; metric: string; mode: string };
@@ -90,7 +100,7 @@ export async function GET(req: Request) {
   if (oldestSnapshot) {
     const dataAge = Date.now() - oldestSnapshot.createdAt.getTime();
     for (const p of PERIOD_ORDER) {
-      if (p === "day" || dataAge >= PERIODS[p] * 0.5) {
+      if (dataAge >= PERIODS[p]) {
         availablePeriods.push(p);
       }
     }
@@ -105,8 +115,6 @@ export async function GET(req: Request) {
     },
     orderBy: { name: "asc" },
   });
-
-  const totalCount = artists.length;
 
   if (mode === "current") {
     // Current mode: just sort by absolute value, no change calculation
@@ -144,7 +152,7 @@ export async function GET(req: Request) {
   const oldSnapshots = await prisma.artistSnapshot.findMany({
     where: {
       artistId: { in: artistIds },
-      createdAt: { lte: new Date(cutoff.getTime() + periodMs * 0.3) },
+      createdAt: { lte: cutoff },
     },
     orderBy: { createdAt: "desc" },
     distinct: ["artistId"],
@@ -218,7 +226,13 @@ export async function GET(req: Request) {
     : result.filter((a) => a.currentValue > 0);
 
   // Sort by absolute change of selected metric (biggest movers first)
-  filteredResult.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+  if (sort === "asc") {
+    filteredResult.sort((a, b) => a.changePercent - b.changePercent);
+  } else if (sort === "desc") {
+    filteredResult.sort((a, b) => b.changePercent - a.changePercent);
+  } else {
+    filteredResult.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+  }
 
   const payload = { artists: filteredResult, totalCount: filteredResult.length, availablePeriods, period, metric, mode };
   routeCache.set(cacheKey, { data: payload, expiresAt: Date.now() + CACHE_TTL_MS });

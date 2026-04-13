@@ -20,6 +20,8 @@ const deezerDetailCache = new Map<number, DeezerCacheEntry>();
 const DEEZER_CACHE_TTL = 3_600_000; // 1 hour
 
 type SongsLeaderboardMode = "popularity" | keyof typeof TREND_PERIODS;
+type TrendSortOrder = "desc" | "abs" | "asc";
+type TrendValueMode = "current" | "change";
 
 function normalizeName(value: string) {
   return value
@@ -47,6 +49,18 @@ function getLeaderboardMode(value: string | null): SongsLeaderboardMode {
   }
 
   return "popularity";
+}
+
+function getTrendSortOrder(value: string | null): TrendSortOrder {
+  if (value === "asc" || value === "abs" || value === "desc") {
+    return value;
+  }
+
+  return "desc";
+}
+
+function getTrendValueMode(value: string | null): TrendValueMode {
+  return value === "change" ? "change" : "current";
 }
 
 function chooseTrackByMetric<T extends {
@@ -98,16 +112,48 @@ function chooseTrackByMetric<T extends {
   return left;
 }
 
-function sortByMetric<T extends { track: { metricValue: number; trendDelta: number; popularity: number } }>(left: T, right: T) {
-  if (right.track.metricValue !== left.track.metricValue) {
-    return right.track.metricValue - left.track.metricValue;
-  }
+function sortTrendTracks<T extends {
+  track: {
+    hasTrendData: boolean;
+    metricValue: number;
+    trendDelta: number;
+    trendPercent: number;
+    popularity: number;
+  };
+}>(tracks: T[], sortOrder: TrendSortOrder, valueMode: TrendValueMode) {
+  tracks.sort((left, right) => {
+    const leftHasData = left.track.hasTrendData ? 1 : 0;
+    const rightHasData = right.track.hasTrendData ? 1 : 0;
+    if (rightHasData !== leftHasData) {
+      return rightHasData - leftHasData;
+    }
 
-  if (right.track.trendDelta !== left.track.trendDelta) {
-    return right.track.trendDelta - left.track.trendDelta;
-  }
+    const leftPrimary = valueMode === "change" ? left.track.trendPercent : left.track.metricValue;
+    const rightPrimary = valueMode === "change" ? right.track.trendPercent : right.track.metricValue;
 
-  return right.track.popularity - left.track.popularity;
+    if (sortOrder === "abs") {
+      const absoluteDiff = Math.abs(rightPrimary) - Math.abs(leftPrimary);
+      if (absoluteDiff !== 0) {
+        return absoluteDiff;
+      }
+    } else if (sortOrder === "asc") {
+      if (leftPrimary !== rightPrimary) {
+        return leftPrimary - rightPrimary;
+      }
+    } else if (leftPrimary !== rightPrimary) {
+      return rightPrimary - leftPrimary;
+    }
+
+    if (right.track.metricValue !== left.track.metricValue) {
+      return right.track.metricValue - left.track.metricValue;
+    }
+
+    if (right.track.trendDelta !== left.track.trendDelta) {
+      return right.track.trendDelta - left.track.trendDelta;
+    }
+
+    return right.track.popularity - left.track.popularity;
+  });
 }
 
 /**
@@ -121,8 +167,10 @@ export async function GET(req: Request) {
   const search = normalizeName(searchParams.get("search")?.trim() || "");
   const collapseVersions = searchParams.get("collapseVersions") !== "false";
   const mode = getLeaderboardMode(searchParams.get("mode"));
+  const sortOrder = getTrendSortOrder(searchParams.get("sort"));
+  const valueMode = getTrendValueMode(searchParams.get("valueMode"));
 
-  const rankedCacheKey = `${mode}:${collapseVersions}`;
+  const rankedCacheKey = `${mode}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -156,14 +204,13 @@ export async function GET(req: Request) {
     } else {
       const periodMs = TREND_PERIODS[mode];
       const cutoff = new Date(Date.now() - periodMs);
-      const snapshotUpperBound = new Date(cutoff.getTime() + periodMs * 0.3);
       let oldSnapshots: Array<{ trackId: string; popularity: number; createdAt: Date }> = [];
 
       try {
         oldSnapshots = await prisma.trackSnapshot.findMany({
           where: {
             trackId: { in: allTracks.map((track) => track.id) },
-            createdAt: { lte: snapshotUpperBound },
+            createdAt: { lte: cutoff },
           },
           orderBy: { createdAt: "desc" },
           distinct: ["trackId"],
@@ -199,7 +246,7 @@ export async function GET(req: Request) {
         ? collapseFeedTrackVersions(metricTracks, chooseTrackByMetric)
         : collapseFeedTracks(metricTracks, chooseTrackByMetric);
 
-      rankedTracks.sort(sortByMetric);
+      sortTrendTracks(rankedTracks, sortOrder, valueMode);
     }
 
     rankedTracksCache.set(rankedCacheKey, { rankedTracks, timestamp: now });
