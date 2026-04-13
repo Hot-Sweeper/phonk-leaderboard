@@ -54,6 +54,15 @@ async function buildDeezerArtistMap() {
   return deezerIdToArtistId;
 }
 
+function normTrackName(s: string) {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 async function deduplicateStoredTracksForArtist(artistId: string) {
   const existingTracks = await prisma.track.findMany({
     where: { artistId },
@@ -64,8 +73,39 @@ async function deduplicateStoredTracksForArtist(artistId: string) {
 
   const keptTracks = dedupeArtistTracks(existingTracks);
   const keepIds = new Set(keptTracks.map((track) => track.id));
+
+  // Any deezerId present in a winning track
+  const keptDeezerIds = new Set(
+    keptTracks.map((t) => t.deezerId).filter((id): id is string => id != null)
+  );
+
+  // Cross-link: if a losing track has a spotifyId that its duplicate winner lacks, transfer it
+  for (const winner of keptTracks) {
+    if (winner.spotifyId) continue;
+    const winnerNorm = normTrackName(winner.name);
+    for (const loser of existingTracks) {
+      if (keepIds.has(loser.id)) continue;
+      if (!loser.spotifyId) continue;
+      if (normTrackName(loser.name) !== winnerNorm) continue;
+      await prisma.track.update({
+        where: { id: winner.id },
+        data: {
+          spotifyId: loser.spotifyId,
+          ...(loser.spotifyUrl ? { spotifyUrl: loser.spotifyUrl } : {}),
+        },
+      }).catch(() => {});
+      break;
+    }
+  }
+
+  // Only delete losers whose deezerId is ALREADY represented in the winners.
+  // A loser with a unique deezerId is a genuinely distinct Deezer track — keep it.
   const deleteIds = existingTracks
-    .filter((track) => !keepIds.has(track.id))
+    .filter((track) => {
+      if (keepIds.has(track.id)) return false; // winner — never delete
+      if (track.deezerId && !keptDeezerIds.has(track.deezerId)) return false; // unique Deezer entry — keep
+      return true; // no unique deezerId — safe to remove
+    })
     .map((track) => track.id);
 
   if (deleteIds.length > 0) {
@@ -167,10 +207,9 @@ async function refreshArtistCatalogInternal(
 
   if (deezerId) {
     const deezerTracks = await fetchDeezerFullCatalog(deezerId);
-    const dedupedDeezerTracks = deezerTracks ? dedupeArtistTracks(deezerTracks) : null;
 
-    if (dedupedDeezerTracks && dedupedDeezerTracks.length > 0) {
-      for (const track of dedupedDeezerTracks) {
+    if (deezerTracks && deezerTracks.length > 0) {
+      for (const track of deezerTracks) {
         const deezerTrackId = String(track.deezerId);
         const featured = dedupeNames(
           track.artists.filter((artistEntry) => artistEntry.deezerId !== deezerId).map((artistEntry) => artistEntry.name)
@@ -234,10 +273,9 @@ async function refreshArtistCatalogInternal(
     if (spotifyId) {
       try {
         const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
-        const dedupedSpotifyTracks = spotifyTracks ? dedupeArtistTracks(spotifyTracks) : null;
 
-        if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
-          for (const track of dedupedSpotifyTracks) {
+        if (spotifyTracks && spotifyTracks.length > 0) {
+          for (const track of spotifyTracks) {
             const featured = dedupeNames(
               track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
             );
@@ -289,10 +327,9 @@ async function refreshArtistCatalogInternal(
     }
   } else if (spotifyId) {
     const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
-    const dedupedSpotifyTracks = spotifyTracks ? dedupeArtistTracks(spotifyTracks) : null;
 
-    if (dedupedSpotifyTracks && dedupedSpotifyTracks.length > 0) {
-      for (const track of dedupedSpotifyTracks) {
+    if (spotifyTracks && spotifyTracks.length > 0) {
+      for (const track of spotifyTracks) {
         const featured = dedupeNames(
           track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
         );
