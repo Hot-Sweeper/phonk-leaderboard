@@ -3,8 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { fetchDeezerTrackDetail } from "@/lib/platforms";
 import { collapseArtistTracks, collapseFeedTrackVersions, dedupeNames, getDisplayTrackTitle } from "@/lib/track-dedupe";
 
-const PUBLIC_SONG_LEADERBOARD_LIMIT = 50;
-
 function normalizeName(value: string) {
   return value
     .toLowerCase()
@@ -43,7 +41,6 @@ export async function GET(
       },
     },
     orderBy: { popularity: "desc" },
-    take: 200,
   });
 
   // Attach peakPopularity + recentGrowth and sort by peak
@@ -60,8 +57,7 @@ export async function GET(
   });
   tracksWithPeak.sort((a, b) => b.peakPopularity - a.peakPopularity);
 
-  const leaderboardTracks = collapseFeedTrackVersions(tracksWithPeak)
-    .slice(0, PUBLIC_SONG_LEADERBOARD_LIMIT);
+  const leaderboardTracks = collapseFeedTrackVersions(tracksWithPeak);
 
   const deezerDetailEntries = await Promise.all(
     leaderboardTracks.map(async ({ track }) => {
