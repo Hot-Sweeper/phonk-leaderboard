@@ -199,7 +199,7 @@ export default function ArtistPanel({ id }: { id: string }) {
       fetchJsonWithSessionCache<Artist>(`artist:${id}:profile`, `/api/artists/${id}`, 60_000).catch(() => null),
       fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 30_000).catch(() => [] as string[]),
       fetchJsonWithSessionCache<RankData>(`artist:${id}:rank`, `/api/artists/${id}/rank`, 60_000).catch(() => null),
-      fetchJsonWithSessionCache<{ tracks?: Track[]; genres?: string[]; spotifyPopularity?: number }>(`artist:${id}:tracks`, `/api/artists/${id}/tracks`, 60_000).catch(() => null),
+      fetchJsonWithSessionCache<{ tracks?: Track[]; genres?: string[]; spotifyPopularity?: number }>(`artist:${id}:tracks:v2`, `/api/artists/${id}/tracks?view=panel-v2`, 15_000, { cache: "no-store" }).catch(() => null),
     ]).then(([a, wl, r, td]) => {
       if (a) setArtist(a);
       if (Array.isArray(wl)) setIsWatched(wl.includes(id));

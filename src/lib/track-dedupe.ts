@@ -280,8 +280,11 @@ function collapseTracks<T extends TrackLike>(
     .sort((left, right) => right.track.popularity - left.track.popularity);
 }
 
-export function collapseArtistTracks<T extends TrackLike>(tracks: T[]) {
-  return collapseTracks(tracks, (track) => getCanonicalTrackTitle(track.name));
+export function collapseArtistTracks<T extends TrackLike>(
+  tracks: T[],
+  chooseTrack?: (left: T, right: T) => T,
+) {
+  return collapseTracks(tracks, (track) => getCanonicalTrackTitle(track.name), chooseTrack);
 }
 
 export function collapseFeedTracks<T extends TrackLike & { artistId: string }>(
