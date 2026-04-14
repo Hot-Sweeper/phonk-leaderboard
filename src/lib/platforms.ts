@@ -745,16 +745,16 @@ export async function resolveArtistToDeezer(name: string, spotifyId?: string | n
   deezerId: number | null;
   source: "deezer-search" | "odesli" | "unresolved";
 }> {
-  const deezerByName = await searchDeezerArtist(name);
-  if (deezerByName) {
-    return { deezerId: deezerByName, source: "deezer-search" };
-  }
-
   if (spotifyId) {
     const deezerBySpotify = await resolveDeezerId(spotifyId);
     if (deezerBySpotify) {
       return { deezerId: deezerBySpotify, source: "odesli" };
     }
+  }
+
+  const deezerByName = await searchDeezerArtist(name);
+  if (deezerByName) {
+    return { deezerId: deezerByName, source: "deezer-search" };
   }
 
   return { deezerId: null, source: "unresolved" };
