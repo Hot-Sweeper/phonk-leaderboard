@@ -215,6 +215,7 @@ export async function GET(req: Request) {
           where: {
             trackId: { in: allTracks.map((track) => track.id) },
             createdAt: { lte: cutoff },
+            popularity: { gt: 0 },
           },
           orderBy: { createdAt: "desc" },
           distinct: ["trackId"],
@@ -232,8 +233,9 @@ export async function GET(req: Request) {
 
       const metricTracks = allTracks.map((track) => {
         const oldSnapshot = oldSnapshotMap.get(track.id);
-        const trendDelta = oldSnapshot ? track.popularity - oldSnapshot.popularity : 0;
-        const trendPercent = oldSnapshot && oldSnapshot.popularity > 0
+        const hasUsableTrendData = !!oldSnapshot && track.popularity > 0 && oldSnapshot.popularity > 0;
+        const trendDelta = hasUsableTrendData ? track.popularity - oldSnapshot.popularity : 0;
+        const trendPercent = hasUsableTrendData
           ? Math.round(((track.popularity - oldSnapshot.popularity) / oldSnapshot.popularity) * 10000) / 100
           : 0;
 
@@ -242,7 +244,7 @@ export async function GET(req: Request) {
           metricValue: trendDelta,
           trendDelta,
           trendPercent,
-          hasTrendData: !!oldSnapshot,
+          hasTrendData: hasUsableTrendData,
         };
       });
 

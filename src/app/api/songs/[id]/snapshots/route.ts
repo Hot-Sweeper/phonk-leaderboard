@@ -29,12 +29,12 @@ export async function GET(
       select: { popularity: true },
     }),
     prisma.trackSnapshot.findFirst({
-      where: { trackId: id, createdAt: { lte: cutoff } },
+      where: { trackId: id, createdAt: { lte: cutoff }, popularity: { gt: 0 } },
       orderBy: { createdAt: "desc" },
       select: { popularity: true, createdAt: true },
     }),
     prisma.trackSnapshot.findMany({
-      where: { trackId: id, createdAt: { gte: cutoff } },
+      where: { trackId: id, createdAt: { gte: cutoff }, popularity: { gt: 0 } },
       orderBy: { createdAt: "asc" },
       select: { popularity: true, createdAt: true },
     }),
@@ -57,7 +57,7 @@ export async function GET(
 
   const lastPoint = dedupedSeries[dedupedSeries.length - 1];
   const hasFreshEndpoint = lastPoint && now.getTime() - lastPoint.createdAt.getTime() <= 5 * 60 * 1000;
-  if (!lastPoint || !hasFreshEndpoint || lastPoint.popularity !== track.popularity) {
+  if (track.popularity > 0 && (!lastPoint || !hasFreshEndpoint || lastPoint.popularity !== track.popularity)) {
     dedupedSeries.push({
       popularity: track.popularity,
       createdAt: now,

@@ -36,10 +36,12 @@ export async function recordTrackSnapshots(trackIds?: string[]) {
     select: { id: true, popularity: true },
   });
 
-  if (tracks.length === 0) return;
+  const tracksWithPopularity = tracks.filter((track) => track.popularity > 0);
+
+  if (tracksWithPopularity.length === 0) return;
 
   await prisma.trackSnapshot.createMany({
-    data: tracks.map((track) => ({
+    data: tracksWithPopularity.map((track) => ({
       trackId: track.id,
       popularity: track.popularity,
     })),
