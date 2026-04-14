@@ -380,30 +380,16 @@ export default function ArtistPanel({ id }: { id: string }) {
 
         {/* FAMOUS FOR */}
         {tracks.length > 0 && (() => {
-          const topTrack = tracks[0];
-          const secondTrack = tracks.length > 1 ? tracks[1] : null;
-          // Pick fastest-growing track that isn't already top1 or top2 — show it regardless of sign
-          const trendingTrack = tracks
-            .filter(t => t.id !== topTrack.id && t.id !== secondTrack?.id)
-            .sort((a, b) => (b.recentGrowth ?? 0) - (a.recentGrowth ?? 0))[0] ?? null;
-          const famousThree = [topTrack, secondTrack, trendingTrack].filter((t): t is Track => t !== null);
+          const famousThree = tracks.slice(0, 3);
           return (
             <div>
               <h3 className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-2.5">Famous for</h3>
               <div className={`grid gap-2 ${famousThree.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
-                {famousThree.map((track) => {
-                  const isRising = track === trendingTrack && (trendingTrack?.recentGrowth ?? 0) > 0;
-                  return (
-                    <div key={track.id} className="relative">
-                      {isRising && (
-                        <div className="absolute -top-2 left-1 z-10 flex items-center gap-0.5 bg-orange-500/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full shadow-md">
-                          <TrendingUp className="w-2 h-2" /> Rising
-                        </div>
-                      )}
-                      <FamousCard track={track} onOpen={() => openSong(track.id, track)} />
-                    </div>
-                  );
-                })}
+                {famousThree.map((track) => (
+                  <div key={track.id} className="relative">
+                    <FamousCard track={track} onOpen={() => openSong(track.id, track)} />
+                  </div>
+                ))}
               </div>
             </div>
           );
