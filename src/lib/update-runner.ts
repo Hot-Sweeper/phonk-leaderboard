@@ -63,7 +63,7 @@ function normTrackName(s: string) {
     .trim();
 }
 
-async function deduplicateStoredTracksForArtist(artistId: string) {
+export async function deduplicateStoredTracksForArtist(artistId: string) {
   const existingTracks = await prisma.track.findMany({
     where: { artistId },
     orderBy: [{ popularity: "desc" }, { updatedAt: "desc" }],
