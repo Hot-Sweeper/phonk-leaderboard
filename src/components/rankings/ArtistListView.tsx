@@ -5,7 +5,9 @@ import Image from "next/image";
 import { useDetailPanel } from "@/lib/detail-panel";
 import { Skeleton } from "@/components/Skeleton";
 import { clearSessionCacheByPrefix, fetchJsonWithSessionCache } from "@/lib/client-cache";
+import RankingBadgeChip from "@/components/rankings/RankingBadgeChip";
 import { SpotifyIcon, YouTubeIcon, TikTokIcon, InstagramIcon } from "@/components/platform-icons";
+import { getArtistRankingBadges } from "@/lib/ranking-badges";
 import {
   Trophy,
   Users,
@@ -50,9 +52,18 @@ type Artist = {
   name: string;
   imageUrl: string | null;
   watchlistCount: number;
+  createdAt: string;
   links: ArtistLink[];
   globalRank?: number;
 };
+
+function getCurrentArtistMetric(artist: Artist, platform: string) {
+  if (platform === "YOUTUBE") return artist.links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
+  if (platform === "SPOTIFY") return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+  if (platform === "TIKTOK") return artist.links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
+  if (platform === "INSTAGRAM") return artist.links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
+  return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+}
 
 const ALL_PLATFORMS = [
   { key: "YOUTUBE", label: "YouTube" },
@@ -222,6 +233,7 @@ type ChangeItemForPodium = {
   id: string;
   name: string;
   imageUrl: string | null;
+  createdAt: string;
   watchlistCount: number;
   currentValue: number;
   changeValue: number;
@@ -252,6 +264,14 @@ function ChangePodiumCard({
   const displayValue = isAbsoluteMode ? item.changeValue : item.changePercent;
   const isUp = displayValue > 0;
   const isDown = displayValue < 0;
+  const badges = getArtistRankingBadges({
+    createdAt: item.createdAt,
+    currentValue: item.currentValue,
+    changeValue: item.changeValue,
+    changePercent: item.changePercent,
+    hasData: item.hasData,
+    showCollectingData: false,
+  });
 
   const sizes = {
     0: { height: "h-[220px] md:h-[260px]", fadeStop: "90%", artSize: "w-28 h-28 md:w-40 md:h-40", titleSize: "text-base md:text-xl" },
@@ -292,6 +312,11 @@ function ChangePodiumCard({
         <button onClick={() => openArtist(item.id)} className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-0.5 hover:text-[var(--accent)] transition-colors cursor-pointer ${sizes.titleSize}`}>
           {item.name}
         </button>
+        {badges.length > 0 && (
+          <div className="mb-2 flex max-w-[15rem] flex-wrap items-center justify-center gap-1.5">
+            {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+          </div>
+        )}
         {/* Change badge */}
         {item.hasData && (
           <span className={`flex items-center gap-1 text-xs font-bold tabular-nums px-2 py-0.5 rounded-lg mb-3 ${isUp ? "bg-green-500/20 text-green-400" : isDown ? "bg-red-500/20 text-red-400" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}>
@@ -368,6 +393,15 @@ function PodiumCard({
   openArtist: (id: string) => void;
 }) {
   const isFirst = rank === 0;
+  const currentValue = getCurrentArtistMetric(artist, platform);
+  const badges = getArtistRankingBadges({
+    createdAt: artist.createdAt,
+    currentValue,
+    changeValue: 0,
+    changePercent: 0,
+    hasData: false,
+    showCollectingData: true,
+  });
 
   const theme = {
     0: {
@@ -463,6 +497,11 @@ function PodiumCard({
         <button onClick={() => openArtist(artist.id)} className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-0.5 hover:text-[var(--accent)] transition-colors cursor-pointer ${theme.titleSize}`}>
           {artist.name}
         </button>
+        {badges.length > 0 && (
+          <div className="mb-2 flex max-w-[15rem] flex-wrap items-center justify-center gap-1.5">
+            {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+          </div>
+        )}
         {/* Stat line */}
         {statLine && <span className={`text-[10px] md:text-xs ${statLine.color} font-bold tabular-nums mb-1`}>{statLine.text}</span>}
         {/* Platform icons */}
@@ -547,6 +586,7 @@ type ChangeItem = {
   id: string;
   name: string;
   imageUrl: string | null;
+  createdAt: string;
   watchlistCount: number;
   currentValue: number;
   changeValue: number;
@@ -968,6 +1008,14 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                 const displayValue = isAbsoluteMode ? item.changeValue : item.changePercent;
                 const isUp = displayValue > 0;
                 const isDown = displayValue < 0;
+                const badges = getArtistRankingBadges({
+                  createdAt: item.createdAt,
+                  currentValue: item.currentValue,
+                  changeValue: item.changeValue,
+                  changePercent: item.changePercent,
+                  hasData: item.hasData,
+                  showCollectingData: false,
+                });
                 return (
                   <div key={item.id} className="group flex items-center gap-4 px-5 py-3 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all">
                     {/* Rank */}
@@ -986,10 +1034,15 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                     </button>
                     {/* Name + Metric */}
                     <div className="flex-1 min-w-0">
-                      <button onClick={() => openArtist(item.id)} className="font-bold text-base group-hover:text-[var(--accent)] transition-colors truncate block cursor-pointer text-left">{item.name}</button>
+                      <button onClick={() => openArtist(item.id)} className="font-bold text-base group-hover:text-[var(--accent)] transition-colors block cursor-pointer text-left leading-tight whitespace-normal line-clamp-2">{item.name}</button>
                       <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
                         <span className="text-xs text-[var(--muted-foreground)] tabular-nums">{formatCount(item.currentValue)} {item.metric}</span>
                       </div>
+                      {badges.length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+                        </div>
+                      )}
                     </div>
                     {/* Change badge */}
                     <div className="shrink-0 flex items-center gap-2">
@@ -1044,6 +1097,14 @@ export default function ArtistListView({ platform, search, sortMode = "current",
             const rc = rankChanges[artist.id];
             const displayRank = artist.globalRank ?? (showPodium ? idx + 4 : idx + 1);
             const isWatched = watchlistedIds.has(artist.id);
+            const badges = getArtistRankingBadges({
+              createdAt: artist.createdAt,
+              currentValue: getCurrentArtistMetric(artist, platform),
+              changeValue: 0,
+              changePercent: 0,
+              hasData: false,
+              showCollectingData: true,
+            });
             return (
               <div key={artist.id} className="group flex items-center gap-4 px-5 py-3.5 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all">
                 {/* Rank + Change */}
@@ -1127,6 +1188,11 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                       );
                     })()}
                   </div>
+                  {badges.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+                    </div>
+                  )}
                 </div>
 
                 {/* Watchlist */}

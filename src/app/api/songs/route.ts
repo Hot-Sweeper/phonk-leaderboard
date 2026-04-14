@@ -426,6 +426,7 @@ export async function GET(req: Request) {
       trendDelta: track.trendDelta,
       trendPercent: track.trendPercent,
       hasTrendData: track.hasTrendData,
+      createdAt: track.createdAt,
       leaderboardMode: mode,
       featuredArtists: remainingFeaturedArtists,
       contributors: resolvedContributors,

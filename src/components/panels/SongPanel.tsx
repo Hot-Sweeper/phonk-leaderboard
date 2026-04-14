@@ -102,7 +102,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
 
   useEffect(() => {
     if (!id) return;
-    fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
+    fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}:v2`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
   }, [id, chartPeriod]);
 
   const song = data ?? fetched;
@@ -121,7 +121,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
   }
 
   const chartPoints: ChartPoint[] = snaps.map(s => ({ value: s.popularity, date: s.createdAt }));
-  const lastVal = chartPoints.length > 0 ? chartPoints[chartPoints.length-1].value : song.popularity;
+  const lastVal = song.popularity;
   const changePercent = chartPoints.length >= 2 ? ((chartPoints[chartPoints.length-1].value - chartPoints[0].value) / Math.max(1, chartPoints[0].value)) * 100 : null;
   const periodOpts: { key: ChartPeriod; label: string }[] = [{ key: "week", label: "7d" }, { key: "month", label: "30d" }, { key: "year", label: "1y" }];
   const isNewSong = isRecentRelease(song.releaseDate);

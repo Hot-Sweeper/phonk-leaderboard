@@ -21,12 +21,48 @@ export async function GET(
 
   const ms = periods[period] ?? periods.month;
   const cutoff = new Date(Date.now() - ms);
+  const now = new Date();
 
-  const snapshots = await prisma.trackSnapshot.findMany({
-    where: { trackId: id, createdAt: { gte: cutoff } },
-    orderBy: { createdAt: "asc" },
-    select: { popularity: true, createdAt: true },
+  const [track, baselineSnapshot, snapshots] = await Promise.all([
+    prisma.track.findUnique({
+      where: { id },
+      select: { popularity: true },
+    }),
+    prisma.trackSnapshot.findFirst({
+      where: { trackId: id, createdAt: { lte: cutoff } },
+      orderBy: { createdAt: "desc" },
+      select: { popularity: true, createdAt: true },
+    }),
+    prisma.trackSnapshot.findMany({
+      where: { trackId: id, createdAt: { gte: cutoff } },
+      orderBy: { createdAt: "asc" },
+      select: { popularity: true, createdAt: true },
+    }),
+  ]);
+
+  if (!track) {
+    return NextResponse.json([], { status: 404 });
+  }
+
+  const series = [
+    ...(baselineSnapshot ? [baselineSnapshot] : []),
+    ...snapshots,
+  ];
+
+  const dedupedSeries = series.filter((point, index) => {
+    if (index === 0) return true;
+    const previous = series[index - 1];
+    return previous.createdAt.getTime() !== point.createdAt.getTime();
   });
 
-  return NextResponse.json(snapshots);
+  const lastPoint = dedupedSeries[dedupedSeries.length - 1];
+  const hasFreshEndpoint = lastPoint && now.getTime() - lastPoint.createdAt.getTime() <= 5 * 60 * 1000;
+  if (!lastPoint || !hasFreshEndpoint || lastPoint.popularity !== track.popularity) {
+    dedupedSeries.push({
+      popularity: track.popularity,
+      createdAt: now,
+    });
+  }
+
+  return NextResponse.json(dedupedSeries);
 }

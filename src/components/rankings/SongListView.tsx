@@ -6,6 +6,8 @@ import { Skeleton } from "@/components/Skeleton";
 import { fetchJsonWithSessionCache } from "@/lib/client-cache";
 import { isValidPreviewUrl, toPreviewProxyUrl } from "@/lib/preview";
 import { claimAudio } from "@/lib/global-audio";
+import RankingBadgeChip from "@/components/rankings/RankingBadgeChip";
+import { getSongRankingBadges } from "@/lib/ranking-badges";
 import {
   Music,
   ExternalLink,
@@ -29,6 +31,7 @@ type Track = {
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
+  createdAt: string;
   durationMs: number;
   popularity: number;
   explicit: boolean;
@@ -116,13 +119,13 @@ function isFreshTrendEntry(track: Track, mode: LeaderboardMode) {
     && track.trendPercent === 0;
 }
 
-function hasNewBadge(track: Track, mode: LeaderboardMode) {
-  return isRecentRelease(track.releaseDate) || isFreshTrendEntry(track, mode);
+function hasNewBadge(track: Track) {
+  return isRecentRelease(track.releaseDate);
 }
 
 function getTrendSubtext(track: Track, mode: LeaderboardMode) {
-  if (isFreshTrendEntry(track, mode)) return "NEW";
-  if (!track.hasTrendData) return hasNewBadge(track, mode) ? "NEW" : "Waiting for history";
+  if (isFreshTrendEntry(track, mode)) return "Freshly tracked";
+  if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Waiting for history";
   const sign = track.trendPercent > 0 ? "+" : "";
   return `${sign}${track.trendPercent.toFixed(2)}% vs ${formatPopularity(track.popularity)}`;
 }
@@ -142,7 +145,7 @@ function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "re
 
 function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
   if (mode === "popularity") return formatPopularity(track.popularity);
-  if (isFreshTrendEntry(track, mode)) return valueMode === "relative" ? "NEW" : formatTrendDelta(track.metricValue);
+  if (isFreshTrendEntry(track, mode)) return valueMode === "relative" ? "--" : formatTrendDelta(track.metricValue);
   if (!track.hasTrendData) return "--";
   return valueMode === "relative" ? formatTrendPercent(track.trendPercent) : formatTrendDelta(track.metricValue);
 }
@@ -151,7 +154,7 @@ function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absol
   if (mode === "popularity") return null;
   if (valueMode === "relative") {
     if (isFreshTrendEntry(track, mode)) return formatTrendDelta(track.metricValue);
-    if (!track.hasTrendData) return hasNewBadge(track, mode) ? "NEW" : "Waiting for history";
+    if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Waiting for history";
     return `${track.metricValue > 0 ? "+" : track.metricValue < 0 ? "-" : ""}${formatPopularity(Math.abs(track.metricValue))}`;
   }
   return getTrendSubtext(track, mode);
@@ -240,7 +243,15 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
   const isFirst = rank === 1;
   const artists = getTrackArtists(track);
   const versionLabel = getVersionLabel(track.primaryVersion, showOriginalVersion);
-  const isNewTrack = hasNewBadge(track, mode);
+  const badges = getSongRankingBadges({
+    createdAt: track.createdAt,
+    releaseDate: track.releaseDate,
+    popularity: track.popularity,
+    metricValue: track.metricValue,
+    trendPercent: track.trendPercent,
+    hasTrendData: track.hasTrendData || isFreshTrendEntry(track, mode),
+    showCollectingData: mode === "popularity",
+  });
 
   const theme = {
     1: { 
@@ -320,10 +331,7 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
              )}
            </div>
            {/* Title above the podium */}
-           <div className="flex items-center justify-center gap-2 mb-0.5">
-             <h3 className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md ${theme.titleSize}`}>{track.name}</h3>
-             {isNewTrack && <span className="shrink-0 rounded-full border border-amber-300/40 bg-amber-400/15 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.2em] text-amber-200">NEW</span>}
-           </div>
+           <h3 className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-1 ${theme.titleSize}`}>{track.name}</h3>
          </button>
          <p className="text-[10px] md:text-xs text-white/60 font-medium line-clamp-1 text-center mb-1">
            {artists.map((a, i) => (
@@ -337,6 +345,11 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
              </span>
            ))}
          </p>
+         {badges.length > 0 && (
+           <div className="mb-2 flex max-w-[18rem] flex-wrap items-center justify-center gap-1.5">
+             {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+           </div>
+         )}
          {versionLabel && <span className="text-[8px] md:text-[9px] uppercase font-bold px-1.5 py-0.5 bg-white/10 border border-white/20 rounded text-white/80 mb-3">{versionLabel}</span>}
          {!versionLabel && <div className="mb-3" />}
       </div>
@@ -661,7 +674,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         </div>
       ) : (
       <>
-      <div className="hidden md:grid md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1fr)_7rem_7rem_3.5rem_5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
+      <div className="hidden md:grid md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1.25fr)_6rem_6.5rem_3.5rem_5rem_3rem] gap-3 px-5 py-2 text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] border-b border-[var(--muted)]">
         <span /><span>#</span><span>Title</span>
         <span className="hidden lg:block">Version</span>
         <span className="hidden lg:block text-right">Released</span>
@@ -688,13 +701,21 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
             const isPlaying = playingTrackId === track.id;
             const artists = getTrackArtists(track);
             const versionLabel = getVersionLabel(track.primaryVersion, collapseVersions);
-            const isNewTrack = hasNewBadge(track, mode);
+            const badges = getSongRankingBadges({
+              createdAt: track.createdAt,
+              releaseDate: track.releaseDate,
+              popularity: track.popularity,
+              metricValue: track.metricValue,
+              trendPercent: track.trendPercent,
+              hasTrendData: track.hasTrendData || isFreshTrendEntry(track, mode),
+              showCollectingData: mode === "popularity",
+            });
             const metricBarWidth = mode === "popularity"
               ? normalizePopularity(track.popularity)
               : maxTrendMetric > 0 && hasVisibleTrendMetric(track, mode) ? Math.max(8, (Math.abs(valueMode === "relative" ? track.trendPercent : track.metricValue) / maxTrendMetric) * 100) : 0;
 
             return (
-              <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1fr)_7rem_7rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
+              <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1.25fr)_6rem_6.5rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
                 {/* Play */}
                 <div className="flex justify-center">
                   {isValidPreviewUrl(track.previewUrl) ? (
@@ -715,12 +736,11 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                     <div className="w-11 h-11 rounded-lg bg-[var(--muted)] flex items-center justify-center shrink-0"><Music className="w-4 h-4 text-[var(--muted-foreground)]" /></div>
                   )}
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" onClick={() => openSong(track.id, track)} className="font-bold text-sm truncate text-left hover:text-[var(--accent)] transition-colors cursor-pointer">{track.name}</button>
-                      {isNewTrack && <span className="shrink-0 rounded-full border border-amber-300/30 bg-amber-400/10 px-1.5 py-px text-[9px] font-black uppercase tracking-[0.2em] text-amber-200">NEW</span>}
+                    <div className="flex items-start gap-1.5">
+                      <button type="button" onClick={() => openSong(track.id, track)} className="min-w-0 flex-1 font-bold text-sm text-left leading-tight whitespace-normal line-clamp-2 hover:text-[var(--accent)] transition-colors cursor-pointer">{track.name}</button>
                       {track.explicit && <span className="shrink-0 text-[9px] font-bold bg-zinc-700 text-zinc-300 px-1 py-px rounded">E</span>}
                     </div>
-                    <div className="text-xs truncate">
+                    <div className="mt-0.5 text-xs leading-relaxed line-clamp-2">
                       {artists.map((artist, idx) => (
                         <span key={artist.key}>
                           {idx > 0 && <span className="text-[var(--muted-foreground)]">, </span>}
@@ -728,6 +748,11 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                         </span>
                       ))}
                     </div>
+                    {badges.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+                      </div>
+                    )}
                     <div className="lg:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">
                       {versionLabel && <>{versionLabel}<span className="mx-1.5">&bull;</span></>}
                       {track.releaseDate ?? "Unknown date"}
