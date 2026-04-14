@@ -224,6 +224,7 @@ type ChangeItemForPodium = {
   imageUrl: string | null;
   watchlistCount: number;
   currentValue: number;
+  changeValue: number;
   changePercent: number;
   hasData: boolean;
   metric: string;
@@ -236,6 +237,7 @@ function ChangePodiumCard({
   onToggle,
   toggling,
   openArtist,
+  isAbsoluteMode,
 }: {
   item: ChangeItemForPodium;
   position: 0 | 1 | 2;
@@ -243,11 +245,13 @@ function ChangePodiumCard({
   onToggle: () => void;
   toggling: boolean;
   openArtist: (id: string) => void;
+  isAbsoluteMode: boolean;
 }) {
   const accentHex = useExtractColor(item.imageUrl, item.name);
   const isFirst = position === 0;
-  const isUp = item.changePercent > 0;
-  const isDown = item.changePercent < 0;
+  const displayValue = isAbsoluteMode ? item.changeValue : item.changePercent;
+  const isUp = displayValue > 0;
+  const isDown = displayValue < 0;
 
   const sizes = {
     0: { height: "h-[220px] md:h-[260px]", fadeStop: "90%", artSize: "w-28 h-28 md:w-40 md:h-40", titleSize: "text-base md:text-xl" },
@@ -292,7 +296,7 @@ function ChangePodiumCard({
         {item.hasData && (
           <span className={`flex items-center gap-1 text-xs font-bold tabular-nums px-2 py-0.5 rounded-lg mb-3 ${isUp ? "bg-green-500/20 text-green-400" : isDown ? "bg-red-500/20 text-red-400" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}>
             {isUp ? <ArrowUpRight className="w-3 h-3" /> : isDown ? <ArrowDownRight className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-            {item.changePercent > 0 ? "+" : ""}{item.changePercent.toFixed(1)}%
+            {isAbsoluteMode ? formatSignedCount(item.changeValue) : `${item.changePercent > 0 ? "+" : ""}${item.changePercent.toFixed(1)}%`}
           </span>
         )}
       </div>
@@ -521,7 +525,7 @@ function PodiumCard({
 interface ArtistListViewProps {
   platform: string;
   search: string;
-  sortMode?: "current" | "change";
+  sortMode?: "current" | "relative" | "absolute";
   period?: string;
   changeSortOrder?: "desc" | "asc" | "abs";
 }
@@ -545,11 +549,17 @@ type ChangeItem = {
   imageUrl: string | null;
   watchlistCount: number;
   currentValue: number;
+  changeValue: number;
   changePercent: number;
   hasData: boolean;
   metric: string;
   allChanges?: AllChanges;
 };
+
+function formatSignedCount(n: number): string {
+  const prefix = n > 0 ? "+" : n < 0 ? "-" : "";
+  return `${prefix}${formatCount(Math.abs(n))}`;
+}
 
 export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc" }: ArtistListViewProps) {
   const { data: session } = useSession();
@@ -565,16 +575,19 @@ export default function ArtistListView({ platform, search, sortMode = "current",
   const [changeItems, setChangeItems] = useState<ChangeItem[]>([]);
   const [loadingChange, setLoadingChange] = useState(false);
 
-  const isChangeMode = sortMode === "change";
+  const isTrendMode = sortMode !== "current";
+  const isAbsoluteMode = sortMode === "absolute";
 
   const sortedChangeItems = useMemo(() => {
     if (!changeItems.length) return changeItems;
     return [...changeItems].sort((a, b) => {
-      if (changeSortOrder === "desc") return b.changePercent - a.changePercent;
-      if (changeSortOrder === "asc") return a.changePercent - b.changePercent;
-      return Math.abs(b.changePercent) - Math.abs(a.changePercent);
+      const left = isAbsoluteMode ? a.changeValue : a.changePercent;
+      const right = isAbsoluteMode ? b.changeValue : b.changePercent;
+      if (changeSortOrder === "desc") return right - left;
+      if (changeSortOrder === "asc") return left - right;
+      return Math.abs(right) - Math.abs(left);
     });
-  }, [changeItems, changeSortOrder]);
+  }, [changeItems, changeSortOrder, isAbsoluteMode]);
   // Request modal
   const [showRequest, setShowRequest] = useState(false);
   const [reqName, setReqName] = useState("");
@@ -678,17 +691,17 @@ export default function ArtistListView({ platform, search, sortMode = "current",
 
   const METRIC_FOR_PLATFORM: Record<string, string> = { "": "listeners", SPOTIFY: "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
 
-  const loadChangeArtists = useCallback(async (plat: string, p: string) => {
+  const loadChangeArtists = useCallback(async (plat: string, p: string, displayMode: "relative" | "absolute") => {
     const metric = METRIC_FOR_PLATFORM[plat] ?? "listeners";
     setLoadingChange(true);
     const data = await fetchJsonWithSessionCache<{ artists: ChangeItem[] }>(
-      `rank:artists:change:${p}:${metric}`,
-      `/api/artists/changes?period=${p}&metric=${metric}&mode=change&skip=0&take=200`,
+      `rank:artists:change:${displayMode}:${p}:${metric}`,
+      `/api/artists/changes?period=${p}&metric=${metric}&mode=${displayMode}&skip=0&take=200&sort=${changeSortOrder}`,
       300_000
     ).catch(() => null);
     if (data) setChangeItems(data.artists ?? []);
     setLoadingChange(false);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [changeSortOrder]);
 
   // Initial load
   useEffect(() => {
@@ -699,8 +712,8 @@ export default function ArtistListView({ platform, search, sortMode = "current",
 
   // Load change data when change mode is active or params change
   useEffect(() => {
-    if (isChangeMode) loadChangeArtists(platform, period);
-  }, [isChangeMode, platform, period, loadChangeArtists]);
+    if (isTrendMode) loadChangeArtists(platform, period, sortMode);
+  }, [isTrendMode, platform, period, loadChangeArtists, sortMode]);
 
   // React to prop changes
   useEffect(() => {
@@ -870,7 +883,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
 
   const top3 = artists.slice(0, 3);
   const rest = artists.slice(3);
-  const showPodium = !search && !isChangeMode && artists.length >= 3;
+  const showPodium = !search && !isTrendMode && artists.length >= 3;
 
   // Listen for sidebar-triggered modal opens
   useEffect(() => {
@@ -899,7 +912,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       )}
 
       {/* Change mode list */}
-      {isChangeMode && (
+      {isTrendMode && (
         loadingChange ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 10 }).map((_, i) => (
@@ -925,6 +938,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                   onToggle={() => toggleWatchlist(sortedChangeItems[1].id)}
                   toggling={togglingIds.has(sortedChangeItems[1].id)}
                   openArtist={openArtist}
+                  isAbsoluteMode={isAbsoluteMode}
                 />
                 <ChangePodiumCard
                   item={sortedChangeItems[0]}
@@ -933,6 +947,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                   onToggle={() => toggleWatchlist(sortedChangeItems[0].id)}
                   toggling={togglingIds.has(sortedChangeItems[0].id)}
                   openArtist={openArtist}
+                  isAbsoluteMode={isAbsoluteMode}
                 />
                 <ChangePodiumCard
                   item={sortedChangeItems[2]}
@@ -941,6 +956,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                   onToggle={() => toggleWatchlist(sortedChangeItems[2].id)}
                   toggling={togglingIds.has(sortedChangeItems[2].id)}
                   openArtist={openArtist}
+                  isAbsoluteMode={isAbsoluteMode}
                 />
               </div>
             )}
@@ -949,8 +965,9 @@ export default function ArtistListView({ platform, search, sortMode = "current",
               {(!search && sortedChangeItems.length >= 3 ? sortedChangeItems.slice(3) : sortedChangeItems).map((item, idx) => {
                 const listRank = (!search && sortedChangeItems.length >= 3 ? idx + 3 : idx);
                 const isWatched = watchlistedIds.has(item.id);
-                const isUp = item.changePercent > 0;
-                const isDown = item.changePercent < 0;
+                const displayValue = isAbsoluteMode ? item.changeValue : item.changePercent;
+                const isUp = displayValue > 0;
+                const isDown = displayValue < 0;
                 return (
                   <div key={item.id} className="group flex items-center gap-4 px-5 py-3 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:bg-[var(--muted)] transition-all">
                     {/* Rank */}
@@ -979,7 +996,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                       {item.hasData ? (
                         <span className={`flex items-center gap-1 text-sm font-bold tabular-nums px-2.5 py-1 rounded-lg ${isUp ? "bg-green-500/15 text-green-400" : isDown ? "bg-red-500/15 text-red-400" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}>
                           {isUp ? <ArrowUpRight className="w-3.5 h-3.5" /> : isDown ? <ArrowDownRight className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
-                          {item.changePercent > 0 ? "+" : ""}{item.changePercent.toFixed(1)}%
+                          {isAbsoluteMode ? formatSignedCount(item.changeValue) : `${item.changePercent > 0 ? "+" : ""}${item.changePercent.toFixed(1)}%`}
                         </span>
                       ) : (
                         <span className="text-xs text-[var(--muted-foreground)] opacity-50">No data</span>
@@ -1003,7 +1020,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       )}
 
       {/* Artist List (current mode) */}
-      {!isChangeMode && (loadingList ? (
+      {!isTrendMode && (loadingList ? (
         <div className="flex flex-col gap-2">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/60 px-5 py-4 flex items-center gap-4">
@@ -1130,7 +1147,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       ))}
 
       {/* Load More sentinel */}
-      {!isChangeMode && artists.length < totalCount && (
+      {!isTrendMode && artists.length < totalCount && (
         <div ref={sentinelRef} className="flex justify-center mt-6 py-4">
           {loadingMore && (
             <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">

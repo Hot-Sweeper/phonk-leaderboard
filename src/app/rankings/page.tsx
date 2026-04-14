@@ -16,6 +16,7 @@ import { SpotifyIcon, YouTubeIcon, InstagramIcon, TikTokIcon } from "@/component
 type Entity = "artists" | "songs";
 type ViewMode = "list" | "bubbles";
 type SongMode = "popularity" | "day" | "week" | "month";
+type TrendDisplayMode = "current" | "relative" | "absolute";
 
 const ARTIST_PLATFORMS: Array<{ key: string; Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = [
   { key: "",          Icon: SpotifyIcon,   color: "#1DB954", label: "Spotify Listeners" },
@@ -31,9 +32,15 @@ const SONG_MODES: Array<{ key: SongMode; label: string }> = [
   { key: "month", label: "30D" },
 ];
 
-const BUBBLE_MODES = [
-  { key: "change", label: "% Change" },
+const TREND_DISPLAY_MODES: Array<{ key: TrendDisplayMode; label: string }> = [
+  { key: "relative", label: "% Change" },
+  { key: "absolute", label: "Abs Change" },
   { key: "current", label: "Current" },
+];
+
+const SONG_TREND_DISPLAY_MODES: Array<{ key: Exclude<TrendDisplayMode, "current">; label: string }> = [
+  { key: "relative", label: "% Change" },
+  { key: "absolute", label: "Abs Change" },
 ];
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -68,7 +75,12 @@ function RankingsInner() {
 
   // Bubble-specific
   const [metric, setMetric] = useState(searchParams.get("metric") || "listeners");
-  const [bubbleMode, setBubbleMode] = useState(searchParams.get("bmode") || "current");
+  const initialBubbleMode = searchParams.get("bmode");
+  const [bubbleMode, setBubbleMode] = useState<TrendDisplayMode>(
+    initialBubbleMode === "relative" || initialBubbleMode === "absolute" || initialBubbleMode === "current"
+      ? initialBubbleMode
+      : "current"
+  );
   const [period, setPeriod] = useState(searchParams.get("period") || "day");
 
   // Song options
@@ -90,7 +102,9 @@ function RankingsInner() {
       if (s.viewMode) setViewMode(s.viewMode as ViewMode);
       if ("platform" in s) setPlatform(s.platform);
       if (s.songMode) setSongMode(s.songMode as SongMode);
-      if (s.bubbleMode) setBubbleMode(s.bubbleMode);
+      if (s.bubbleMode === "relative" || s.bubbleMode === "absolute" || s.bubbleMode === "current") {
+        setBubbleMode(s.bubbleMode);
+      }
       if (s.period) setPeriod(s.period);
       if (typeof s.collapseVersions === "boolean") setCollapseVersions(s.collapseVersions);
       if (s.changeSortOrder === "asc" || s.changeSortOrder === "abs" || s.changeSortOrder === "desc") {
@@ -110,6 +124,10 @@ function RankingsInner() {
   useEffect(() => {
     if (entity === "songs" && songMode === "popularity" && bubbleMode !== "current") {
       setBubbleMode("current");
+      return;
+    }
+    if (entity === "songs" && songMode !== "popularity" && bubbleMode === "current") {
+      setBubbleMode("absolute");
     }
   }, [entity, songMode, bubbleMode]);
 
@@ -124,13 +142,13 @@ function RankingsInner() {
     if (viewMode === "bubbles") {
       if (entity === "artists") {
         if (metric !== "listeners") params.set("metric", metric);
-        if (bubbleMode !== "change") params.set("bmode", bubbleMode);
+        if (bubbleMode !== "current") params.set("bmode", bubbleMode);
         if (period !== "day") params.set("period", period);
-        if (bubbleMode === "change" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
+        if (bubbleMode !== "current" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
       }
       if (entity === "songs") {
         if (bubbleMode !== "current") params.set("bmode", bubbleMode);
-        if (songMode !== "popularity" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
+        if (songMode !== "popularity" && bubbleMode !== "current" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
       }
     }
     const qs = params.toString();
@@ -246,7 +264,7 @@ function RankingsInner() {
           {/* Change/Current toggle — artists */}
           {isArtists && (
             <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-              {BUBBLE_MODES.map((m) => (
+              {TREND_DISPLAY_MODES.map((m) => (
                 <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
                   {m.label}
                 </button>
@@ -255,7 +273,7 @@ function RankingsInner() {
           )}
 
           {/* Period — artists change mode */}
-          {isArtists && bubbleMode === "change" && (
+          {isArtists && bubbleMode !== "current" && (
             <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
               {ALL_PERIODS.map((p) => (
                 <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
@@ -266,7 +284,7 @@ function RankingsInner() {
           )}
 
           {/* Sort order — artists change mode */}
-          {isArtists && bubbleMode === "change" && (
+          {isArtists && bubbleMode !== "current" && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
@@ -294,19 +312,15 @@ function RankingsInner() {
           )}
 
           {/* Song bubble current/% change */}
-          {!isArtists && isBubbles && (
+          {!isArtists && songMode !== "popularity" && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-                {BUBBLE_MODES.map((m) => (
+                {SONG_TREND_DISPLAY_MODES.map((m) => (
                   <button
                     key={m.key}
-                    onClick={() => {
-                      if (songMode === "popularity" && m.key === "change") return;
-                      setBubbleMode(m.key);
-                    }}
-                    disabled={songMode === "popularity" && m.key === "change"}
-                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"} ${songMode === "popularity" && m.key === "change" ? "opacity-40 cursor-not-allowed hover:text-[var(--muted-foreground)]" : ""}`}
+                    onClick={() => setBubbleMode(m.key)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}
                   >
                     {m.label}
                   </button>
@@ -316,7 +330,7 @@ function RankingsInner() {
           )}
 
           {/* Song sort order — bubble trends */}
-          {!isArtists && isBubbles && songMode !== "popularity" && (
+          {!isArtists && isBubbles && songMode !== "popularity" && bubbleMode !== "current" && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
@@ -333,7 +347,7 @@ function RankingsInner() {
           )}
 
           {/* Song sort order — list trends */}
-          {!isArtists && !isBubbles && songMode !== "popularity" && (
+          {!isArtists && !isBubbles && songMode !== "popularity" && bubbleMode !== "current" && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
@@ -402,12 +416,12 @@ function RankingsInner() {
         <div className="px-6 pb-12">
           {artistListMounted && (
             <div className={!isArtists ? "hidden" : ""}>
-              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode as "current" | "change"} period={period} changeSortOrder={changeSortOrder} />
+              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode} period={period} changeSortOrder={changeSortOrder} />
             </div>
           )}
           {songListMounted && (
             <div className={isArtists ? "hidden" : ""}>
-              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} />
+              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} valueMode={bubbleMode === "relative" ? "relative" : "absolute"} />
             </div>
           )}
         </div>

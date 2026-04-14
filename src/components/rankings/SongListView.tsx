@@ -94,40 +94,85 @@ function formatTrendDelta(delta: number) {
   return `${sign}${formatPopularity(Math.abs(delta))}`;
 }
 
-function getMetricHeaderLabel(mode: LeaderboardMode) {
-  switch (mode) {
-    case "day": return "24H Hype";
-    case "week": return "7D Hype";
-    case "month": return "30D Hype";
-    default: return "Popularity";
-  }
+function formatTrendPercent(percent: number) {
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${percent.toFixed(2)}%`;
 }
 
-function getMetricText(track: Track, mode: LeaderboardMode) {
-  if (mode === "popularity") return formatPopularity(track.popularity);
-  if (!track.hasTrendData) return "--";
-  return formatTrendDelta(track.metricValue);
+const NEW_RELEASE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
+
+function isRecentRelease(releaseDate: string | null | undefined) {
+  if (!releaseDate) return false;
+  const parsed = Date.parse(releaseDate);
+  if (Number.isNaN(parsed)) return false;
+  const age = Date.now() - parsed;
+  return age >= 0 && age <= NEW_RELEASE_WINDOW_MS;
 }
 
-function getMetricSubtext(track: Track, mode: LeaderboardMode) {
-  if (mode === "popularity") return null;
-  if (!track.hasTrendData) return "Waiting for history";
+function isFreshTrendEntry(track: Track, mode: LeaderboardMode) {
+  return mode !== "popularity"
+    && track.metricValue > 0
+    && track.metricValue === track.popularity
+    && track.trendPercent === 0;
+}
+
+function hasNewBadge(track: Track, mode: LeaderboardMode) {
+  return isRecentRelease(track.releaseDate) || isFreshTrendEntry(track, mode);
+}
+
+function getTrendSubtext(track: Track, mode: LeaderboardMode) {
+  if (isFreshTrendEntry(track, mode)) return "NEW";
+  if (!track.hasTrendData) return hasNewBadge(track, mode) ? "NEW" : "Waiting for history";
   const sign = track.trendPercent > 0 ? "+" : "";
   return `${sign}${track.trendPercent.toFixed(2)}% vs ${formatPopularity(track.popularity)}`;
 }
 
-function getMetricTextClass(track: Track, mode: LeaderboardMode) {
+function hasVisibleTrendMetric(track: Track, mode: LeaderboardMode) {
+  return track.hasTrendData || isFreshTrendEntry(track, mode);
+}
+
+function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+  switch (mode) {
+    case "day": return valueMode === "relative" ? "24H %" : "24H Hype";
+    case "week": return valueMode === "relative" ? "7D %" : "7D Hype";
+    case "month": return valueMode === "relative" ? "30D %" : "30D Hype";
+    default: return "Popularity";
+  }
+}
+
+function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+  if (mode === "popularity") return formatPopularity(track.popularity);
+  if (isFreshTrendEntry(track, mode)) return valueMode === "relative" ? "NEW" : formatTrendDelta(track.metricValue);
+  if (!track.hasTrendData) return "--";
+  return valueMode === "relative" ? formatTrendPercent(track.trendPercent) : formatTrendDelta(track.metricValue);
+}
+
+function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+  if (mode === "popularity") return null;
+  if (valueMode === "relative") {
+    if (isFreshTrendEntry(track, mode)) return formatTrendDelta(track.metricValue);
+    if (!track.hasTrendData) return hasNewBadge(track, mode) ? "NEW" : "Waiting for history";
+    return `${track.metricValue > 0 ? "+" : track.metricValue < 0 ? "-" : ""}${formatPopularity(Math.abs(track.metricValue))}`;
+  }
+  return getTrendSubtext(track, mode);
+}
+
+function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
   if (mode === "popularity") return popularityColor(track.popularity);
+  if (isFreshTrendEntry(track, mode)) return "text-amber-300";
   if (!track.hasTrendData) return "text-[var(--muted-foreground)]";
-  if (track.metricValue > 0) return "text-green-400";
-  if (track.metricValue < 0) return "text-rose-400";
+  const displayValue = valueMode === "relative" ? track.trendPercent : track.metricValue;
+  if (displayValue > 0) return "text-green-400";
+  if (displayValue < 0) return "text-rose-400";
   return "text-[var(--muted-foreground)]";
 }
 
-function getMetricBarClass(track: Track, mode: LeaderboardMode) {
+function getMetricBarClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
   if (mode === "popularity") return popularityBar(track.popularity);
-  if (!track.hasTrendData || track.metricValue === 0) return "bg-zinc-600";
-  return track.metricValue > 0 ? "bg-green-500" : "bg-rose-500";
+  if (isFreshTrendEntry(track, mode)) return "bg-amber-400";
+  const displayValue = valueMode === "relative" ? track.trendPercent : track.metricValue;
+  if (!track.hasTrendData || displayValue === 0) return "bg-zinc-600";
+  return displayValue > 0 ? "bg-green-500" : "bg-rose-500";
 }
 
 function getVersionLabel(primaryVersion: string | null | undefined, showOriginal = true) {
@@ -189,12 +234,13 @@ function SongsSkeleton() {
   );
 }
 
-function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, onOpenSong, onOpenArtist }: {
-  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, url: string, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; onOpenSong: (track: Track) => void; onOpenArtist: (id: string) => void;
+function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenArtist }: {
+  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, url: string, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenArtist: (id: string) => void;
 }) {
   const isFirst = rank === 1;
   const artists = getTrackArtists(track);
   const versionLabel = getVersionLabel(track.primaryVersion, showOriginalVersion);
+  const isNewTrack = hasNewBadge(track, mode);
 
   const theme = {
     1: { 
@@ -274,7 +320,10 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
              )}
            </div>
            {/* Title above the podium */}
-           <h3 className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md mb-0.5 ${theme.titleSize}`}>{track.name}</h3>
+           <div className="flex items-center justify-center gap-2 mb-0.5">
+             <h3 className={`font-black text-white leading-tight line-clamp-2 text-center drop-shadow-md ${theme.titleSize}`}>{track.name}</h3>
+             {isNewTrack && <span className="shrink-0 rounded-full border border-amber-300/40 bg-amber-400/15 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.2em] text-amber-200">NEW</span>}
+           </div>
          </button>
          <p className="text-[10px] md:text-xs text-white/60 font-medium line-clamp-1 text-center mb-1">
            {artists.map((a, i) => (
@@ -334,11 +383,11 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
                   </button>
               )}
               <span className={`font-black ${theme.scoreSize} tracking-tighter`} style={{ color: `rgb(${theme.accentHex})`, textShadow: `0 0 25px rgba(${theme.accentHex}, 0.4)` }}>
-                  {getMetricText(track, mode)}
+                    {getMetricText(track, mode, valueMode)}
               </span>
-              {mode !== "popularity" && (
+                {mode !== "popularity" && (
                   <span className="text-[8px] md:text-[9px] text-white/50 uppercase font-bold tracking-widest">
-                      {getMetricSubtext(track, mode)}
+                      {getMetricSubtext(track, mode, valueMode)}
                   </span>
               )}
           </div>
@@ -353,9 +402,10 @@ interface SongListViewProps {
   search: string;
   collapseVersions: boolean;
   sortOrder?: "desc" | "asc" | "abs";
+  valueMode?: "absolute" | "relative";
 }
 
-export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc" }: SongListViewProps) {
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute" }: SongListViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -392,7 +442,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search]);
 
-  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode, trendSortOrder: "desc" | "asc" | "abs") => {
+  const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode, trendSortOrder: "desc" | "asc" | "abs", trendValueMode: "absolute" | "relative") => {
     if (append) {
       setLoadingMore(true);
       try {
@@ -401,6 +451,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         params.set("collapseVersions", groupedVersions ? "true" : "false");
         params.set("mode", trackMode);
         params.set("sort", trendSortOrder);
+        params.set("valueMode", trendValueMode);
         const qs = params.toString();
         const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
           `rank:songs:more:${qs}`,
@@ -426,6 +477,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       podiumParams.set("collapseVersions", groupedVersions ? "true" : "false");
       podiumParams.set("mode", trackMode);
       podiumParams.set("sort", trendSortOrder);
+      podiumParams.set("valueMode", trendValueMode);
       const podiumQs = podiumParams.toString();
       const podiumData = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
         `rank:songs:podium:${podiumQs}`,
@@ -443,6 +495,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       params.set("collapseVersions", groupedVersions ? "true" : "false");
       params.set("mode", trackMode);
       params.set("sort", trendSortOrder);
+      params.set("valueMode", trendValueMode);
       const qs = params.toString();
       const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
         `rank:songs:list:${qs}`,
@@ -461,8 +514,8 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
   // Reload when mode/search/collapse/sortOrder changes
   useEffect(() => {
-    fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder);
-  }, [collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder]);
+    fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder, valueMode);
+  }, [collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder, valueMode]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -557,7 +610,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   const loadMoreRef = useRef(() => {});
 
   function loadMore() {
-    fetchTracks(tracks.length, debouncedSearch, true, collapseVersions, mode, sortOrder);
+    fetchTracks(tracks.length, debouncedSearch, true, collapseVersions, mode, sortOrder, valueMode);
   }
   loadMoreRef.current = loadMore;
 
@@ -565,7 +618,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   const podiumTracks = showPodium ? tracks.slice(0, 3) : [];
   const tableTracks = showPodium ? tracks.slice(3) : tracks;
   const hasTrendData = tracks.some((t) => t.hasTrendData);
-  const maxTrendMetric = tracks.reduce((max, t) => Math.max(max, Math.abs(t.metricValue)), 0);
+  const maxTrendMetric = tracks.reduce((max, t) => Math.max(max, Math.abs(valueMode === "relative" ? t.trendPercent : t.metricValue)), 0);
 
   if (loadingPodium) return <SongsSkeleton />;
 
@@ -576,9 +629,9 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       {/* Podium */}
       {podiumTracks.length === 3 && (
         <div className="flex flex-row items-end justify-center h-[560px] md:h-[660px] gap-2 md:gap-5 mb-16 px-2 md:px-0">
-          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
-          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
-          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
+          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
+          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
+          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
         </div>
       )}
 
@@ -613,7 +666,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         <span className="hidden lg:block">Version</span>
         <span className="hidden lg:block text-right">Released</span>
         <span className="hidden lg:block text-right"><Clock className="w-3 h-3 inline" /></span>
-        <span className="text-right">{getMetricHeaderLabel(mode)}</span>
+        <span className="text-right">{getMetricHeaderLabel(mode, valueMode)}</span>
         <span />
       </div>
 
@@ -635,9 +688,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
             const isPlaying = playingTrackId === track.id;
             const artists = getTrackArtists(track);
             const versionLabel = getVersionLabel(track.primaryVersion, collapseVersions);
+            const isNewTrack = hasNewBadge(track, mode);
             const metricBarWidth = mode === "popularity"
               ? normalizePopularity(track.popularity)
-              : maxTrendMetric > 0 && track.hasTrendData ? Math.max(8, (Math.abs(track.metricValue) / maxTrendMetric) * 100) : 0;
+              : maxTrendMetric > 0 && hasVisibleTrendMetric(track, mode) ? Math.max(8, (Math.abs(valueMode === "relative" ? track.trendPercent : track.metricValue) / maxTrendMetric) * 100) : 0;
 
             return (
               <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1fr)_7rem_7rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
@@ -663,6 +717,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <button type="button" onClick={() => openSong(track.id, track)} className="font-bold text-sm truncate text-left hover:text-[var(--accent)] transition-colors cursor-pointer">{track.name}</button>
+                      {isNewTrack && <span className="shrink-0 rounded-full border border-amber-300/30 bg-amber-400/10 px-1.5 py-px text-[9px] font-black uppercase tracking-[0.2em] text-amber-200">NEW</span>}
                       {track.explicit && <span className="shrink-0 text-[9px] font-bold bg-zinc-700 text-zinc-300 px-1 py-px rounded">E</span>}
                     </div>
                     <div className="text-xs truncate">
@@ -688,10 +743,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
                 {/* Metric */}
                 <div className="flex flex-col items-end gap-0.5">
-                  <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, mode)}`}>{getMetricText(track, mode)}</span>
-                  {mode !== "popularity" && <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{getMetricSubtext(track, mode)}</span>}
+                  <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, mode, valueMode)}`}>{getMetricText(track, mode, valueMode)}</span>
+                  {mode !== "popularity" && <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{getMetricSubtext(track, mode, valueMode)}</span>}
                   <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
-                    <div className={`h-full rounded-full ${getMetricBarClass(track, mode)}`} style={{ width: `${metricBarWidth}%` }} />
+                    <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode)}`} style={{ width: `${metricBarWidth}%` }} />
                   </div>
                 </div>
 
@@ -724,7 +779,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
       {/* Scroll to top */}
       {showScrollTop && (
-        <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="fixed bottom-6 right-6 z-50 w-10 h-10 rounded-full bg-green-600 hover:bg-green-500 text-white flex items-center justify-center shadow-lg transition-all">
+          <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} title="Scroll to top" className="fixed bottom-6 right-6 z-50 w-10 h-10 rounded-full bg-green-600 hover:bg-green-500 text-white flex items-center justify-center shadow-lg transition-all">
           <ChevronUp className="w-5 h-5" />
         </button>
       )}

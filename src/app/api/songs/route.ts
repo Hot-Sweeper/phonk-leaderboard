@@ -21,7 +21,7 @@ const DEEZER_CACHE_TTL = 3_600_000; // 1 hour
 
 type SongsLeaderboardMode = "popularity" | keyof typeof TREND_PERIODS;
 type TrendSortOrder = "desc" | "abs" | "asc";
-type TrendValueMode = "current" | "change";
+type TrendValueMode = "absolute" | "relative";
 
 function normalizeName(value: string) {
   return value
@@ -60,7 +60,11 @@ function getTrendSortOrder(value: string | null): TrendSortOrder {
 }
 
 function getTrendValueMode(value: string | null): TrendValueMode {
-  return value === "change" ? "change" : "current";
+  if (value === "relative" || value === "change") {
+    return "relative";
+  }
+
+  return "absolute";
 }
 
 function chooseTrackByMetric<T extends {
@@ -128,8 +132,8 @@ function sortTrendTracks<T extends {
       return rightHasData - leftHasData;
     }
 
-    const leftPrimary = valueMode === "change" ? left.track.trendPercent : left.track.metricValue;
-    const rightPrimary = valueMode === "change" ? right.track.trendPercent : right.track.metricValue;
+    const leftPrimary = valueMode === "relative" ? left.track.trendPercent : left.track.metricValue;
+    const rightPrimary = valueMode === "relative" ? right.track.trendPercent : right.track.metricValue;
 
     if (sortOrder === "abs") {
       const absoluteDiff = Math.abs(rightPrimary) - Math.abs(leftPrimary);

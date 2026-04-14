@@ -9,6 +9,7 @@ type BubbleItem = {
   name: string;
   imageUrl: string | null;
   value: number;
+  changeValue: number;
   changePercent: number;
   hasData: boolean;
   rank: number;
@@ -45,7 +46,7 @@ const ARTIST_METRICS = [
 interface BubbleViewProps {
   entity: "artists" | "songs";
   metric: string;
-  mode: string;
+  mode: "current" | "relative" | "absolute";
   period: string;
   songMode?: string;
   searchQuery?: string;
@@ -104,7 +105,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         mode: sMode,
         collapseVersions: collapseVersions ? "true" : "false",
         sort: sortOrder,
-        valueMode: mode,
+        valueMode: mode === "relative" ? "relative" : "absolute",
       });
       fetch(`/api/songs?${params.toString()}`)
         .then(r => r.json())
@@ -176,17 +177,18 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         take: String(PAGE_SIZE),
       });
       const url = `/api/artists/changes?${params.toString()}`;
-      fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
+      fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changeValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
         `rank:bubbles:artists:${period}:${metric}:${mode}:${sortOrder}:${skip}`,
         url,
         45_000
       )
         .then((data) => {
-          const artists = (data.artists ?? []).map((a: { id: string; name: string; imageUrl: string | null; currentValue: number; changePercent: number; hasData: boolean }, idx: number) => ({
+          const artists = (data.artists ?? []).map((a: { id: string; name: string; imageUrl: string | null; currentValue: number; changeValue: number; changePercent: number; hasData: boolean }, idx: number) => ({
             id: a.id,
             name: a.name,
             imageUrl: a.imageUrl,
             value: a.currentValue,
+            changeValue: a.changeValue,
             changePercent: a.changePercent,
             hasData: a.hasData,
             rank: skip + idx + 1,
@@ -206,7 +208,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         mode: sMode,
         collapseVersions: collapseVersions ? "true" : "false",
         sort: sortOrder,
-        valueMode: mode,
+        valueMode: mode === "relative" ? "relative" : "absolute",
       });
       const url = `/api/songs?${params.toString()}`;
       fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }>; totalCount?: number }>(
@@ -219,7 +221,8 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
             id: t.id,
             name: t.name,
             imageUrl: t.albumImageUrl,
-            value: sMode === "popularity" ? t.popularity : Math.abs(t.metricValue),
+            value: sMode === "popularity" ? t.popularity : Math.abs(mode === "relative" ? t.trendPercent : t.metricValue),
+            changeValue: t.metricValue,
             changePercent: t.trendPercent,
             hasData: t.hasTrendData,
             rank: skip + idx + 1,
@@ -244,7 +247,8 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     const canvasArea = w * h;
 
     const isCurrentMode = mode === "current" || (entity === "songs" && songMode === "popularity");
-    const sizeValues = items.map((a) => isCurrentMode ? a.value : Math.abs(a.changePercent));
+    const isRelativeMode = mode === "relative";
+    const sizeValues = items.map((a) => isCurrentMode ? a.value : Math.abs(isRelativeMode ? a.changePercent : a.changeValue));
     const maxVal = Math.max(0.01, ...sizeValues);
 
     const fillRatio = 0.55;
@@ -255,7 +259,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     const maxR = Math.min(w, h) * 0.4;
 
     const newBubbles: Bubble[] = items.map((item) => {
-      const sizeVal = isCurrentMode ? item.value : Math.abs(item.changePercent);
+      const sizeVal = isCurrentMode ? item.value : Math.abs(isRelativeMode ? item.changePercent : item.changeValue);
       const rawR = scale * Math.sqrt(sizeVal / maxVal);
       const targetR = Math.max(minR, Math.min(maxR, rawR));
 
@@ -382,8 +386,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         const saturation = 0.3 + sizeRatio * 0.7;
 
         const isPodium = b.rank >= 1 && b.rank <= 3;
-        const isChangeMode = mode === "change" && b.hasData;
-        const isPositive = b.changePercent >= 0;
+        const isTrendMode = mode !== "current" && b.hasData;
+        const displayChange = mode === "relative" ? b.changePercent : b.changeValue;
+        const isPositive = displayChange >= 0;
 
         const podiumColors: Record<number, { r: number; g: number; b: number }> = {
           1: { r: 255, g: 215, b: 0 },
@@ -400,9 +405,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
           borderColor = `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.6 + saturation * 0.4})`;
           glowColor = `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.3 + saturation * 0.4})`;
           overlayColor = `rgba(${Math.floor(pc.r * 0.15)}, ${Math.floor(pc.g * 0.15)}, ${Math.floor(pc.b * 0.1)}, ${0.45 + saturation * 0.15})`;
-        } else if (isChangeMode) {
+        } else if (isTrendMode) {
           const alpha = 0.3 + saturation * 0.5;
-          const intensity = Math.min(1, Math.abs(b.changePercent) / 20);
+          const intensity = Math.min(1, Math.abs(displayChange) / (mode === "relative" ? 20 : Math.max(1, Math.abs(displayChange))));
           if (isPositive) {
             borderColor = `rgba(34, 197, 94, ${alpha + intensity * 0.2})`;
             glowColor = `rgba(34, 197, 94, ${0.15 + saturation * 0.3})`;
@@ -437,7 +442,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
             const pc = podiumColors[b.rank];
             grad.addColorStop(0, `rgba(${pc.r}, ${pc.g}, ${pc.b}, ${0.3 + saturation * 0.3})`);
             grad.addColorStop(1, `rgba(${Math.floor(pc.r * 0.3)}, ${Math.floor(pc.g * 0.3)}, ${Math.floor(pc.b * 0.3)}, ${0.5 + saturation * 0.3})`);
-          } else if (isChangeMode) {
+          } else if (isTrendMode) {
             if (isPositive) {
               grad.addColorStop(0, `rgba(34, 197, 94, ${0.3 + saturation * 0.3})`);
               grad.addColorStop(1, `rgba(20, 83, 45, ${0.5 + saturation * 0.3})`);
@@ -494,8 +499,10 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
 
           const smallSize = Math.max(6, fontSize * 0.75);
           ctx.font = `bold ${smallSize}px sans-serif`;
-          if (isChangeMode) {
-            const changeText = `${b.changePercent >= 0 ? "+" : ""}${b.changePercent.toFixed(1)}%`;
+          if (isTrendMode) {
+            const changeText = mode === "relative"
+              ? `${b.changePercent >= 0 ? "+" : ""}${b.changePercent.toFixed(1)}%`
+              : `${b.changeValue > 0 ? "+" : b.changeValue < 0 ? "-" : ""}${formatCount(Math.abs(b.changeValue))}`;
             ctx.fillStyle = isPositive ? "#4ade80" : "#f87171";
             ctx.fillText(changeText, b.x, b.y + fontSize * 0.5);
           } else {
@@ -632,8 +639,10 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     ? (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase()
     : songMode === "popularity"
       ? "popularity"
-      : mode === "change"
+      : mode === "relative"
         ? `${songMode ?? "trend"} % change`
+        : mode === "absolute"
+          ? `${songMode ?? "trend"} abs change`
         : `${songMode ?? "trend"} hype`;
 
   return (
@@ -677,9 +686,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
                 {hovered.value > 0 && (
                   <span className="text-[var(--muted-foreground)] tabular-nums">{formatCount(hovered.value)} {metricLabel}</span>
                 )}
-                {hovered.hasData && hovered.changePercent !== 0 && (
-                  <span className={`font-bold tabular-nums ${hovered.changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {hovered.changePercent >= 0 ? "+" : ""}{hovered.changePercent.toFixed(2)}%
+                {hovered.hasData && (mode === "relative" ? hovered.changePercent !== 0 : hovered.changeValue !== 0) && (
+                  <span className={`font-bold tabular-nums ${(mode === "relative" ? hovered.changePercent : hovered.changeValue) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {mode === "relative"
+                      ? `${hovered.changePercent >= 0 ? "+" : ""}${hovered.changePercent.toFixed(2)}%`
+                      : `${hovered.changeValue > 0 ? "+" : hovered.changeValue < 0 ? "-" : ""}${formatCount(Math.abs(hovered.changeValue))}`}
                   </span>
                 )}
               </div>

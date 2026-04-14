@@ -12,6 +12,7 @@ const PERIOD_ORDER = ["day", "week", "month", "year"];
 
 type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
 type SortOrder = "desc" | "abs" | "asc";
+type DisplayMode = "current" | "relative" | "absolute";
 
 const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram"];
 
@@ -53,17 +54,29 @@ function getSortOrder(value: string | null): SortOrder {
   return "abs";
 }
 
+function getDisplayMode(value: string | null): DisplayMode {
+  if (value === "current" || value === "relative" || value === "absolute") {
+    return value;
+  }
+
+  if (value === "change") {
+    return "relative";
+  }
+
+  return "current";
+}
+
 /**
  * GET /api/artists/changes?period=day&metric=listeners&mode=change&skip=0&take=100
  *
  * metric: listeners | followers | youtube | tiktok | instagram
- * mode: change (% change over period) | current (absolute value, no change calc)
+ * mode: relative (% change over period) | absolute (raw delta over period) | current
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const period = searchParams.get("period") ?? "day";
   const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
-  const mode = searchParams.get("mode") ?? "change";
+  const mode = getDisplayMode(searchParams.get("mode"));
   const sort = getSortOrder(searchParams.get("sort"));
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "100", 10) || 100, 200);
@@ -139,6 +152,7 @@ export async function GET(req: Request) {
         imageUrl: artist.imageUrl,
         watchlistCount: artist.watchlistCount,
         currentValue,
+        changeValue: 0,
         changePercent: 0,
         hasData: false,
         metric,
@@ -157,7 +171,7 @@ export async function GET(req: Request) {
     );
   }
 
-  // Change mode: calculate % change over period
+  // Trend modes: calculate % change and raw delta over period
   const artistIds = artists.map((a) => a.id);
 
   const oldSnapshots = await prisma.artistSnapshot.findMany({
@@ -213,6 +227,7 @@ export async function GET(req: Request) {
 
     const currentValue = getMetricFromLinks(artist.links, metric);
     const oldValue = old ? getMetricFromSnapshot(old, metric) : currentValue;
+    const changeValue = old ? currentValue - oldValue : 0;
     let changePercent = 0;
     if (oldValue > 0 && old) {
       changePercent = ((currentValue - oldValue) / oldValue) * 100;
@@ -224,6 +239,7 @@ export async function GET(req: Request) {
       imageUrl: artist.imageUrl,
       watchlistCount: artist.watchlistCount,
       currentValue,
+      changeValue,
       changePercent: Math.round(changePercent * 100) / 100,
       hasData,
       metric,
@@ -234,13 +250,14 @@ export async function GET(req: Request) {
   // Artists were pre-filtered by platform link — use result directly
   const filteredResult = result;
 
-  // Sort by absolute change of selected metric (biggest movers first)
+  const getTrendMetric = (artist: (typeof filteredResult)[number]) => mode === "absolute" ? artist.changeValue : artist.changePercent;
+
   if (sort === "asc") {
-    filteredResult.sort((a, b) => a.changePercent - b.changePercent);
+    filteredResult.sort((a, b) => getTrendMetric(a) - getTrendMetric(b));
   } else if (sort === "desc") {
-    filteredResult.sort((a, b) => b.changePercent - a.changePercent);
+    filteredResult.sort((a, b) => getTrendMetric(b) - getTrendMetric(a));
   } else {
-    filteredResult.sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent));
+    filteredResult.sort((a, b) => Math.abs(getTrendMetric(b)) - Math.abs(getTrendMetric(a)));
   }
 
   const payload = { artists: filteredResult, totalCount: filteredResult.length, availablePeriods, period, metric, mode };
