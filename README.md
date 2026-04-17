@@ -1,4 +1,25 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is the PhonkLeaderboard app built with Next.js, React, Prisma, and Tailwind.
+
+## Legal External Data Sources
+
+The rankings stack now supports these legally safer external signals on the legal 24H songs board:
+
+- Deezer public chart API
+- Audius public trending API
+- Apple public top songs RSS feed
+- Last.fm global and tag charts when `LASTFM_API_KEY` is configured
+
+These signals are fetched through [src/lib/legal-sources.ts](src/lib/legal-sources.ts) and blended into the legal song hype model in [src/app/api/songs/route.ts](src/app/api/songs/route.ts).
+
+## Environment
+
+Optional variables:
+
+```bash
+LASTFM_API_KEY=your_lastfm_api_key
+```
+
+Without `LASTFM_API_KEY`, Last.fm signals are skipped automatically.
 
 ## Getting Started
 

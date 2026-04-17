@@ -44,8 +44,12 @@ export async function GET(
     return NextResponse.json([], { status: 404 });
   }
 
+  const anchorValue = baselineSnapshot?.popularity
+    ?? snapshots[0]?.popularity
+    ?? (track.popularity > 0 ? track.popularity : null);
+
   const series = [
-    ...(baselineSnapshot ? [baselineSnapshot] : []),
+    ...(anchorValue != null ? [{ popularity: anchorValue, createdAt: cutoff }] : []),
     ...snapshots,
   ];
 

@@ -55,9 +55,13 @@ type Artist = {
   createdAt: string;
   links: ArtistLink[];
   globalRank?: number;
+  audienceScore?: number;
 };
 
-function getCurrentArtistMetric(artist: Artist, platform: string) {
+type RankingModel = "standard" | "legal";
+
+function getCurrentArtistMetric(artist: Artist, platform: string, rankingModel: RankingModel) {
+  if (rankingModel === "legal") return artist.audienceScore ?? 0;
   if (platform === "YOUTUBE") return artist.links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
   if (platform === "SPOTIFY") return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
   if (platform === "TIKTOK") return artist.links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
@@ -382,6 +386,7 @@ function PodiumCard({
   toggling,
   platform,
   openArtist,
+  rankingModel,
 }: {
   artist: Artist;
   rank: number;
@@ -391,9 +396,10 @@ function PodiumCard({
   toggling: boolean;
   platform: string;
   openArtist: (id: string) => void;
+  rankingModel: RankingModel;
 }) {
   const isFirst = rank === 0;
-  const currentValue = getCurrentArtistMetric(artist, platform);
+  const currentValue = getCurrentArtistMetric(artist, platform, rankingModel);
   const badges = getArtistRankingBadges({
     createdAt: artist.createdAt,
     currentValue,
@@ -454,6 +460,9 @@ function PodiumCard({
   const platformColors: Record<string, string> = { "": "text-green-400", YOUTUBE: "text-red-400", INSTAGRAM: "text-fuchsia-400", TIKTOK: "text-cyan-400" };
 
   const statLine = (() => {
+    if (rankingModel === "legal") {
+      return { text: `${formatCount(artist.audienceScore ?? 0)} score`, color: "text-emerald-300" };
+    }
     const color = platformColors[platform] ?? "text-green-400";
     if (!platform || platform === "") {
       const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
@@ -567,6 +576,7 @@ interface ArtistListViewProps {
   sortMode?: "current" | "relative" | "absolute";
   period?: string;
   changeSortOrder?: "desc" | "asc" | "abs";
+  rankingModel?: RankingModel;
 }
 
 type AllChanges = {
@@ -601,7 +611,7 @@ function formatSignedCount(n: number): string {
   return `${prefix}${formatCount(Math.abs(n))}`;
 }
 
-export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc" }: ArtistListViewProps) {
+export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc", rankingModel = "standard" }: ArtistListViewProps) {
   const { data: session } = useSession();
   const { openArtist } = useDetailPanel();
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -660,7 +670,8 @@ export default function ArtistListView({ platform, search, sortMode = "current",
   const loadArtists = useCallback(async (q = "", plat = "") => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
-    if (plat) params.set("platform", plat);
+    if (plat && rankingModel === "standard") params.set("platform", plat);
+    if (rankingModel === "legal") params.set("rankingModel", "legal");
 
     // Phase 1: fetch top 3 for the podium
     const podiumParams = new URLSearchParams(params);
@@ -689,13 +700,14 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       setTotalCount(data.totalCount);
     }
     setLoadingList(false);
-  }, []);
+  }, [rankingModel]);
 
   const loadMore = useCallback(async () => {
     setLoadingMore(true);
     const params = new URLSearchParams();
     if (search) params.set("q", search);
-    if (platform) params.set("platform", platform);
+    if (platform && rankingModel === "standard") params.set("platform", platform);
+    if (rankingModel === "legal") params.set("rankingModel", "legal");
     params.set("skip", String(artists.length));
     const qs = params.toString();
     const data = await fetchJsonWithSessionCache<{ artists: Artist[]; totalCount: number }>(
@@ -708,7 +720,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       setTotalCount(data.totalCount);
     }
     setLoadingMore(false);
-  }, [search, platform, artists.length]);
+  }, [search, platform, artists.length, rankingModel]);
 
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
@@ -721,27 +733,31 @@ export default function ArtistListView({ platform, search, sortMode = "current",
   }, []);
 
   const loadRankChanges = useCallback(async () => {
+    if (rankingModel === "legal") {
+      setRankChanges({});
+      return;
+    }
     const ranks = await fetchJsonWithSessionCache<Record<string, { currentRank: number; previousRank: number | null; rankChange: number }>>(
       "rank:artists:changes",
       "/api/artists/ranks",
       300_000
     ).catch(() => null);
     if (ranks) setRankChanges(ranks);
-  }, []);
+  }, [rankingModel]);
 
   const METRIC_FOR_PLATFORM: Record<string, string> = { "": "listeners", SPOTIFY: "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
 
   const loadChangeArtists = useCallback(async (plat: string, p: string, displayMode: "relative" | "absolute") => {
-    const metric = METRIC_FOR_PLATFORM[plat] ?? "listeners";
+    const metric = rankingModel === "legal" ? "audience" : METRIC_FOR_PLATFORM[plat] ?? "listeners";
     setLoadingChange(true);
     const data = await fetchJsonWithSessionCache<{ artists: ChangeItem[] }>(
-      `rank:artists:change:${displayMode}:${p}:${metric}`,
-      `/api/artists/changes?period=${p}&metric=${metric}&mode=${displayMode}&skip=0&take=200&sort=${changeSortOrder}`,
+      `rank:artists:change:${rankingModel}:${displayMode}:${p}:${metric}`,
+      `/api/artists/changes?period=${p}&metric=${metric}&mode=${displayMode}&skip=0&take=200&sort=${changeSortOrder}${rankingModel === "legal" ? "&rankingModel=legal" : ""}`,
       300_000
     ).catch(() => null);
     if (data) setChangeItems(data.artists ?? []);
     setLoadingChange(false);
-  }, [changeSortOrder]);
+  }, [changeSortOrder, rankingModel]);
 
   // Initial load
   useEffect(() => {
@@ -945,9 +961,9 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       {/* Podium */}
       {showPodium && (
         <div className="flex flex-row items-end justify-center h-[520px] md:h-[620px] gap-2 md:gap-5 mb-16 px-2 md:px-0 max-w-5xl mx-auto">
-          <PodiumCard key={top3[1].id} artist={top3[1]} rank={1} displayRank={top3[1].globalRank ?? 2} isWatched={watchlistedIds.has(top3[1].id)} onToggle={() => toggleWatchlist(top3[1].id)} toggling={togglingIds.has(top3[1].id)} platform={platform} openArtist={openArtist} />
-          <PodiumCard key={top3[0].id} artist={top3[0]} rank={0} displayRank={top3[0].globalRank ?? 1} isWatched={watchlistedIds.has(top3[0].id)} onToggle={() => toggleWatchlist(top3[0].id)} toggling={togglingIds.has(top3[0].id)} platform={platform} openArtist={openArtist} />
-          <PodiumCard key={top3[2].id} artist={top3[2]} rank={2} displayRank={top3[2].globalRank ?? 3} isWatched={watchlistedIds.has(top3[2].id)} onToggle={() => toggleWatchlist(top3[2].id)} toggling={togglingIds.has(top3[2].id)} platform={platform} openArtist={openArtist} />
+          <PodiumCard key={top3[1].id} artist={top3[1]} rank={1} displayRank={top3[1].globalRank ?? 2} isWatched={watchlistedIds.has(top3[1].id)} onToggle={() => toggleWatchlist(top3[1].id)} toggling={togglingIds.has(top3[1].id)} platform={platform} openArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumCard key={top3[0].id} artist={top3[0]} rank={0} displayRank={top3[0].globalRank ?? 1} isWatched={watchlistedIds.has(top3[0].id)} onToggle={() => toggleWatchlist(top3[0].id)} toggling={togglingIds.has(top3[0].id)} platform={platform} openArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumCard key={top3[2].id} artist={top3[2]} rank={2} displayRank={top3[2].globalRank ?? 3} isWatched={watchlistedIds.has(top3[2].id)} onToggle={() => toggleWatchlist(top3[2].id)} toggling={togglingIds.has(top3[2].id)} platform={platform} openArtist={openArtist} rankingModel={rankingModel} />
         </div>
       )}
 
@@ -1099,7 +1115,8 @@ export default function ArtistListView({ platform, search, sortMode = "current",
             const isWatched = watchlistedIds.has(artist.id);
             const badges = getArtistRankingBadges({
               createdAt: artist.createdAt,
-              currentValue: getCurrentArtistMetric(artist, platform),
+              currentValue: getCurrentArtistMetric(artist, platform, rankingModel),
+              
               changeValue: 0,
               changePercent: 0,
               hasData: false,
@@ -1137,6 +1154,13 @@ export default function ArtistListView({ platform, search, sortMode = "current",
                   </button>
                   <div className="flex gap-3 mt-1 flex-wrap">
                     {(() => {
+                      if (rankingModel === "legal") {
+                        return (
+                          <span className="flex items-center gap-1 text-xs text-emerald-300">
+                            <span className="tabular-nums">{formatCount(artist.audienceScore ?? 0)} score</span>
+                          </span>
+                        );
+                      }
                       if (platform) {
                         const link = artist.links.find((l) => l.platform === platform);
                         if (link) {

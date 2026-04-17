@@ -54,6 +54,7 @@ type ChartPoint = { value: number; date: string };
 
 /* ── spark chart ── */
 function SparkChart({ id, points, height = 80 }: { id: string; points: ChartPoint[]; height?: number }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   if (points.length < 2) return <div className="flex items-center justify-center opacity-40" style={{ height }}><span className="text-[11px] text-[var(--muted-foreground)]">Not enough history</span></div>;
   const W = 400, H = height, pad = { t: 6, r: 2, b: 20, l: 2 };
   const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
@@ -68,12 +69,46 @@ function SparkChart({ id, points, height = 80 }: { id: string; points: ChartPoin
   const area = `${d} L${lx},${H-pad.b} L${pad.l},${H-pad.b}Z`;
   const up = vals[vals.length-1] >= vals[0]; const col = up ? "#4ade80" : "#f87171";
   const gid = `sp-${id.slice(-6)}`;
+  const activeIndex = hoveredIndex ?? (points.length - 1);
+  const [ax, ay] = pts[activeIndex];
+  const activePoint = points[activeIndex];
+  const tooltipWidth = 76;
+  const tooltipX = Math.max(6, Math.min(W - tooltipWidth - 6, ax - tooltipWidth / 2));
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full" style={{ height }} aria-hidden>
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="w-full"
+      style={{ height }}
+      aria-hidden
+      onMouseMove={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const normalizedX = ((event.clientX - bounds.left) / bounds.width) * W;
+        let nearestIndex = 0;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        for (let index = 0; index < pts.length; index++) {
+          const distance = Math.abs(pts[index][0] - normalizedX);
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestIndex = index;
+          }
+        }
+        setHoveredIndex(nearestIndex);
+      }}
+      onMouseLeave={() => setHoveredIndex(null)}
+    >
       <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity="0.25" /><stop offset="100%" stopColor={col} stopOpacity="0.02" /></linearGradient></defs>
       <line x1={pad.l} y1={pad.t+ch*0.5} x2={W-pad.r} y2={pad.t+ch*0.5} stroke="rgba(255,255,255,0.05)" strokeWidth="1" />
       <path d={area} fill={`url(#${gid})`} /><path d={d} fill="none" stroke={col} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={lx} cy={ly} r="2.5" fill={col} />
+      <line x1={ax} y1={pad.t} x2={ax} y2={H - pad.b} stroke="rgba(255,255,255,0.14)" strokeWidth="1" strokeDasharray="3 3" />
+      <circle cx={ax} cy={ay} r="3" fill={col} />
+      <circle cx={ax} cy={ay} r="6" fill="transparent" stroke={col} strokeOpacity="0.35" strokeWidth="1.5" />
+      <g transform={`translate(${tooltipX}, ${Math.max(4, ay - 34)})`}>
+        <rect width={tooltipWidth} height="24" rx="7" fill="rgba(9,9,13,0.94)" stroke="rgba(255,255,255,0.08)" />
+        <text x="7" y="10" fill="rgba(255,255,255,0.55)" fontSize="7" fontFamily="system-ui">{fmtDate(activePoint.date)}</text>
+        <text x="7" y="19" fill="#ffffff" fontSize="9" fontWeight="700" fontFamily="system-ui">{fmtPop(activePoint.value)}</text>
+      </g>
       <text x={pad.l+2} y={H-3} fill="rgba(255,255,255,0.25)" fontSize="8" fontFamily="system-ui">{fmtDate(points[0].date)}</text>
       <text x={W-pad.r-2} y={H-3} fill="rgba(255,255,255,0.25)" fontSize="8" fontFamily="system-ui" textAnchor="end">{fmtDate(points[points.length-1].date)}</text>
     </svg>
@@ -102,7 +137,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
 
   useEffect(() => {
     if (!id) return;
-    fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}:v2`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
+    fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}:v3`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
   }, [id, chartPeriod]);
 
   const song = data ?? fetched;

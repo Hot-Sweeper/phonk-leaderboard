@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
 import { fetchPlatformStats, parseSpotifyUrl, fetchSpotifyArtist } from "@/lib/platforms";
 import { hydrateArtistNow } from "@/lib/update-runner";
+import { getArtistAudienceScore } from "@/lib/legal-rankings";
 
 // Server-side in-memory cache for artist list
 type ArtistCacheEntry = {
@@ -12,14 +13,109 @@ type ArtistCacheEntry = {
 };
 const artistListCache = new Map<string, ArtistCacheEntry>();
 const ARTIST_CACHE_TTL = 120_000; // 2 minutes
+const legalArtistCache = new Map<string, { artists: Array<Record<string, unknown>>; timestamp: number }>();
 
 // GET artists with optional search + platform filter + pagination
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
   const platform = searchParams.get("platform")?.toUpperCase();
+  const rankingModel = searchParams.get("rankingModel") === "legal" ? "legal" : "standard";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "50", 10) || 50, 100);
+
+  if (rankingModel === "legal") {
+    const cacheKey = `legal:${q ?? ""}`;
+    const now = Date.now();
+    const cached = legalArtistCache.get(cacheKey);
+
+    let fullList: Array<Record<string, unknown>>;
+
+    if (cached && now - cached.timestamp < ARTIST_CACHE_TTL) {
+      fullList = cached.artists;
+    } else {
+      const artists = await prisma.artist.findMany({
+        include: {
+          links: { orderBy: { platform: "asc" } },
+          tracks: {
+            select: {
+              id: true,
+              artistId: true,
+              name: true,
+              albumName: true,
+              popularity: true,
+              previewUrl: true,
+              durationMs: true,
+              releaseDate: true,
+              featuredArtists: true,
+              contributorIds: true,
+            },
+          },
+        },
+      });
+
+      const maxYoutubeSubscribers = Math.max(
+        1,
+        ...artists.map((artist) => artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0)
+      );
+      const maxWatchlistCount = Math.max(1, ...artists.map((artist) => artist.watchlistCount));
+
+      fullList = artists.map((artist) => {
+        const youtubeSubscribers = artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
+        const score = getArtistAudienceScore({
+          watchlistCount: artist.watchlistCount,
+          youtubeSubscribers,
+          tracks: artist.tracks,
+          maxYoutubeSubscribers,
+          maxWatchlistCount,
+        });
+
+        return {
+          id: artist.id,
+          name: artist.name,
+          imageUrl: artist.imageUrl,
+          watchlistCount: artist.watchlistCount,
+          createdAt: artist.createdAt,
+          links: artist.links,
+          audienceScore: score.audienceScore,
+        };
+      });
+
+      fullList.sort((a, b) => {
+        const scoreDelta = Number((b.audienceScore as number | undefined) ?? 0) - Number((a.audienceScore as number | undefined) ?? 0);
+        if (scoreDelta !== 0) return scoreDelta;
+        const watchlistDelta = Number((b.watchlistCount as number | undefined) ?? 0) - Number((a.watchlistCount as number | undefined) ?? 0);
+        if (watchlistDelta !== 0) return watchlistDelta;
+        return String(a.name ?? "").localeCompare(String(b.name ?? ""));
+      });
+
+      legalArtistCache.set(cacheKey, { artists: fullList, timestamp: now });
+    }
+
+    const globalRankMap = new Map<string, number>();
+    fullList.forEach((artist, index) => globalRankMap.set(String(artist.id), index + 1));
+
+    const filtered = q
+      ? fullList.filter((artist) => {
+          const lowerQ = q.toLowerCase();
+          if (String(artist.name ?? "").toLowerCase().includes(lowerQ)) return true;
+          const links = (artist.links as Array<{ handle: string | null }> | undefined) ?? [];
+          return links.some((link) => link.handle?.toLowerCase().includes(lowerQ));
+        })
+      : fullList;
+
+    return NextResponse.json(
+      {
+        artists: filtered.slice(skip, skip + take).map((artist) => ({ ...artist, globalRank: globalRankMap.get(String(artist.id)) ?? 0 })),
+        totalCount: filtered.length,
+      },
+      {
+        headers: {
+          "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
+        },
+      }
+    );
+  }
 
   const metricForArtist = (artist: ArtistCacheEntry["artists"][number], plat?: string) => {
     if (plat === "YOUTUBE") return artist.links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;

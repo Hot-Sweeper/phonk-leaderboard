@@ -34,6 +34,7 @@ function formatCount(n: number): string {
 }
 
 const PAGE_SIZE = 100;
+const SONG_BUBBLE_CACHE_VERSION = "v4";
 
 const ARTIST_METRICS = [
   { key: "listeners", label: "Monthly Listeners" },
@@ -52,9 +53,10 @@ interface BubbleViewProps {
   searchQuery?: string;
   collapseVersions?: boolean;
   sortOrder?: "desc" | "abs" | "asc";
+  rankingModel?: "standard" | "legal";
 }
 
-export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc" }: BubbleViewProps) {
+export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc", rankingModel = "standard" }: BubbleViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +109,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         sort: sortOrder,
         valueMode: mode === "relative" ? "relative" : "absolute",
       });
+      if (rankingModel === "legal") params.set("rankingModel", "legal");
       fetch(`/api/songs?${params.toString()}`)
         .then(r => r.json())
         .then((data: { tracks?: Array<{ rank?: number }> }) => {
@@ -127,12 +130,13 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
           const skip = p * PAGE_SIZE;
           const params = new URLSearchParams({
             period,
-            metric,
+            metric: rankingModel === "legal" ? "audience" : metric,
             mode,
             sort: sortOrder,
             skip: String(skip),
             take: String(PAGE_SIZE),
           });
+          if (rankingModel === "legal") params.set("rankingModel", "legal");
           const url = `/api/artists/changes?${params.toString()}`;
           const data = await fetch(url).then(r => r.json()).catch(() => null);
           if (!data) continue;
@@ -170,12 +174,13 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     if (entity === "artists") {
       const params = new URLSearchParams({
         period,
-        metric,
+        metric: rankingModel === "legal" ? "audience" : metric,
         mode,
         sort: sortOrder,
         skip: String(skip),
         take: String(PAGE_SIZE),
       });
+      if (rankingModel === "legal") params.set("rankingModel", "legal");
       const url = `/api/artists/changes?${params.toString()}`;
       fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changeValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
         `rank:bubbles:artists:${period}:${metric}:${mode}:${sortOrder}:${skip}`,
@@ -210,18 +215,21 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         sort: sortOrder,
         valueMode: mode === "relative" ? "relative" : "absolute",
       });
+      if (rankingModel === "legal") params.set("rankingModel", "legal");
       const url = `/api/songs?${params.toString()}`;
-      fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }>; totalCount?: number }>(
-        `rank:bubbles:songs:${sMode}:${mode}:${sortOrder}:${collapseVersions}:${skip}`,
+      fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean; audienceScore?: number }>; totalCount?: number }>(
+        `rank:bubbles:songs:${SONG_BUBBLE_CACHE_VERSION}:${rankingModel}:${sMode}:${mode}:${sortOrder}:${collapseVersions}:${skip}`,
         url,
         45_000
       )
         .then((data) => {
-          const tracks = (data.tracks ?? []).map((t: { id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean }, idx: number) => ({
+          const tracks = (data.tracks ?? []).map((t: { id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean; audienceScore?: number }, idx: number) => ({
             id: t.id,
             name: t.name,
             imageUrl: t.albumImageUrl,
-            value: sMode === "popularity" ? t.popularity : Math.abs(mode === "relative" ? t.trendPercent : t.metricValue),
+            value: rankingModel === "legal"
+              ? (sMode === "popularity" ? (t.audienceScore ?? t.metricValue) : t.metricValue)
+              : (sMode === "popularity" ? t.popularity : Math.abs(mode === "relative" ? t.trendPercent : t.metricValue)),
             changeValue: t.metricValue,
             changePercent: t.trendPercent,
             hasData: t.hasTrendData,
@@ -234,7 +242,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         .catch(() => {})
         .finally(() => setLoading(false));
     }
-  }, [entity, page, period, metric, mode, songMode, collapseVersions, sortOrder]);
+  }, [entity, page, period, metric, mode, songMode, collapseVersions, sortOrder, rankingModel]);
 
   // Build bubbles from items
   useEffect(() => {
@@ -636,9 +644,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
   }, [handleClick, handleMouseUp]);
 
   const metricLabel = entity === "artists"
-    ? (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase()
+    ? (rankingModel === "legal" ? "audience score" : (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase())
     : songMode === "popularity"
-      ? "popularity"
+      ? (rankingModel === "legal" ? "audience score" : "popularity")
+      : rankingModel === "legal"
+        ? "hype score"
       : mode === "relative"
         ? `${songMode ?? "trend"} % change`
         : mode === "absolute"

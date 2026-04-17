@@ -23,6 +23,8 @@ import {
 type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
 type LeaderboardMode = "popularity" | "day" | "week" | "month";
+type RankingModel = "standard" | "legal";
+const SONG_RANKINGS_CACHE_VERSION = "v4";
 
 type Track = {
   id: string;
@@ -41,6 +43,8 @@ type Track = {
   previewUrl: string | null;
   bpm: number | null;
   gain: number | null;
+  audienceScore?: number;
+  isEmergingHype?: boolean;
   rank: number;
   versions: string[];
   primaryVersion: string;
@@ -134,7 +138,25 @@ function hasVisibleTrendMetric(track: Track, mode: LeaderboardMode) {
   return track.hasTrendData || isFreshTrendEntry(track, mode);
 }
 
-function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+function isLegalHypeMode(mode: LeaderboardMode, rankingModel: RankingModel) {
+  return rankingModel === "legal" && mode !== "popularity";
+}
+
+function getLegalHypeSubtext(track: Track) {
+  if (track.isEmergingHype) return "Early breakout";
+  if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Waiting for history";
+  const delta = formatTrendDelta(track.trendDelta);
+  const percent = formatTrendPercent(track.trendPercent);
+  return `${delta} • ${percent}`;
+}
+
+function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
+  if (rankingModel === "legal") {
+    if (mode === "day") return "24H Hype";
+    if (mode === "week") return "7D Hype";
+    if (mode === "month") return "30D Hype";
+    return "Audience";
+  }
   switch (mode) {
     case "day": return valueMode === "relative" ? "24H %" : "24H Hype";
     case "week": return valueMode === "relative" ? "7D %" : "7D Hype";
@@ -143,14 +165,24 @@ function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "re
   }
 }
 
-function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
+  if (rankingModel === "legal") {
+    if (mode === "popularity") return formatPopularity(track.audienceScore ?? track.metricValue);
+    if (track.isEmergingHype) return formatPopularity(track.metricValue);
+    if (!track.hasTrendData) return "--";
+    return formatPopularity(track.metricValue);
+  }
   if (mode === "popularity") return formatPopularity(track.popularity);
   if (isFreshTrendEntry(track, mode)) return valueMode === "relative" ? "--" : formatTrendDelta(track.metricValue);
   if (!track.hasTrendData) return "--";
   return valueMode === "relative" ? formatTrendPercent(track.trendPercent) : formatTrendDelta(track.metricValue);
 }
 
-function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
+  if (rankingModel === "legal") {
+    if (mode === "popularity") return "Stored-only score";
+    return getLegalHypeSubtext(track);
+  }
   if (mode === "popularity") return null;
   if (valueMode === "relative") {
     if (isFreshTrendEntry(track, mode)) return formatTrendDelta(track.metricValue);
@@ -160,7 +192,13 @@ function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absol
   return getTrendSubtext(track, mode);
 }
 
-function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
+  if (rankingModel === "legal") {
+    if (mode === "popularity") return "text-emerald-300";
+    if (track.isEmergingHype) return "text-fuchsia-300";
+    if (!track.hasTrendData) return "text-[var(--muted-foreground)]";
+    return "text-cyan-300";
+  }
   if (mode === "popularity") return popularityColor(track.popularity);
   if (isFreshTrendEntry(track, mode)) return "text-amber-300";
   if (!track.hasTrendData) return "text-[var(--muted-foreground)]";
@@ -170,7 +208,13 @@ function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "abs
   return "text-[var(--muted-foreground)]";
 }
 
-function getMetricBarClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative") {
+function getMetricBarClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
+  if (rankingModel === "legal") {
+    if (mode === "popularity") return "bg-emerald-500";
+    if (track.isEmergingHype) return "bg-fuchsia-500";
+    if (!track.hasTrendData || track.metricValue === 0) return "bg-zinc-600";
+    return "bg-cyan-500";
+  }
   if (mode === "popularity") return popularityBar(track.popularity);
   if (isFreshTrendEntry(track, mode)) return "bg-amber-400";
   const displayValue = valueMode === "relative" ? track.trendPercent : track.metricValue;
@@ -237,8 +281,8 @@ function SongsSkeleton() {
   );
 }
 
-function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenArtist }: {
-  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, url: string, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenArtist: (id: string) => void;
+function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenArtist, rankingModel }: {
+  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, url: string, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenArtist: (id: string) => void; rankingModel: RankingModel;
 }) {
   const isFirst = rank === 1;
   const artists = getTrackArtists(track);
@@ -396,12 +440,12 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
                   </button>
               )}
               <span className={`font-black ${theme.scoreSize} tracking-tighter`} style={{ color: `rgb(${theme.accentHex})`, textShadow: `0 0 25px rgba(${theme.accentHex}, 0.4)` }}>
-                    {getMetricText(track, mode, valueMode)}
+                {getMetricText(track, mode, valueMode, rankingModel)}
               </span>
-                {mode !== "popularity" && (
-                  <span className="text-[8px] md:text-[9px] text-white/50 uppercase font-bold tracking-widest">
-                      {getMetricSubtext(track, mode, valueMode)}
-                  </span>
+              {(mode !== "popularity" || rankingModel === "legal") && (
+                <span className="text-[8px] md:text-[9px] text-white/50 uppercase font-bold tracking-widest">
+                  {getMetricSubtext(track, mode, valueMode, rankingModel)}
+                </span>
               )}
           </div>
         </div>
@@ -416,9 +460,10 @@ interface SongListViewProps {
   collapseVersions: boolean;
   sortOrder?: "desc" | "asc" | "abs";
   valueMode?: "absolute" | "relative";
+  rankingModel?: RankingModel;
 }
 
-export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute" }: SongListViewProps) {
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "standard" }: SongListViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -437,6 +482,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   const prevMode = useRef(mode);
   const prevSearch = useRef(search);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const requestSeqRef = useRef(0);
 
   const stopCurrentAudio = useCallback(() => {
     if (!audioRef.current) return;
@@ -446,7 +492,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     setPlayingTrackId(null);
     if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
     document.documentElement.style.setProperty('--amplitude', '0');
-  }, []);
+  }, [rankingModel]);
 
   // Sync search prop with debounce
   useEffect(() => {
@@ -456,27 +502,32 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   }, [search]);
 
   const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode, trendSortOrder: "desc" | "asc" | "abs", trendValueMode: "absolute" | "relative") => {
+    const requestId = ++requestSeqRef.current;
+
     if (append) {
       setLoadingMore(true);
       try {
         const params = new URLSearchParams({ skip: String(skip), take: "50" });
         if (searchQuery) params.set("search", searchQuery);
+        if (rankingModel === "legal") params.set("rankingModel", "legal");
         params.set("collapseVersions", groupedVersions ? "true" : "false");
         params.set("mode", trackMode);
         params.set("sort", trendSortOrder);
         params.set("valueMode", trendValueMode);
         const qs = params.toString();
         const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
-          `rank:songs:more:${qs}`,
+          `rank:songs:more:${SONG_RANKINGS_CACHE_VERSION}:${qs}`,
           `/api/songs?${qs}`,
           300_000
         ).catch(() => null);
-        if (data) {
+        if (data && requestSeqRef.current === requestId) {
           setTracks(prev => [...prev, ...data.tracks]);
           setTotalCount(data.totalCount);
         }
       } finally {
-        setLoadingMore(false);
+        if (requestSeqRef.current === requestId) {
+          setLoadingMore(false);
+        }
       }
       return;
     }
@@ -487,41 +538,49 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     try {
       const podiumParams = new URLSearchParams({ skip: "0", take: "3" });
       if (searchQuery) podiumParams.set("search", searchQuery);
+      if (rankingModel === "legal") podiumParams.set("rankingModel", "legal");
       podiumParams.set("collapseVersions", groupedVersions ? "true" : "false");
       podiumParams.set("mode", trackMode);
       podiumParams.set("sort", trendSortOrder);
       podiumParams.set("valueMode", trendValueMode);
       const podiumQs = podiumParams.toString();
       const podiumData = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
-        `rank:songs:podium:${podiumQs}`,
+        `rank:songs:podium:${SONG_RANKINGS_CACHE_VERSION}:${podiumQs}`,
         `/api/songs?${podiumQs}`,
         300_000
       ).catch(() => null);
-      if (podiumData) {
+      if (podiumData && requestSeqRef.current === requestId) {
         setTracks(podiumData.tracks);
         setTotalCount(podiumData.totalCount);
       }
+      if (requestSeqRef.current !== requestId) {
+        return;
+      }
+
       setLoadingPodium(false);
 
       const params = new URLSearchParams({ skip: "0", take: "50" });
       if (searchQuery) params.set("search", searchQuery);
+      if (rankingModel === "legal") params.set("rankingModel", "legal");
       params.set("collapseVersions", groupedVersions ? "true" : "false");
       params.set("mode", trackMode);
       params.set("sort", trendSortOrder);
       params.set("valueMode", trendValueMode);
       const qs = params.toString();
       const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
-        `rank:songs:list:${qs}`,
+        `rank:songs:list:${SONG_RANKINGS_CACHE_VERSION}:${qs}`,
         `/api/songs?${qs}`,
         300_000
       ).catch(() => null);
-      if (data) {
+      if (data && requestSeqRef.current === requestId) {
         setTracks(data.tracks);
         setTotalCount(data.totalCount);
       }
     } finally {
-      setLoadingPodium(false);
-      setLoadingList(false);
+      if (requestSeqRef.current === requestId) {
+        setLoadingPodium(false);
+        setLoadingList(false);
+      }
     }
   }, []);
 
@@ -631,7 +690,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   const podiumTracks = showPodium ? tracks.slice(0, 3) : [];
   const tableTracks = showPodium ? tracks.slice(3) : tracks;
   const hasTrendData = tracks.some((t) => t.hasTrendData);
-  const maxTrendMetric = tracks.reduce((max, t) => Math.max(max, Math.abs(valueMode === "relative" ? t.trendPercent : t.metricValue)), 0);
+  const maxTrendMetric = tracks.reduce((max, t) => {
+    const legalMetric = mode === "popularity" ? (t.audienceScore ?? t.metricValue) : t.metricValue;
+    return Math.max(max, Math.abs(rankingModel === "legal" ? legalMetric : (valueMode === "relative" ? t.trendPercent : t.metricValue)));
+  }, 0);
 
   if (loadingPodium) return <SongsSkeleton />;
 
@@ -642,16 +704,18 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       {/* Podium */}
       {podiumTracks.length === 3 && (
         <div className="flex flex-row items-end justify-center h-[560px] md:h-[660px] gap-2 md:gap-5 mb-16 px-2 md:px-0">
-          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
-          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
-          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} />
+          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
         </div>
       )}
 
       {/* Trend notice */}
       {mode !== "popularity" && !hasTrendData && tracks.length > 0 && (
         <div className="mb-6 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/50 px-4 py-3 text-sm text-[var(--muted-foreground)]">
-          Hype rankings need at least two song snapshots across the selected period. The data will start filling in after song updates keep running.
+          {rankingModel === "legal"
+            ? "Legal hype score needs at least two stored song snapshots across the selected period. It will fill in as updates keep running."
+            : "Hype rankings need at least two song snapshots across the selected period. The data will start filling in after song updates keep running."}
         </div>
       )}
 
@@ -679,7 +743,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         <span className="hidden lg:block">Version</span>
         <span className="hidden lg:block text-right">Released</span>
         <span className="hidden lg:block text-right"><Clock className="w-3 h-3 inline" /></span>
-        <span className="text-right">{getMetricHeaderLabel(mode, valueMode)}</span>
+        <span className="text-right">{getMetricHeaderLabel(mode, valueMode, rankingModel)}</span>
         <span />
       </div>
 
@@ -710,9 +774,13 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
               hasTrendData: track.hasTrendData || isFreshTrendEntry(track, mode),
               showCollectingData: mode === "popularity",
             });
-            const metricBarWidth = mode === "popularity"
-              ? normalizePopularity(track.popularity)
-              : maxTrendMetric > 0 && hasVisibleTrendMetric(track, mode) ? Math.max(8, (Math.abs(valueMode === "relative" ? track.trendPercent : track.metricValue) / maxTrendMetric) * 100) : 0;
+            const metricBarWidth = rankingModel === "legal"
+              ? maxTrendMetric > 0
+                ? Math.max(8, ((((mode === "popularity" ? (track.audienceScore ?? track.metricValue) : track.metricValue)) / maxTrendMetric) * 100))
+                : 0
+              : mode === "popularity"
+                ? normalizePopularity(track.popularity)
+                : maxTrendMetric > 0 && hasVisibleTrendMetric(track, mode) ? Math.max(8, (Math.abs(valueMode === "relative" ? track.trendPercent : track.metricValue) / maxTrendMetric) * 100) : 0;
 
             return (
               <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1.25fr)_6rem_6.5rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
@@ -768,10 +836,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
                 {/* Metric */}
                 <div className="flex flex-col items-end gap-0.5">
-                  <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, mode, valueMode)}`}>{getMetricText(track, mode, valueMode)}</span>
-                  {mode !== "popularity" && <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{getMetricSubtext(track, mode, valueMode)}</span>}
+                  <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, mode, valueMode, rankingModel)}`}>{getMetricText(track, mode, valueMode, rankingModel)}</span>
+                  {(mode !== "popularity" || rankingModel === "legal") && <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{getMetricSubtext(track, mode, valueMode, rankingModel)}</span>}
                   <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
-                    <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode)}`} style={{ width: `${metricBarWidth}%` }} />
+                    <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode, rankingModel)}`} style={{ width: `${metricBarWidth}%` }} />
                   </div>
                 </div>
 

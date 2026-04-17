@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getArtistAudienceScore } from "@/lib/legal-rankings";
 
 const PERIODS: Record<string, number> = {
   day: 24 * 60 * 60 * 1000,
@@ -10,11 +11,11 @@ const PERIODS: Record<string, number> = {
 
 const PERIOD_ORDER = ["day", "week", "month", "year"];
 
-type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram";
+type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram" | "audience";
 type SortOrder = "desc" | "abs" | "asc";
 type DisplayMode = "current" | "relative" | "absolute";
 
-const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram"];
+const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram", "audience"];
 
 // Server-side in-memory cache — cleared on deploy/restart
 const routeCache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -30,6 +31,7 @@ function getMetricFromSnapshot(
     case "youtube": return snapshot.youtubeSubscribers;
     case "tiktok": return snapshot.tiktokFollowers;
     case "instagram": return snapshot.instagramFollowers;
+    case "audience": return 0;
   }
 }
 
@@ -43,6 +45,7 @@ function getMetricFromLinks(
     case "youtube": return links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
     case "tiktok": return links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
     case "instagram": return links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
+    case "audience": return 0;
   }
 }
 
@@ -78,11 +81,87 @@ export async function GET(req: Request) {
   const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
   const mode = getDisplayMode(searchParams.get("mode"));
   const sort = getSortOrder(searchParams.get("sort"));
+  const rankingModel = searchParams.get("rankingModel") === "legal" ? "legal" : "standard";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "100", 10) || 100, 200);
 
   if (!METRIC_KEYS.includes(metric)) {
     return NextResponse.json({ error: "Invalid metric" }, { status: 400 });
+  }
+
+  if (rankingModel === "legal") {
+    const cacheKey = `legal:${mode}:${sort}`;
+    const cached = routeCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      const full = cached.data as { artists: unknown[]; totalCount: number; availablePeriods: string[]; period: string; metric: string; mode: string };
+      return NextResponse.json(
+        { ...full, artists: full.artists.slice(skip, skip + take) },
+        { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300", "X-Cache": "HIT" } }
+      );
+    }
+
+    const artists = await prisma.artist.findMany({
+      include: {
+        links: {
+          select: { platform: true, monthlyListeners: true, followerCount: true },
+        },
+        tracks: {
+          select: {
+            id: true,
+            artistId: true,
+            name: true,
+            albumName: true,
+            popularity: true,
+            previewUrl: true,
+            durationMs: true,
+            releaseDate: true,
+            featuredArtists: true,
+            contributorIds: true,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+
+    const maxYoutubeSubscribers = Math.max(
+      1,
+      ...artists.map((artist) => artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0)
+    );
+    const maxWatchlistCount = Math.max(1, ...artists.map((artist) => artist.watchlistCount));
+
+    const result = artists.map((artist) => {
+      const youtubeSubscribers = artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
+      const score = getArtistAudienceScore({
+        watchlistCount: artist.watchlistCount,
+        youtubeSubscribers,
+        tracks: artist.tracks,
+        maxYoutubeSubscribers,
+        maxWatchlistCount,
+      });
+
+      return {
+        id: artist.id,
+        name: artist.name,
+        imageUrl: artist.imageUrl,
+        createdAt: artist.createdAt,
+        watchlistCount: artist.watchlistCount,
+        currentValue: score.audienceScore,
+        changeValue: 0,
+        changePercent: 0,
+        hasData: false,
+        metric: "audience score",
+      };
+    });
+
+    result.sort((a, b) => b.currentValue - a.currentValue || b.watchlistCount - a.watchlistCount || a.name.localeCompare(b.name));
+
+    const payload = { artists: result, totalCount: result.length, availablePeriods: [], period, metric: "audience", mode: "current" };
+    routeCache.set(cacheKey, { data: payload, expiresAt: Date.now() + CACHE_TTL_MS });
+
+    return NextResponse.json(
+      { ...payload, artists: result.slice(skip, skip + take) },
+      { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } }
+    );
   }
 
   const periodMs = PERIODS[period];
