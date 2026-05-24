@@ -279,7 +279,6 @@ export async function GET(req: Request) {
         try {
           oldSnapshots = await prisma.trackSnapshot.findMany({
             where: {
-              trackId: { in: allTracks.map((track) => track.id) },
               createdAt: { lte: cutoff },
               popularity: { gt: 0 },
             },
@@ -385,7 +384,6 @@ export async function GET(req: Request) {
         try {
           oldSnapshots = await prisma.trackSnapshot.findMany({
             where: {
-              trackId: { in: allTracks.map((track) => track.id) },
               createdAt: { lte: cutoff },
               popularity: { gt: 0 },
             },

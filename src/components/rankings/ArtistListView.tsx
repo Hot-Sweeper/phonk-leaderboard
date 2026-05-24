@@ -577,6 +577,7 @@ interface ArtistListViewProps {
   period?: string;
   changeSortOrder?: "desc" | "asc" | "abs";
   rankingModel?: RankingModel;
+  active?: boolean;
 }
 
 type AllChanges = {
@@ -611,7 +612,7 @@ function formatSignedCount(n: number): string {
   return `${prefix}${formatCount(Math.abs(n))}`;
 }
 
-export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc", rankingModel = "standard" }: ArtistListViewProps) {
+export default function ArtistListView({ platform, search, sortMode = "current", period = "day", changeSortOrder = "desc", rankingModel = "standard", active = true }: ArtistListViewProps) {
   const { data: session } = useSession();
   const { openArtist } = useDetailPanel();
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -761,18 +762,21 @@ export default function ArtistListView({ platform, search, sortMode = "current",
 
   // Initial load
   useEffect(() => {
+    if (!active) return;
     loadArtists();
     loadWatchlist();
     loadRankChanges();
-  }, [loadArtists, loadWatchlist, loadRankChanges]);
+  }, [active, loadArtists, loadWatchlist, loadRankChanges]);
 
   // Load change data when change mode is active or params change
   useEffect(() => {
+    if (!active) return;
     if (isTrendMode) loadChangeArtists(platform, period, sortMode);
-  }, [isTrendMode, platform, period, loadChangeArtists, sortMode]);
+  }, [active, isTrendMode, platform, period, loadChangeArtists, sortMode]);
 
   // React to prop changes
   useEffect(() => {
+    if (!active) return;
     if (search !== prevSearchRef.current || platform !== prevPlatformRef.current) {
       prevSearchRef.current = search;
       prevPlatformRef.current = platform;
@@ -780,7 +784,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
       setLoadingList(true);
       loadArtists(search, platform);
     }
-  }, [search, platform, loadArtists]);
+  }, [active, search, platform, loadArtists]);
 
   // YouTube channel search for link modal
   useEffect(() => {
@@ -818,6 +822,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
 
   // Auto-load more when sentinel is visible
   useEffect(() => {
+    if (!active) return;
     const el = sentinelRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
@@ -826,7 +831,7 @@ export default function ArtistListView({ platform, search, sortMode = "current",
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [artists.length, totalCount, loadingMore, loadingList, loadMore]);
+  }, [active, artists.length, totalCount, loadingMore, loadingList, loadMore]);
 
   function openLinkModal(artistId: string, artistName: string, plat: string) {
     setLinkModalArtistId(artistId);

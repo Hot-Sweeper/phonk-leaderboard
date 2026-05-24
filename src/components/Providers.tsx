@@ -4,7 +4,7 @@ import { DetailPanelProvider } from "@/lib/detail-panel";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   return (
-    <SessionProvider>
+    <SessionProvider refetchOnWindowFocus={false}>
       <DetailPanelProvider>{children}</DetailPanelProvider>
     </SessionProvider>
   );

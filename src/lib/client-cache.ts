@@ -3,6 +3,8 @@ type CacheEntry<T> = {
   data: T;
 };
 
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
 function safeRead<T>(key: string): CacheEntry<T> | null {
   try {
     const raw = localStorage.getItem(key);
@@ -40,11 +42,28 @@ export async function fetchJsonWithSessionCache<T>(
     return entry.data;
   }
 
-  const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`);
-  const data = (await res.json()) as T;
-  safeWrite<T>(key, { data, expiresAt: Date.now() + ttlMs });
-  return data;
+  const inFlight = inFlightRequests.get(key);
+  if (inFlight) {
+    return inFlight as Promise<T>;
+  }
+
+  const request = (async () => {
+    const res = await fetch(url, init);
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    const data = (await res.json()) as T;
+    safeWrite<T>(key, { data, expiresAt: Date.now() + ttlMs });
+    return data;
+  })();
+
+  inFlightRequests.set(key, request);
+
+  try {
+    return await request;
+  } finally {
+    if (inFlightRequests.get(key) === request) {
+      inFlightRequests.delete(key);
+    }
+  }
 }
 
 export function clearSessionCacheByPrefix(prefix: string) {

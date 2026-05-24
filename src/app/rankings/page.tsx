@@ -200,7 +200,7 @@ function RankingsInner() {
 
   const isBubbles = viewMode === "bubbles";
   const isArtists = entity === "artists";
-  const [artistListMounted, setArtistListMounted] = useState(true);
+  const [artistListMounted, setArtistListMounted] = useState(entity === "artists" && viewMode === "list");
   const [songListMounted, setSongListMounted] = useState(entity === "songs" && viewMode === "list");
   const [artistBubblesMounted, setArtistBubblesMounted] = useState(entity === "artists" && viewMode === "bubbles");
   const [songBubblesMounted, setSongBubblesMounted] = useState(entity === "songs" && viewMode === "bubbles");
@@ -417,7 +417,7 @@ function RankingsInner() {
           {rankingModel === "legal" && (
             <div className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
               {isArtists
-                ? "Audience Score is driven mostly by stored song strength, with YouTube and internal signals only acting as light tie-breakers."
+                ? "Audience Score is driven mostly by top-song strength plus the average popularity across the full catalog, with YouTube and internal signals only acting as light tie-breakers."
                 : songMode === "popularity"
                   ? "Legal Audience ranks songs by stored track strength only."
                   : "Legal 24H Hype ranks songs by stored change over time, rewards early breakouts, and decays hype as songs age."}
@@ -439,6 +439,7 @@ function RankingsInner() {
               searchQuery={debouncedSearch}
               sortOrder={changeSortOrder}
               rankingModel={rankingModel}
+              active={isBubbles && isArtists}
             />
           </div>
         )}
@@ -454,6 +455,7 @@ function RankingsInner() {
               collapseVersions={collapseVersions}
               sortOrder={changeSortOrder}
               rankingModel={rankingModel}
+              active={isBubbles && !isArtists}
             />
           </div>
         )}
@@ -463,12 +465,12 @@ function RankingsInner() {
         <div className="px-6 pb-12">
           {artistListMounted && (
             <div className={!isArtists ? "hidden" : ""}>
-              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode} period={period} changeSortOrder={changeSortOrder} rankingModel={rankingModel} />
+              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode} period={period} changeSortOrder={changeSortOrder} rankingModel={rankingModel} active={!isBubbles && isArtists} />
             </div>
           )}
           {songListMounted && (
             <div className={isArtists ? "hidden" : ""}>
-              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} valueMode={bubbleMode === "relative" ? "relative" : "absolute"} rankingModel={rankingModel} />
+              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} valueMode={bubbleMode === "relative" ? "relative" : "absolute"} rankingModel={rankingModel} active={!isBubbles && !isArtists} />
             </div>
           )}
         </div>

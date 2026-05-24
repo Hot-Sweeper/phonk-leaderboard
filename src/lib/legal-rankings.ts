@@ -178,6 +178,9 @@ export function getEmergingTrackHypeScore(track: Pick<ArtistTrackInput, "popular
 
 export function getArtistAudienceScore(input: ArtistScoreInput) {
   const dedupedTracks = dedupeArtistTracks(input.tracks);
+  const catalogPopularityScore = average(
+    dedupedTracks.map((track) => normalizePopularityForScore(track.popularity))
+  );
   const trackScores = dedupedTracks
     .map((track) => getTrackAudienceScore(track))
     .sort((left, right) => right - left);
@@ -198,16 +201,18 @@ export function getArtistAudienceScore(input: ArtistScoreInput) {
   const watchlistScore = normalizeLog(input.watchlistCount, input.maxWatchlistCount);
 
   const audienceScore = Math.round(
-    topTracksScore * 0.82 +
-    depthScore * 0.12 +
-    releaseScore * 0.03 +
-    youtubeScore * 0.02 +
-    watchlistScore * 0.01
+    topTracksScore * 0.5 +
+    catalogPopularityScore * 0.3 +
+    depthScore * 0.1 +
+    releaseScore * 0.04 +
+    youtubeScore * 0.04 +
+    watchlistScore * 0.02
   );
 
   return {
     audienceScore,
     topTracksScore: Math.round(topTracksScore),
+    catalogPopularityScore: Math.round(catalogPopularityScore),
     depthScore: Math.round(depthScore),
     releaseScore: Math.round(releaseScore),
     youtubeScore: Math.round(youtubeScore),

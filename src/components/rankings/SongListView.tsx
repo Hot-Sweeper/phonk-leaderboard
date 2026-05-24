@@ -461,9 +461,10 @@ interface SongListViewProps {
   sortOrder?: "desc" | "asc" | "abs";
   valueMode?: "absolute" | "relative";
   rankingModel?: RankingModel;
+  active?: boolean;
 }
 
-export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "standard" }: SongListViewProps) {
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "standard", active = true }: SongListViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -586,8 +587,9 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
   // Reload when mode/search/collapse/sortOrder changes
   useEffect(() => {
+    if (!active) return;
     fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder, valueMode);
-  }, [collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder, valueMode]);
+  }, [active, collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder, valueMode]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -606,6 +608,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
   // Auto-load more when sentinel is visible
   useEffect(() => {
+    if (!active) return;
     const el = sentinelRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
@@ -614,7 +617,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [tracks.length, totalCount, loadingMore, loadingList]);
+  }, [active, tracks.length, totalCount, loadingMore, loadingList]);
 
   async function togglePreview(trackId: string, previewUrl: string, deezerId?: string | null) {
     if (playingTrackId === trackId) { stopCurrentAudio(); return; }

@@ -1,6 +1,9 @@
 export async function register() {
   // Only run the scheduler on the Node.js server runtime, not in edge or build
-  if (process.env.NEXT_RUNTIME === "nodejs") {
+  const shouldRunScheduler = process.env.NEXT_RUNTIME === "nodejs"
+    && (process.env.NODE_ENV === "production" || process.env.ENABLE_LOCAL_SCHEDULER === "true");
+
+  if (shouldRunScheduler) {
     const { checkAndRunScheduledUpdate } = await import("./lib/update-runner");
 
     let running = false;

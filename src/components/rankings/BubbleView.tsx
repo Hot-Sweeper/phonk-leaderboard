@@ -54,9 +54,10 @@ interface BubbleViewProps {
   collapseVersions?: boolean;
   sortOrder?: "desc" | "abs" | "asc";
   rankingModel?: "standard" | "legal";
+  active?: boolean;
 }
 
-export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc", rankingModel = "standard" }: BubbleViewProps) {
+export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc", rankingModel = "standard", active = true }: BubbleViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -79,6 +80,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
 
   // Search query: highlight matching bubbles and auto-jump to correct page
   useEffect(() => {
+    if (!active) return;
     if (!searchQuery?.trim()) {
       searchMatchIdsRef.current = new Set();
       setSearchStatus(null);
@@ -151,10 +153,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
       scan();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, items]);
+  }, [active, searchQuery, items]);
 
   // Load watchlist
   useEffect(() => {
+    if (!active) return;
     if (entity !== "artists") return;
     const loadWatchlist = () => {
       fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 30_000)
@@ -164,10 +167,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     loadWatchlist();
     window.addEventListener("watchlist-changed", loadWatchlist);
     return () => window.removeEventListener("watchlist-changed", loadWatchlist);
-  }, [entity]);
+  }, [active, entity]);
 
   // Fetch data
   useEffect(() => {
+    if (!active) return;
     setLoading(true);
     const skip = page * PAGE_SIZE;
 
@@ -242,7 +246,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         .catch(() => {})
         .finally(() => setLoading(false));
     }
-  }, [entity, page, period, metric, mode, songMode, collapseVersions, sortOrder, rankingModel]);
+  }, [active, entity, page, period, metric, mode, songMode, collapseVersions, sortOrder, rankingModel]);
 
   // Build bubbles from items
   useEffect(() => {
