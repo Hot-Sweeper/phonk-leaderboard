@@ -430,6 +430,7 @@ async function refreshArtistCatalogInternal(
         const matchedSpotifyTrack = findMatchingSpotifyTrack(track, spotifyTrackLookup);
         const spotifyPopularity = matchedSpotifyTrack?.popularity ?? existingTrack?.spotifyPopularity ?? 0;
         const spotifyUrl = matchedSpotifyTrack?.spotifyUrl ?? existingTrack?.spotifyUrl;
+        const albumImageUrl = matchedSpotifyTrack?.album.imageUrl ?? track.album.imageUrl;
         const featured = dedupeNames(
           track.artists.filter((artistEntry) => artistEntry.deezerId !== deezerId).map((artistEntry) => artistEntry.name)
         );
@@ -447,7 +448,7 @@ async function refreshArtistCatalogInternal(
           update: {
             name: track.name,
             albumName: track.album.name,
-            albumImageUrl: track.album.imageUrl,
+            albumImageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
             popularity: getInternalTrackPopularity(
@@ -471,7 +472,7 @@ async function refreshArtistCatalogInternal(
             artistId: artist.id,
             name: track.name,
             albumName: track.album.name,
-            albumImageUrl: track.album.imageUrl,
+            albumImageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
             popularity: getInternalTrackPopularity(
