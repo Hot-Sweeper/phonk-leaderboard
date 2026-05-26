@@ -55,6 +55,23 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
   const title = track?.name ?? "Spotify player";
   const imageUrl = track?.albumImageUrl ?? null;
   const trackUri = toSpotifyTrackUri(track);
+  const hasMountedController = Boolean(controllerRef.current);
+
+  const clearLoadingTimeout = useCallback(() => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleLoadingSettle = useCallback(() => {
+    clearLoadingTimeout();
+    loadingTimeoutRef.current = setTimeout(() => {
+      loadingTimeoutRef.current = null;
+      const hasIframe = Boolean(containerRef.current?.querySelector("iframe"));
+      setState(controllerRef.current || hasIframe ? "ready" : "error");
+    }, 6500);
+  }, [clearLoadingTimeout]);
 
   const loadUriForPlayback = useCallback((uri: string) => {
     const controller = controllerRef.current;
@@ -62,6 +79,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       pendingUriRef.current = uri;
       pendingPlaybackUriRef.current = uri;
       setState("loading");
+      scheduleLoadingSettle();
       return false;
     }
 
@@ -70,10 +88,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
     lastRequestedUriRef.current = uri;
 
     try {
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
-      }
+      clearLoadingTimeout();
       controller.loadUri?.(uri);
       controller.play?.();
       setState("ready");
@@ -82,7 +97,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       setState("error");
       return false;
     }
-  }, []);
+  }, [clearLoadingTimeout, scheduleLoadingSettle]);
 
   const loadUriWithoutPlayback = useCallback((uri: string) => {
     const controller = controllerRef.current;
@@ -90,6 +105,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       pendingUriRef.current = uri;
       pendingPlaybackUriRef.current = null;
       setState("loading");
+      scheduleLoadingSettle();
       return;
     }
 
@@ -103,7 +119,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
     } catch {
       setState("error");
     }
-  }, []);
+  }, [scheduleLoadingSettle]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -162,6 +178,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       controllerRef.current = controller;
       controllerReadyRef.current = false;
       controller.addListener?.("ready", () => {
+        clearLoadingTimeout();
         controllerReadyRef.current = true;
         const pendingPlaybackUri = pendingPlaybackUriRef.current;
         if (pendingPlaybackUri) {
@@ -182,18 +199,12 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
         setState(nextUri ? "ready" : "idle");
       });
       controller.addListener?.("playback_started", () => {
-        if (loadingTimeoutRef.current) {
-          clearTimeout(loadingTimeoutRef.current);
-          loadingTimeoutRef.current = null;
-        }
+        clearLoadingTimeout();
         setState("ready");
       });
       controller.addListener?.("playback_update", (event: any) => {
         if (event?.data && event.data.isPaused === false && event.data.isBuffering === false) {
-          if (loadingTimeoutRef.current) {
-            clearTimeout(loadingTimeoutRef.current);
-            loadingTimeoutRef.current = null;
-          }
+          clearLoadingTimeout();
           setState("ready");
         }
       });
@@ -202,14 +213,11 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
     return () => {
       cancelled = true;
       controllerReadyRef.current = false;
-      if (loadingTimeoutRef.current) {
-        clearTimeout(loadingTimeoutRef.current);
-        loadingTimeoutRef.current = null;
-      }
+      clearLoadingTimeout();
       controllerRef.current?.destroy?.();
       controllerRef.current = null;
     };
-  }, [apiReady, loadUriForPlayback]);
+  }, [apiReady, clearLoadingTimeout, loadUriForPlayback]);
 
   useEffect(() => {
     registerDockPlaybackHandler((nextTrack) => {
@@ -226,12 +234,13 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       pendingUriRef.current = nextUri;
       pendingPlaybackUriRef.current = nextUri;
       setState("loading");
+      scheduleLoadingSettle();
     });
 
     return () => {
       registerDockPlaybackHandler(null);
     };
-  }, [loadUriForPlayback, registerDockPlaybackHandler]);
+  }, [loadUriForPlayback, registerDockPlaybackHandler, scheduleLoadingSettle]);
 
   useEffect(() => {
     if (!trackUri) {
@@ -249,6 +258,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
         pendingPlaybackUriRef.current = null;
       }
       setState("loading");
+      scheduleLoadingSettle();
       return;
     }
 
@@ -286,12 +296,20 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
               Click a song to load the docked Spotify player here.
             </div>
           )}
-          {trackUri && (state === "loading" || !apiReady) && (
+          {trackUri && (state === "loading" || !apiReady) && !hasMountedController && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-sm text-white/55">
               <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-2 text-xs font-semibold">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Starting Spotify player
               </div>
+            </div>
+          )}
+          {trackUri && state === "loading" && hasMountedController && (
+            <div className="pointer-events-none absolute right-3 top-3 rounded-full border border-white/10 bg-black/70 px-2.5 py-1 text-[10px] font-semibold text-white/60 shadow-lg">
+              <span className="inline-flex items-center gap-1.5">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Loading track
+              </span>
             </div>
           )}
           {trackUri && state === "error" && (
