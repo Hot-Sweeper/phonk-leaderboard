@@ -125,34 +125,34 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
     if (typeof window === "undefined") return;
 
     const win = window as Window & {
-      onSpotifyIframeApiReady?: (api: any) => void;
       __spotifyIframeApi?: any;
       __spotifyIframeScriptLoaded?: boolean;
     };
+
+    const handleReady = () => setApiReady(true);
 
     if (win.__spotifyIframeApi) {
       setApiReady(true);
       return;
     }
 
-    const scriptId = "spotify-iframe-api";
-    const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
-    const previousReady = win.onSpotifyIframeApiReady;
+    window.addEventListener("spotify-iframe-api-ready", handleReady);
 
-    win.onSpotifyIframeApiReady = (api: any) => {
-      win.__spotifyIframeApi = api;
-      win.__spotifyIframeScriptLoaded = true;
+    if (win.__spotifyIframeScriptLoaded) {
       setApiReady(true);
-      if (previousReady) previousReady(api);
-    };
+    }
 
-    if (!existing) {
+    if (!document.getElementById("spotify-iframe-api")) {
       const script = document.createElement("script");
-      script.id = scriptId;
+      script.id = "spotify-iframe-api";
       script.src = "https://open.spotify.com/embed/iframe-api/v1";
       script.async = true;
       document.body.appendChild(script);
     }
+
+    return () => {
+      window.removeEventListener("spotify-iframe-api-ready", handleReady);
+    };
   }, []);
 
   useEffect(() => {
@@ -187,8 +187,9 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
         }
 
         const nextUri = pendingUriRef.current;
-        if (nextUri && nextUri !== initialUri) {
+        if (nextUri && nextUri !== initialUri && nextUri !== lastRequestedUriRef.current) {
           try {
+            lastRequestedUriRef.current = nextUri;
             controller.loadUri?.(nextUri);
           } catch {
             setState("error");
@@ -196,7 +197,9 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
           }
         }
 
-        setState(nextUri ? "ready" : "idle");
+        pendingUriRef.current = null;
+
+        setState((lastRequestedUriRef.current ?? nextUri) ? "ready" : "idle");
       });
       controller.addListener?.("playback_started", () => {
         clearLoadingTimeout();

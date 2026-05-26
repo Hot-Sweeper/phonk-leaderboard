@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Providers from "@/components/Providers";
@@ -38,7 +39,23 @@ export default async function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <link rel="preconnect" href="https://open.spotify.com" />
+        <link rel="preconnect" href="https://i.scdn.co" crossOrigin="" />
+      </head>
       <body className="h-full bg-[var(--background)]">
+        <Script id="spotify-iframe-api-bootstrap" strategy="beforeInteractive">
+          {`window.onSpotifyIframeApiReady = function(api) {
+  window.__spotifyIframeApi = api;
+  window.__spotifyIframeScriptLoaded = true;
+  window.dispatchEvent(new Event('spotify-iframe-api-ready'));
+};`}
+        </Script>
+        <Script
+          id="spotify-iframe-api"
+          src="https://open.spotify.com/embed/iframe-api/v1"
+          strategy="beforeInteractive"
+        />
         <Providers session={initialSession}>
           <Navbar />
           <AppShell>{children}</AppShell>
