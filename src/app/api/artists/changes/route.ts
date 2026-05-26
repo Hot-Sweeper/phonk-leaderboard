@@ -36,6 +36,9 @@ function getMetricFromSnapshot(
     case "tiktok": return snapshot.tiktokFollowers;
     case "instagram": return snapshot.instagramFollowers;
     case "audience": return 0;
+    // Legacy snapshots do not store the internal legal metrics.
+    case "popularity": return 0;
+    case "hype": return 0;
   }
 }
 
@@ -50,6 +53,9 @@ function getMetricFromLinks(
     case "tiktok": return links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
     case "instagram": return links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
     case "audience": return 0;
+    // Internal legal metrics are derived from multiple signals, not raw links.
+    case "popularity": return 0;
+    case "hype": return 0;
   }
 }
 

@@ -236,7 +236,7 @@ function findMatchingSpotifyTrack(track: DeezerCatalogTrack, spotifyLookup: Map<
       return rightPreview - leftPreview;
     }
 
-    return (right.releaseDate ?? right.album.releaseDate ?? "").localeCompare(left.releaseDate ?? left.album.releaseDate ?? "");
+    return (right.album.releaseDate ?? "").localeCompare(left.album.releaseDate ?? "");
   })[0] ?? null;
 }
 
@@ -785,7 +785,7 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
  * Get artists that need signal backfilling (have incomplete Spotify/YouTube coverage).
  * Returns artists with fewer than SIGNAL_COVERAGE_THRESHOLD fully-covered tracks.
  */
-async function getArtistsNeedingDeltaUpdate(): Promise<Awaited<ReturnType<typeof prisma.artist.findMany>>> {
+async function getArtistsNeedingDeltaUpdate(): Promise<ArtistForUpdate[]> {
   const SIGNAL_COVERAGE_THRESHOLD = 5; // Artists with 5+ tracks with both signals are skipped
 
   // Get artist IDs with sufficient signal coverage
@@ -859,7 +859,7 @@ export async function runSongUpdate(trigger: string = "manual", mode: "delta" | 
 
   const startTime = Date.now();
 
-  const artists = mode === "delta"
+  const artists: ArtistForUpdate[] = mode === "delta"
     ? await getArtistsNeedingDeltaUpdate()
     : await prisma.artist.findMany({
         include: { links: { where: { platform: "SPOTIFY" } } },

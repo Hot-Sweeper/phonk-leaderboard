@@ -152,8 +152,8 @@ export function getTrackHypeScore(
     if ((track.previousSpotifyPopularity ?? 0) > 0 || (track.previousYoutubeViews ?? 0) > 0) {
       return getTrackSignalScore({
         popularity: track.previousPopularity ?? 0,
-        spotifyPopularity: track.previousSpotifyPopularity,
-        youtubeViews: track.previousYoutubeViews,
+        spotifyPopularity: track.previousSpotifyPopularity ?? undefined,
+        youtubeViews: track.previousYoutubeViews ?? undefined,
       });
     }
 
@@ -439,6 +439,7 @@ export function getArtistInternalMetrics(input: ArtistInternalMetricsInput) {
     popularityScore,
     popularityChangeValue,
     popularityChangePercent,
+    hasPopularityTrendData: previousPopularity != null,
     hypeScore,
     hypeChangeValue,
     hypeChangePercent,
