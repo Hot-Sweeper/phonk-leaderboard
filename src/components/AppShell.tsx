@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Sidebar from "@/components/Sidebar";
 import DetailPanel from "@/components/DetailPanel";
@@ -16,6 +16,7 @@ const RIGHT_DEFAULT = 520;
 const RIGHT_BOTTOM_MIN = 168;
 const RIGHT_BOTTOM_MAX = 340;
 const RIGHT_BOTTOM_DEFAULT = 220;
+const DOCK_PREWARM_TRACK_URI = "spotify:track:0AnaqLZve2BpCEqgk7755Y";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -39,10 +40,14 @@ function toSpotifyTrackUri(track: DockTrack | null): string | null {
   return `spotify:track:${match[1]}`;
 }
 
-function RightDock({ track }: { track: DockTrack | null }) {
+function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | null; registerDockPlaybackHandler: (handler: ((track: DockTrack) => void) | null) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<any>(null);
+  const controllerReadyRef = useRef(false);
   const pendingUriRef = useRef<string | null>(null);
+  const pendingPlaybackUriRef = useRef<string | null>(null);
+  const lastRequestedUriRef = useRef<string | null>(null);
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [apiReady, setApiReady] = useState(false);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
 
@@ -50,6 +55,63 @@ function RightDock({ track }: { track: DockTrack | null }) {
   const title = track?.name ?? "Spotify player";
   const imageUrl = track?.albumImageUrl ?? null;
   const trackUri = toSpotifyTrackUri(track);
+
+  const finishLoadingSoon = useCallback((uri: string) => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    loadingTimeoutRef.current = setTimeout(() => {
+      if (pendingUriRef.current === uri) {
+        setState("ready");
+      }
+    }, 1800);
+  }, []);
+
+  const loadUriForPlayback = useCallback((uri: string) => {
+    const controller = controllerRef.current;
+    if (!controller) {
+      pendingUriRef.current = uri;
+      pendingPlaybackUriRef.current = uri;
+      setState("loading");
+      return false;
+    }
+
+    pendingUriRef.current = uri;
+    pendingPlaybackUriRef.current = null;
+    lastRequestedUriRef.current = uri;
+
+    try {
+      controller.loadUri?.(uri);
+      controller.play?.();
+      setState("loading");
+      finishLoadingSoon(uri);
+      return true;
+    } catch {
+      setState("error");
+      return false;
+    }
+  }, [finishLoadingSoon]);
+
+  const loadUriWithoutPlayback = useCallback((uri: string) => {
+    const controller = controllerRef.current;
+    if (!controller) {
+      pendingUriRef.current = uri;
+      pendingPlaybackUriRef.current = null;
+      setState("loading");
+      return;
+    }
+
+    pendingUriRef.current = uri;
+    pendingPlaybackUriRef.current = null;
+    lastRequestedUriRef.current = uri;
+
+    try {
+      controller.loadUri?.(uri);
+      setState("ready");
+    } catch {
+      setState("error");
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -86,65 +148,120 @@ function RightDock({ track }: { track: DockTrack | null }) {
   }, []);
 
   useEffect(() => {
-    if (!trackUri) {
-      setState("idle");
+    if (!apiReady || !containerRef.current || controllerRef.current) {
       return;
     }
-
-    pendingUriRef.current = trackUri;
 
     const win = window as Window & { __spotifyIframeApi?: any };
     const api = win.__spotifyIframeApi;
-    const container = containerRef.current;
-
-    if (!api || !container) {
-      setState("loading");
+    if (!api) {
       return;
     }
 
-    const playLoadedUri = (controller: any, uri: string) => {
-      try {
-        controller.loadUri?.(uri);
-        controller.play?.();
-        setState("loading");
-      } catch {
-        setState("error");
-      }
-    };
-
-    if (controllerRef.current) {
-      playLoadedUri(controllerRef.current, trackUri);
-      return;
-    }
-
-    setState("loading");
+    const initialUri = trackUri ?? DOCK_PREWARM_TRACK_URI;
     let cancelled = false;
 
-    api.createController(container, { width: "100%", height: "100%", uri: trackUri }, (controller: any) => {
+    api.createController(containerRef.current, { width: "100%", height: "100%", uri: initialUri }, (controller: any) => {
       if (cancelled) {
         controller.destroy?.();
         return;
       }
 
       controllerRef.current = controller;
+      controllerReadyRef.current = false;
       controller.addListener?.("ready", () => {
+        controllerReadyRef.current = true;
+        const pendingPlaybackUri = pendingPlaybackUriRef.current;
+        if (pendingPlaybackUri) {
+          loadUriForPlayback(pendingPlaybackUri);
+          return;
+        }
+
         const nextUri = pendingUriRef.current;
-        if (nextUri) playLoadedUri(controller, nextUri);
+        if (nextUri && nextUri !== initialUri) {
+          try {
+            controller.loadUri?.(nextUri);
+          } catch {
+            setState("error");
+            return;
+          }
+        }
+
+        setState(trackUri ? "ready" : "idle");
       });
-      controller.addListener?.("playback_started", () => setState("ready"));
+      controller.addListener?.("playback_started", () => {
+        if (loadingTimeoutRef.current) {
+          clearTimeout(loadingTimeoutRef.current);
+          loadingTimeoutRef.current = null;
+        }
+        setState("ready");
+      });
       controller.addListener?.("playback_update", (event: any) => {
         if (event?.data && event.data.isPaused === false && event.data.isBuffering === false) {
+          if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+            loadingTimeoutRef.current = null;
+          }
           setState("ready");
         }
       });
-
-      playLoadedUri(controller, trackUri);
     });
 
     return () => {
       cancelled = true;
+      controllerReadyRef.current = false;
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
+      controllerRef.current?.destroy?.();
+      controllerRef.current = null;
     };
-  }, [trackUri]);
+  }, [apiReady, trackUri]);
+
+  useEffect(() => {
+    registerDockPlaybackHandler((nextTrack) => {
+      const nextUri = toSpotifyTrackUri(nextTrack);
+      if (!nextUri) {
+        return;
+      }
+
+      if (controllerRef.current && controllerReadyRef.current) {
+        loadUriForPlayback(nextUri);
+        return;
+      }
+
+      pendingUriRef.current = nextUri;
+      pendingPlaybackUriRef.current = nextUri;
+      setState("loading");
+    });
+
+    return () => {
+      registerDockPlaybackHandler(null);
+    };
+  }, [loadUriForPlayback, registerDockPlaybackHandler]);
+
+  useEffect(() => {
+    if (!trackUri) {
+      setState("idle");
+      return;
+    }
+
+    if (lastRequestedUriRef.current === trackUri) {
+      return;
+    }
+
+    if (!controllerRef.current || !controllerReadyRef.current) {
+      pendingUriRef.current = trackUri;
+      if (pendingPlaybackUriRef.current && pendingPlaybackUriRef.current !== trackUri) {
+        pendingPlaybackUriRef.current = null;
+      }
+      setState("loading");
+      return;
+    }
+
+    loadUriWithoutPlayback(trackUri);
+  }, [loadUriWithoutPlayback, trackUri]);
 
   return (
     <div className="flex h-full min-h-0 flex-col border-t border-white/10 bg-[#0a0a0f]">
@@ -198,7 +315,7 @@ function RightDock({ track }: { track: DockTrack | null }) {
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
-  const { panel, dockSong } = useDetailPanel();
+  const { panel, dockSong, registerDockPlaybackHandler } = useDetailPanel();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [leftWidth, setLeftWidth] = useState(LEFT_DEFAULT);
   const [rightWidth, setRightWidth] = useState(RIGHT_DEFAULT);
@@ -302,7 +419,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           onMouseDown={() => setDragging("right-bottom")}
         />
         <div className="shrink-0 overflow-hidden" style={{ height: `${rightBottomHeight}px` }}>
-          <RightDock track={selectedDockTrack} />
+          <RightDock track={selectedDockTrack} registerDockPlaybackHandler={registerDockPlaybackHandler} />
         </div>
       </div>
     </div>
