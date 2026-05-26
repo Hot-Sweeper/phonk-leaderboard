@@ -93,6 +93,26 @@ type ScheduledUpdaterSetting = {
   lastRun: string | null;
 };
 
+type LiveUpdateProgress = {
+  id: string;
+  status: string;
+  trigger: string;
+  updateType: string;
+  totalArtists: number;
+  updatedCount: number;
+  failedCount: number;
+  processedArtists: number;
+  progressPercent: number;
+  durationMs: number;
+  createdAt: string;
+  completedAt: string | null;
+  coverage: {
+    tracksWithSpotifyPopularity: number;
+    tracksWithYouTube: number;
+    snapshotsWithSpotifyPopularity: number;
+  } | null;
+};
+
 const INTERVAL_OPTIONS = [
   { value: 1, label: "Every hour" },
   { value: 6, label: "Every 6 hours" },
@@ -249,6 +269,8 @@ export default function AdminPage() {
   const [updateLogs, setUpdateLogs] = useState<UpdateLogEntry[]>([]);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [cancellingAll, setCancellingAll] = useState(false);
+  const [liveStatsProgress, setLiveStatsProgress] = useState<LiveUpdateProgress | null>(null);
+  const [liveSongProgress, setLiveSongProgress] = useState<LiveUpdateProgress | null>(null);
 
   const isAdmin = session?.user?.role === "ADMIN";
 
@@ -281,6 +303,61 @@ export default function AdminPage() {
   useEffect(() => {
     if (isAdmin) load();
   }, [isAdmin, load]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    let cancelled = false;
+
+    async function pollProgress() {
+      try {
+        const [statsRes, songsRes] = await Promise.all([
+          fetch("/api/admin/update-progress?updateType=stats", { cache: "no-store" }),
+          fetch("/api/admin/update-progress?updateType=songs", { cache: "no-store" }),
+        ]);
+
+        if (!cancelled && statsRes.ok) {
+          const data = await statsRes.json();
+          setLiveStatsProgress(data.status === "idle" ? null : data);
+          if (data.status === "running") {
+            setUpdatingAll(true);
+            setUpdateProgress({ current: data.processedArtists, total: data.totalArtists });
+          } else {
+            setUpdatingAll(false);
+            setUpdateProgress(null);
+          }
+        }
+
+        if (!cancelled && songsRes.ok) {
+          const data = await songsRes.json();
+          setLiveSongProgress(data.status === "idle" ? null : data);
+          if (data.status === "running") {
+            setUpdatingSongs(true);
+            setSongProgress({ current: data.processedArtists, total: data.totalArtists });
+          } else {
+            setUpdatingSongs(false);
+            setSongProgress(null);
+          }
+        }
+      } catch {
+        // Ignore transient polling failures.
+      }
+    }
+
+    pollProgress();
+    const interval = setInterval(pollProgress, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [isAdmin]);
+
+  function formatDuration(durationMs: number) {
+    if (durationMs <= 0) return "just started";
+    if (durationMs >= 60000) return `${(durationMs / 60000).toFixed(1)}m`;
+    return `${(durationMs / 1000).toFixed(1)}s`;
+  }
 
   async function runDebugAction(action: string, extraBody?: Record<string, unknown>) {
     const res = await fetch("/api/admin/debug", {
@@ -1188,6 +1265,95 @@ export default function AdminPage() {
               </div>
             </div>
 
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Zap className="w-5 h-5 text-yellow-400" />
+                Live Updater Status
+              </h2>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {[liveStatsProgress, liveSongProgress].filter(Boolean).map((progress) => {
+                  const entry = progress as LiveUpdateProgress;
+                  const isSongs = entry.updateType === "songs";
+                  const barClass = isSongs ? "bg-green-500" : "bg-blue-500";
+                  const coverage = entry.coverage;
+
+                  return (
+                    <div key={entry.id} className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            {isSongs ? <Music className="w-4 h-4 text-green-400" /> : <RefreshCw className="w-4 h-4 text-blue-400" />}
+                            <h3 className="text-base font-black">{isSongs ? "Song updater" : "Stats updater"}</h3>
+                          </div>
+                          <p className="text-sm text-[var(--muted-foreground)]">
+                            Trigger: {entry.trigger} · Started {new Date(entry.createdAt).toLocaleString()}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] border ${entry.status === "running" ? "border-emerald-500/40 text-emerald-300" : "border-[var(--muted)] text-[var(--muted-foreground)]"}`}>
+                          {entry.status}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs text-[var(--muted-foreground)]">
+                          <span>{entry.processedArtists}/{entry.totalArtists} artists processed</span>
+                          <span>{entry.progressPercent}%</span>
+                        </div>
+                        <div className="w-full bg-[var(--muted)] rounded-full h-3 overflow-hidden">
+                          <div className={`h-full rounded-full transition-all duration-500 ${barClass}`} style={{ width: `${entry.progressPercent}%` }} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2">
+                            <div className="text-[var(--muted-foreground)] uppercase tracking-[0.16em] text-[10px]">Updated</div>
+                            <div className="font-black text-sm">{entry.updatedCount}</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2">
+                            <div className="text-[var(--muted-foreground)] uppercase tracking-[0.16em] text-[10px]">Failed</div>
+                            <div className="font-black text-sm">{entry.failedCount}</div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2">
+                            <div className="text-[var(--muted-foreground)] uppercase tracking-[0.16em] text-[10px]">Runtime</div>
+                            <div className="font-black text-sm">{formatDuration(entry.durationMs)}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {coverage && (
+                        <div className="space-y-3 pt-1">
+                          <div>
+                            <div className="flex justify-between text-xs text-[var(--muted-foreground)] mb-1">
+                              <span>Spotify track signals</span>
+                              <span>{coverage.tracksWithSpotifyPopularity.toLocaleString()}</span>
+                            </div>
+                            <div className="w-full bg-[var(--muted)] rounded-full h-2 overflow-hidden">
+                              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, Math.max(4, (coverage.tracksWithSpotifyPopularity / 30000) * 100))}%` }} />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="flex justify-between text-xs text-[var(--muted-foreground)] mb-1">
+                              <span>YouTube track signals</span>
+                              <span>{coverage.tracksWithYouTube.toLocaleString()}</span>
+                            </div>
+                            <div className="w-full bg-[var(--muted)] rounded-full h-2 overflow-hidden">
+                              <div className="h-full rounded-full bg-red-500" style={{ width: `${Math.min(100, Math.max(4, (coverage.tracksWithYouTube / 500) * 100))}%` }} />
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                            Snapshot rows with Spotify popularity: <span className="font-black text-[var(--foreground)]">{coverage.snapshotsWithSpotifyPopularity.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {!liveStatsProgress && !liveSongProgress && (
+                  <div className="xl:col-span-2 bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 text-sm text-[var(--muted-foreground)]">
+                    No updater is currently reporting live progress.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Migrate to Spotify */}
             <div className="mb-10">
               <h2 className="text-lg font-black mb-3 flex items-center gap-2">
@@ -1566,7 +1732,7 @@ export default function AdminPage() {
                 <Package className="w-5 h-5 text-cyan-400" /> Add Sample Pack
               </h2>
               <p className="text-xs text-[var(--muted-foreground)]">
-                Paste a Payhip and/or Gumroad product link. Metadata will be scraped automatically.
+                Paste a Payhip and/or Gumroad product link. The legal branch derives a basic preview from the URL and expects any richer metadata to be edited manually.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

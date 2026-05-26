@@ -231,8 +231,11 @@ model Track {
   albumImageUrl   String?
   previewUrl      String?
   durationMs      Int      @default(0)
-  popularity      Int      @default(0)
-  trackNumber     Int      @default(0)
+  popularity         Int      @default(0)
+  spotifyPopularity  Int      @default(0)
+  youtubeVideoId     String?
+  youtubeViews       Int      @default(0)
+  trackNumber        Int      @default(0)
   discNumber      Int      @default(0)
   explicit        Boolean  @default(false)
   releaseDate     String?
@@ -252,11 +255,13 @@ model Track {
 }
 
 model TrackSnapshot {
-  id         String   @id @default(cuid())
-  trackId     String
-  popularity  Int      @default(0)
-  track       Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
+  id                String   @id @default(cuid())
+  trackId           String
+  popularity        Int      @default(0)
+  spotifyPopularity Int      @default(0)
+  youtubeViews      Int      @default(0)
+  track             Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
 
   @@index([trackId, createdAt])
 }

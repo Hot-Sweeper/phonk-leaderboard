@@ -14,7 +14,6 @@ import {
   Star,
   X,
   Send,
-  ExternalLink,
   Loader2,
   Check,
   ArrowUpRight,
@@ -55,10 +54,7 @@ type Artist = {
 };
 
 const PLATFORMS = [
-  { key: "", label: "Spotify Listeners", color: "text-green-400" },
-  { key: "YOUTUBE", label: "YouTube Subs", color: "text-red-400" },
-  { key: "INSTAGRAM", label: "Instagram", color: "text-fuchsia-400" },
-  { key: "TIKTOK", label: "TikTok", color: "text-cyan-400" },
+  { key: "", label: "Internal Order", color: "text-[var(--accent)]" },
 ];
 
 const ALL_PLATFORMS = [
@@ -67,12 +63,6 @@ const ALL_PLATFORMS = [
   { key: "TIKTOK", label: "TikTok" },
   { key: "INSTAGRAM", label: "Instagram" },
 ];
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
 
 function isValidSpotifyArtistUrl(url: string): boolean {
   try {
@@ -122,13 +112,6 @@ function extractHandleFromUrl(platform: string, url: string): string | null {
 function getDisplayHandle(link: ArtistLink): string | null {
   return link.handle ?? extractHandleFromUrl(link.platform, link.url);
 }
-
-const PLATFORM_STAT_LABEL: Record<string, string> = {
-  YOUTUBE: "subs",
-  SPOTIFY: "listeners",
-  TIKTOK: "followers",
-  INSTAGRAM: "followers",
-};
 
 const PLATFORM_DOT: Record<string, string> = {
   YOUTUBE: "bg-red-400",
@@ -274,29 +257,22 @@ function PodiumCard({
         <div className="flex flex-col items-center gap-1 mt-2">
           {(() => {
             const platformColors: Record<string, string> = {
-              "": "text-green-400",
+              "": "text-[var(--accent)]",
               YOUTUBE: "text-red-400",
               INSTAGRAM: "text-fuchsia-400",
               TIKTOK: "text-cyan-400",
             };
             const color = platformColors[platform] ?? "text-green-400";
 
-            if (!platform || platform === "") {
-              const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
-              if (spotifyLink && spotifyLink.monthlyListeners > 0) {
-                return (
-                  <span className={`text-xs ${color} font-bold tabular-nums`}>
-                    {formatCount(spotifyLink.monthlyListeners)} listeners
-                  </span>
-                );
-              }
+            if (platform === "") {
+              return <span className={`text-xs ${color} font-bold`}>Internal order</span>;
             } else {
               const link = artist.links.find((l) => l.platform === platform);
-              if (link && link.followerCount > 0) {
-                const label = platform === "YOUTUBE" ? "subs" : "followers";
+              if (link) {
+                const handle = getDisplayHandle(link);
                 return (
-                  <span className={`text-xs ${color} font-bold tabular-nums`}>
-                    {formatCount(link.followerCount)} {label}
+                  <span className={`text-xs ${color} font-bold`}>
+                    {handle ? `@${handle}` : `${ALL_PLATFORMS.find((item) => item.key === platform)?.label ?? platform} linked`}
                   </span>
                 );
               }
@@ -308,7 +284,7 @@ function PodiumCard({
               <span
                 key={l.id}
                 className={`w-2 h-2 rounded-full ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`}
-                title={`${l.platform}: ${formatCount(l.followerCount)}`}
+                title={`${ALL_PLATFORMS.find((item) => item.key === l.platform)?.label ?? l.platform} linked`}
               />
             ))}
           </div>
@@ -372,7 +348,7 @@ export default function LeaderboardPage() {
   const [linkModalUrl, setLinkModalUrl] = useState("");
   const [linkModalSubmitting, setLinkModalSubmitting] = useState(false);
   const [linkModalYtQuery, setLinkModalYtQuery] = useState("");
-  const [linkModalYtResults, setLinkModalYtResults] = useState<Array<{ name: string; imageUrl: string | null; subscriberCount: number; handle: string | null; platformId: string | null }>>([]);
+  const [linkModalYtResults, setLinkModalYtResults] = useState<Array<{ name: string; imageUrl: string | null; handle: string | null; platformId: string | null }>>([]);
   const [linkModalYtSearching, setLinkModalYtSearching] = useState(false);
 
   const isPrivileged =
@@ -545,7 +521,8 @@ export default function LeaderboardPage() {
       if (res.ok) {
         setWatchlistedIds((prev) => {
           const next = new Set(prev);
-          isWatched ? next.delete(artistId) : next.add(artistId);
+          if (isWatched) next.delete(artistId);
+          else next.add(artistId);
           return next;
         });
         setArtists((prev) =>
@@ -786,6 +763,9 @@ export default function LeaderboardPage() {
             />
           </div>
         </div>
+        <div className="mb-6 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-300">
+          Artist order uses internal catalog signals. Exact platform totals stay hidden, and platform filters only narrow by linked profiles.
+        </div>
 
         {/* ── Leaderboard List ── */}
         {loading ? (
@@ -863,37 +843,18 @@ export default function LeaderboardPage() {
                         if (platform) {
                           const link = artist.links.find((l) => l.platform === platform);
                           if (link) {
+                            const handle = getDisplayHandle(link);
                             return (
                               <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[link.platform] ?? "bg-zinc-500"}`} />
-                                <span className="tabular-nums">
-                                  {formatCount(link.followerCount)} {PLATFORM_STAT_LABEL[link.platform] ?? ""}
-                                </span>
+                                <span>{handle ? `@${handle}` : `${ALL_PLATFORMS.find((item) => item.key === link.platform)?.label ?? link.platform} linked`}</span>
                               </span>
                             );
                           }
                           return null;
                         }
-                        // Default tab: show Spotify monthly listeners + followers as secondary
-                        const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
                         return (
                           <>
-                            {spotifyLink && spotifyLink.monthlyListeners > 0 && (
-                              <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                                <span className="w-2 h-2 rounded-full shrink-0 bg-green-400" />
-                                <span className="tabular-nums">
-                                  {formatCount(spotifyLink.monthlyListeners)} listeners
-                                </span>
-                              </span>
-                            )}
-                            {spotifyLink && spotifyLink.followerCount > 0 && (
-                              <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
-                                <span className="w-2 h-2 rounded-full shrink-0 bg-green-700" />
-                                <span className="tabular-nums">
-                                  {formatCount(spotifyLink.followerCount)} followers
-                                </span>
-                              </span>
-                            )}
                             {artist.links.filter((l) => l.platform !== "SPOTIFY").map((l) => (
                               <a
                                 key={l.id}
@@ -903,13 +864,9 @@ export default function LeaderboardPage() {
                                 className="flex items-center gap-1 text-xs text-[var(--muted-foreground)] hover:text-white transition-colors"
                               >
                                 <span className={`w-2 h-2 rounded-full shrink-0 ${PLATFORM_DOT[l.platform] ?? "bg-zinc-500"}`} />
-                                {l.followerCount > 0 ? (
-                                  <span className="tabular-nums">
-                                    {formatCount(l.followerCount)} {PLATFORM_STAT_LABEL[l.platform] ?? ""}
-                                  </span>
-                                ) : getDisplayHandle(l) ? (
-                                  <span>@{getDisplayHandle(l)}</span>
-                                ) : null}
+                                {getDisplayHandle(l)
+                                  ? <span>@{getDisplayHandle(l)}</span>
+                                  : <span>{ALL_PLATFORMS.find((item) => item.key === l.platform)?.label ?? l.platform} link</span>}
                               </a>
                             ))}
                             {isPrivileged && (() => {
@@ -1281,7 +1238,7 @@ export default function LeaderboardPage() {
                           <div className="flex-1 min-w-0">
                             <div className="font-bold truncate">{ch.name}</div>
                             {ch.handle && <div className="text-xs text-[var(--muted-foreground)]">@{ch.handle}</div>}
-                            <div className="text-sm text-red-400 font-bold tabular-nums mt-0.5">{formatCount(ch.subscriberCount)} subscribers</div>
+                            <div className="text-sm text-[var(--muted-foreground)] mt-0.5">Channel lookup result</div>
                           </div>
                         </button>
                       ))}

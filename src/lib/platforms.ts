@@ -1,6 +1,6 @@
 /**
- * YouTube Data API v3 + Spotify/TikTok/Instagram scraping utilities
- * Fetches profile pictures, subscriber counts, follower counts, and monthly listeners.
+ * Official platform API utilities plus lightweight URL helpers.
+ * Legalized mode avoids scraping public profile pages for counters.
  */
 
 type YouTubeChannelData = {
@@ -158,7 +158,7 @@ export async function searchSpotifyArtists(
     type: "artist",
     limit: String(limit),
   });
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `https://api.spotify.com/v1/search?${params}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -249,11 +249,118 @@ export async function searchYouTubeChannels(
   }
 }
 
+// ─── YouTube track-level helpers ───
+
+/**
+ * Search YouTube for a song's music video and return the video ID.
+ * Prefers results with "official" or "music video" in the title.
+ * Costs 100 quota units.
+ */
+export async function searchYouTubeMusicVideoId(
+  trackName: string,
+  artistName: string
+): Promise<string | null> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const q = `${artistName} ${trackName} official music video`;
+    const params = new URLSearchParams({
+      part: "snippet",
+      type: "video",
+      videoCategoryId: "10", // Music category
+      q,
+      maxResults: "5",
+      key: apiKey,
+    });
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/search?${params}`
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[YouTube] Music video search failed: ${res.status} ${text.substring(0, 200)}`);
+      return null;
+    }
+    const data = await res.json();
+    const items: { id?: { videoId?: string }; snippet?: { title?: string } }[] = data.items ?? [];
+    if (items.length === 0) return null;
+
+    // Prefer videos whose title contains "official" or "music video"
+    const preferred = items.find((item) => {
+      const title = (item.snippet?.title ?? "").toLowerCase();
+      return title.includes("official") || title.includes("music video");
+    });
+    const best = preferred ?? items[0];
+    return best?.id?.videoId ?? null;
+  } catch (err) {
+    console.error("[YouTube] searchYouTubeMusicVideoId error:", err);
+    return null;
+  }
+}
+
+/**
+ * Fetch view counts for up to 50 YouTube video IDs.
+ * Costs 1 quota unit per call.
+ * Returns a map of videoId → viewCount.
+ */
+export async function fetchYouTubeVideoViews(
+  videoIds: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey || videoIds.length === 0) return result;
+
+  try {
+    const params = new URLSearchParams({
+      part: "statistics",
+      id: videoIds.slice(0, 50).join(","),
+      key: apiKey,
+    });
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?${params}`
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[YouTube] Video stats fetch failed: ${res.status} ${text.substring(0, 200)}`);
+      return result;
+    }
+    const data = await res.json();
+    for (const item of (data.items ?? []) as { id: string; statistics?: { viewCount?: string } }[]) {
+      const views = parseInt(item.statistics?.viewCount ?? "0", 10);
+      result.set(item.id, views);
+    }
+    return result;
+  } catch (err) {
+    console.error("[YouTube] fetchYouTubeVideoViews error:", err);
+    return result;
+  }
+}
+
 // ─── Spotify ───
 
 let spotifyToken: string | null = null;
 let spotifyTokenExpiry = 0;
 let spotifyTokenFailedUntil = 0;
+const SPOTIFY_REQUEST_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = SPOTIFY_REQUEST_TIMEOUT_MS
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function logSpotifyApiFailure(scope: string, status: number, text: string) {
+  console.error(`[Spotify] ${scope} failed: ${status} ${text.substring(0, 200)}`);
+}
 
 /** Get a Spotify access token via Client Credentials flow */
 export async function getSpotifyToken(): Promise<string | null> {
@@ -270,7 +377,7 @@ export async function getSpotifyToken(): Promise<string | null> {
   }
 
   try {
-    const res = await fetch("https://accounts.spotify.com/api/token", {
+    const res = await fetchWithTimeout("https://accounts.spotify.com/api/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -345,24 +452,20 @@ export function extractSocialHandle(
   }
 }
 
-/** Fetch Spotify artist data (API + scrape monthly listeners) */
+/** Fetch Spotify artist data from the official API only. */
 export async function fetchSpotifyArtist(
   url: string
 ): Promise<SpotifyArtistData | null> {
   const artistId = parseSpotifyUrl(url);
   if (!artistId) return null;
 
-  // Fetch API data and scrape monthly listeners in parallel
-  const [apiData, scraped] = await Promise.all([
-    fetchSpotifyArtistApi(artistId),
-    scrapeSpotifyListeners(artistId),
-  ]);
+  const apiData = await fetchSpotifyArtistApi(artistId);
 
   return {
-    imageUrl: scraped?.profileImage ?? apiData?.imageUrl ?? null,
-    followerCount: scraped?.followers ?? apiData?.followerCount ?? 0,
-    monthlyListeners: scraped?.monthlyListeners ?? 0,
-    name: scraped?.name ?? apiData?.name ?? null,
+    imageUrl: apiData?.imageUrl ?? null,
+    followerCount: 0,
+    monthlyListeners: 0,
+    name: apiData?.name ?? null,
     platformId: artistId,
   };
 }
@@ -379,11 +482,15 @@ export async function fetchSpotifyArtistDetails(spotifyId: string): Promise<{
   if (!token) return null;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.spotify.com/v1/artists/${spotifyId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      logSpotifyApiFailure(`artist details for ${spotifyId}`, res.status, text);
+      return null;
+    }
     const data = await res.json();
     return {
       genres: data.genres ?? [],
@@ -395,6 +502,48 @@ export async function fetchSpotifyArtistDetails(spotifyId: string): Promise<{
   } catch {
     return null;
   }
+}
+
+/**
+ * Batch-fetch Spotify popularity for up to 50 track IDs.
+ * Costs 1 API call per batch of 50.
+ * Returns a map of spotifyTrackId → popularity (0–100).
+ */
+export async function fetchSpotifyTrackPopularityBatch(
+  spotifyIds: string[]
+): Promise<Map<string, { popularity: number; previewUrl: string | null }>> {
+  const result = new Map<string, { popularity: number; previewUrl: string | null }>();
+  const token = await getSpotifyToken();
+  if (!token || spotifyIds.length === 0) return result;
+
+  // Process in chunks of 50 (Spotify API limit)
+  for (let i = 0; i < spotifyIds.length; i += 50) {
+    const chunk = spotifyIds.slice(i, i + 50);
+    try {
+      const params = new URLSearchParams({ ids: chunk.join(",") });
+      const res = await fetchWithTimeout(
+        `https://api.spotify.com/v1/tracks?${params}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        logSpotifyApiFailure("track batch fetch", res.status, text);
+        continue;
+      }
+      const data = await res.json();
+      for (const t of (data.tracks ?? []) as ({ id: string; popularity: number; preview_url?: string | null } | null)[]) {
+        if (t?.id) {
+          result.set(t.id, {
+            popularity: t.popularity ?? 0,
+            previewUrl: t.preview_url ?? null,
+          });
+        }
+      }
+    } catch (err) {
+      console.error("[Spotify] fetchSpotifyTrackPopularityBatch error:", err);
+    }
+  }
+  return result;
 }
 
 /** Fetch Spotify artist's top tracks */
@@ -422,7 +571,7 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
   }
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks?market=US`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -465,7 +614,7 @@ async function fetchSpotifyArtistApi(
   if (!token) return null;
 
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://api.spotify.com/v1/artists/${artistId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -483,140 +632,6 @@ async function fetchSpotifyArtistApi(
     console.error("[Spotify] Artist lookup error:", err);
   }
   return null;
-}
-
-const SCRAPE_HEADERS = {
-  "User-Agent": "Mozilla/5.0",
-  "Accept-Language": "en",
-};
-
-async function scrapeSpotifyListeners(
-  artistId: string
-): Promise<{ monthlyListeners: number; followers: number | null; name: string | null; profileImage: string | null } | null> {
-  try {
-    const res = await fetch(`https://open.spotify.com/artist/${artistId}`, {
-      headers: SCRAPE_HEADERS,
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
-
-    // Monthly listeners: "62,131 monthly listeners"
-    let monthlyListeners = 0;
-    const exactMatch = html.match(/([\d,]+)\s+monthly\s+listeners/i);
-    if (exactMatch) {
-      monthlyListeners = parseInt(exactMatch[1].replace(/,/g, ""), 10);
-    } else {
-      // Abbreviated form: "62.1K monthly listeners"
-      const abbrevMatch = html.match(/([\d.]+)([KMB])\s+monthly\s+listeners/i);
-      if (abbrevMatch) {
-        const suffixes: Record<string, number> = { K: 1_000, M: 1_000_000, B: 1_000_000_000 };
-        monthlyListeners = Math.round(parseFloat(abbrevMatch[1]) * (suffixes[abbrevMatch[2].toUpperCase()] ?? 1));
-      }
-    }
-
-    // Followers from HTML: ">3,587</p>...Followers</p>"
-    let followers: number | null = null;
-    const followersMatch = html.match(/>([\d,]+)<\/[^>]+>\s*<[^>]+>Followers</i);
-    if (followersMatch) {
-      followers = parseInt(followersMatch[1].replace(/,/g, ""), 10);
-    }
-
-    // Artist name from JSON-LD
-    let name: string | null = null;
-    const nameMatch = html.match(/"name"\s*:\s*"([^"]+)"/);
-    if (nameMatch) {
-      // Decode JSON unicode escapes (e.g. \u00F8 → ø)
-      try {
-        name = JSON.parse(`"${nameMatch[1]}"`);
-      } catch {
-        name = nameMatch[1];
-      }
-    }
-
-    // Profile image from og:image meta tag
-    let profileImage: string | null = null;
-    const ogImageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
-    if (ogImageMatch) {
-      profileImage = ogImageMatch[1];
-    }
-
-    return { monthlyListeners, followers, name, profileImage };
-  } catch (err) {
-    console.error("[Spotify] Scrape error:", err);
-    return null;
-  }
-}
-
-type ScrapedSocialStats = {
-  followers: number | null;
-  name: string | null;
-};
-
-async function scrapeInstagramStats(url: string): Promise<ScrapedSocialStats | null> {
-  try {
-    const parsedUrl = new URL(url);
-    const path = parsedUrl.pathname.replace(/\/+$/, "");
-    const match = path.match(/^\/([^/?#]+)/);
-    const username = match?.[1]?.replace(/^@/, "");
-    if (!username) return null;
-
-    const res = await fetch(`https://www.instagram.com/${username}/`, {
-      headers: SCRAPE_HEADERS,
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
-
-    // Meta description: "96 Followers, 62 Following, 0 Posts - Name (@user)"
-    const metaMatch = html.match(/<meta[^>]*(?:name|property)="(?:og:)?description"[^>]*content="([^"]*)"/i)
-      ?? html.match(/<meta[^>]*content="([^"]*)"[^>]*name="description"/i);
-
-    let followers: number | null = null;
-    let name: string | null = null;
-
-    if (metaMatch) {
-      const desc = metaMatch[1];
-      const followersMatch = desc.match(/([\d,]+)\s+Followers/i);
-      if (followersMatch) followers = parseInt(followersMatch[1].replace(/,/g, ""), 10);
-      const nameMatch = desc.match(/-\s*(.+?)\s*\((?:@|&#064;)/);
-      if (nameMatch) name = nameMatch[1].trim();
-    }
-
-    return { followers, name };
-  } catch (err) {
-    console.error("[Instagram] Scrape error:", err);
-    return null;
-  }
-}
-
-async function scrapeTikTokStats(url: string): Promise<ScrapedSocialStats | null> {
-  try {
-    const parsedUrl = new URL(url);
-    const match = parsedUrl.pathname.match(/\/@([^/?#]+)/);
-    const username = match?.[1];
-    if (!username) return null;
-
-    const res = await fetch(`https://www.tiktok.com/@${username}`, {
-      headers: SCRAPE_HEADERS,
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const html = await res.text();
-
-    let followers: number | null = null;
-    const followersMatch = html.match(/"followerCount"\s*:\s*(\d+)/);
-    if (followersMatch) followers = parseInt(followersMatch[1], 10);
-
-    let name: string | null = null;
-    const nameMatch = html.match(/"nickname"\s*:\s*"([^"]+)"/);
-    if (nameMatch) name = nameMatch[1];
-
-    return { followers, name };
-  } catch (err) {
-    console.error("[TikTok] Scrape error:", err);
-    return null;
-  }
 }
 
 // ─────────── Deezer API (free, no auth) ───────────
@@ -1012,8 +1027,12 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
       `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single,compilation,appears_on&limit=50&market=US`;
 
     while (nextUrl && albumIds.length < 500) {
-      const albumRes = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
-      if (!albumRes.ok) break;
+      const albumRes = await fetchWithTimeout(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (!albumRes.ok) {
+        const text = await albumRes.text().catch(() => "");
+        logSpotifyApiFailure(`artist albums for ${spotifyId}`, albumRes.status, text);
+        return null;
+      }
       const albumData = await albumRes.json() as { items?: { id: string; album_group?: string }[]; next?: string | null };
       for (const a of albumData.items ?? []) {
         albumIds.push(a.id);
@@ -1032,11 +1051,15 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
     // Fetch album details in batches of 20 (Spotify limit)
     for (let i = 0; i < albumIds.length; i += 20) {
       const batch = albumIds.slice(i, i + 20);
-      const res = await fetch(
+      const res = await fetchWithTimeout(
         `https://api.spotify.com/v1/albums?ids=${batch.join(",")}&market=US`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        logSpotifyApiFailure(`album batch fetch for ${spotifyId}`, res.status, text);
+        continue;
+      }
       const data = await res.json();
       for (const album of data.albums ?? []) {
         if (!album) continue;
@@ -1070,7 +1093,27 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
       }
     }
 
-    return allTracks && allTracks.length > 0 ? allTracks : null;
+    if (!allTracks || allTracks.length === 0) {
+      return null;
+    }
+
+    const popularityByTrackId = await fetchSpotifyTrackPopularityBatch([
+      ...new Set(allTracks.map((track) => track.id).filter(Boolean)),
+    ]);
+
+    if (allTracks.length > 0 && popularityByTrackId.size === 0) {
+      console.error(`[Spotify] Full catalog popularity enrichment failed for ${spotifyId}; preserving stored track signals instead.`);
+      return null;
+    }
+
+    return allTracks.map((track) => {
+      const enriched = popularityByTrackId.get(track.id);
+      return {
+        ...track,
+        popularity: enriched?.popularity ?? 0,
+        previewUrl: track.previewUrl ?? enriched?.previewUrl ?? null,
+      };
+    });
   } catch (err) {
     console.error(`[Spotify] Full catalog error for ${spotifyId}:`, err);
     return null;
@@ -1148,7 +1191,7 @@ export async function fetchPlatformStats(
     if (!data) return null;
     return {
       imageUrl: data.imageUrl,
-      followerCount: data.subscriberCount,
+      followerCount: 0,
       monthlyListeners: 0,
       handle: data.handle,
       platformId: data.platformId,
@@ -1169,10 +1212,9 @@ export async function fetchPlatformStats(
   }
 
   if (platform === "TIKTOK") {
-    const scraped = await scrapeTikTokStats(url);
     return {
       imageUrl: null,
-      followerCount: scraped?.followers ?? 0,
+      followerCount: 0,
       monthlyListeners: 0,
       handle: extractSocialHandle(platform, url),
       platformId: null,
@@ -1180,10 +1222,9 @@ export async function fetchPlatformStats(
   }
 
   if (platform === "INSTAGRAM") {
-    const scraped = await scrapeInstagramStats(url);
     return {
       imageUrl: null,
-      followerCount: scraped?.followers ?? 0,
+      followerCount: 0,
       monthlyListeners: 0,
       handle: extractSocialHandle(platform, url),
       platformId: null,

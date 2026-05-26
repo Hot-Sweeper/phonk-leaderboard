@@ -154,7 +154,9 @@ export async function GET(
     name: displayTitle,
     albumName: deezerDetail?.album.name ?? track.albumName,
     albumImageUrl: deezerDetail?.album.imageUrl ?? track.albumImageUrl,
-    previewUrl: track.previewUrl,
+    previewUrl: deezerDetail?.previewUrl ?? track.previewUrl,
+    deezerId: track.deezerId,
+    deezerUrl: track.deezerUrl,
     spotifyUrl: track.spotifyId
       ? `https://open.spotify.com/track/${track.spotifyId}`
       : null,

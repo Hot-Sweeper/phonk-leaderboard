@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getArtistAudienceScore } from "@/lib/legal-rankings";
+import { getArtistInternalMetrics } from "@/lib/legal-rankings";
 
 const PERIODS: Record<string, number> = {
   day: 24 * 60 * 60 * 1000,
@@ -11,11 +11,15 @@ const PERIODS: Record<string, number> = {
 
 const PERIOD_ORDER = ["day", "week", "month", "year"];
 
-type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram" | "audience";
+type MetricKey = "listeners" | "followers" | "youtube" | "tiktok" | "instagram" | "audience" | "popularity" | "hype";
 type SortOrder = "desc" | "abs" | "asc";
 type DisplayMode = "current" | "relative" | "absolute";
 
-const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram", "audience"];
+const METRIC_KEYS: MetricKey[] = ["listeners", "followers", "youtube", "tiktok", "instagram", "audience", "popularity", "hype"];
+
+function getLegalArtistMetric(metric: MetricKey): "popularity" | "hype" {
+  return metric === "hype" ? "hype" : "popularity";
+}
 
 // Server-side in-memory cache — cleared on deploy/restart
 const routeCache = new Map<string, { data: unknown; expiresAt: number }>();
@@ -81,7 +85,7 @@ export async function GET(req: Request) {
   const metric = (searchParams.get("metric") ?? "listeners") as MetricKey;
   const mode = getDisplayMode(searchParams.get("mode"));
   const sort = getSortOrder(searchParams.get("sort"));
-  const rankingModel = searchParams.get("rankingModel") === "legal" ? "legal" : "standard";
+  const rankingModel = "legal";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "100", 10) || 100, 200);
 
@@ -89,8 +93,16 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Invalid metric" }, { status: 400 });
   }
 
+  const periodMs = PERIODS[period];
+  if (!periodMs) {
+    return NextResponse.json({ error: "Invalid period" }, { status: 400 });
+  }
+
+  const cutoff = new Date(Date.now() - periodMs);
+
   if (rankingModel === "legal") {
-    const cacheKey = `legal:${mode}:${sort}`;
+    const legalMetric = getLegalArtistMetric(metric);
+    const cacheKey = `legal:${legalMetric}:${period}:${mode}:${sort}`;
     const cached = routeCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       const full = cached.data as { artists: unknown[]; totalCount: number; availablePeriods: string[]; period: string; metric: string; mode: string };
@@ -100,44 +112,77 @@ export async function GET(req: Request) {
       );
     }
 
-    const artists = await prisma.artist.findMany({
-      include: {
-        links: {
-          select: { platform: true, monthlyListeners: true, followerCount: true },
-        },
-        tracks: {
-          select: {
-            id: true,
-            artistId: true,
-            name: true,
-            albumName: true,
-            popularity: true,
-            previewUrl: true,
-            durationMs: true,
-            releaseDate: true,
-            featuredArtists: true,
-            contributorIds: true,
+    const [artists, oldSnapshots, oldestSnapshot, watchlistAggregate] = await Promise.all([
+      prisma.artist.findMany({
+        include: {
+          links: {
+            select: { platform: true, monthlyListeners: true, followerCount: true },
+          },
+          tracks: {
+            select: {
+              popularity: true,
+              previewUrl: true,
+              releaseDate: true,
+            },
           },
         },
-      },
-      orderBy: { name: "asc" },
-    });
+        orderBy: { name: "asc" },
+      }),
+      prisma.artistSnapshot.findMany({
+        where: {
+          createdAt: { lte: cutoff },
+        },
+        orderBy: { createdAt: "desc" },
+        distinct: ["artistId"],
+        select: {
+          artistId: true,
+          monthlyListeners: true,
+          followerCount: true,
+          createdAt: true,
+        },
+      }),
+      prisma.artistSnapshot.findFirst({
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
+      }),
+      prisma.artist.aggregate({
+        _max: { watchlistCount: true },
+      }),
+    ]);
 
-    const maxYoutubeSubscribers = Math.max(
-      1,
-      ...artists.map((artist) => artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0)
-    );
-    const maxWatchlistCount = Math.max(1, ...artists.map((artist) => artist.watchlistCount));
+    const availablePeriods: string[] = [];
+    if (oldestSnapshot) {
+      const dataAge = Date.now() - oldestSnapshot.createdAt.getTime();
+      for (const candidatePeriod of PERIOD_ORDER) {
+        if (dataAge >= PERIODS[candidatePeriod]) {
+          availablePeriods.push(candidatePeriod);
+        }
+      }
+    }
+
+    const oldSnapshotMap = new Map(oldSnapshots.map((snapshot) => [snapshot.artistId, snapshot]));
+    const maxWatchlistCount = Math.max(1, watchlistAggregate._max.watchlistCount ?? 0);
 
     const result = artists.map((artist) => {
-      const youtubeSubscribers = artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
-      const score = getArtistAudienceScore({
-        watchlistCount: artist.watchlistCount,
-        youtubeSubscribers,
+      const oldSnapshot = oldSnapshotMap.get(artist.id);
+      const metrics = getArtistInternalMetrics({
         tracks: artist.tracks,
-        maxYoutubeSubscribers,
+        watchlistCount: artist.watchlistCount,
         maxWatchlistCount,
+        previousSnapshot: oldSnapshot
+          && oldSnapshot.monthlyListeners <= 100
+          && oldSnapshot.followerCount <= 100
+          ? {
+              popularityIndex: oldSnapshot.monthlyListeners,
+              hypeIndex: oldSnapshot.followerCount,
+            }
+          : null,
       });
+
+      const currentValue = legalMetric === "hype" ? metrics.hypeScore : metrics.popularityScore;
+      const changeValue = legalMetric === "hype" ? metrics.hypeChangeValue : metrics.popularityChangeValue;
+      const changePercent = legalMetric === "hype" ? metrics.hypeChangePercent : metrics.popularityChangePercent;
+      const hasData = legalMetric === "hype" ? metrics.hasHypeData : metrics.hasPopularityTrendData;
 
       return {
         id: artist.id,
@@ -145,28 +190,33 @@ export async function GET(req: Request) {
         imageUrl: artist.imageUrl,
         createdAt: artist.createdAt,
         watchlistCount: artist.watchlistCount,
-        currentValue: score.audienceScore,
-        changeValue: 0,
-        changePercent: 0,
-        hasData: false,
-        metric: "audience score",
+        currentValue,
+        changeValue,
+        changePercent,
+        hasData,
+        metric: legalMetric,
       };
     });
 
-    result.sort((a, b) => b.currentValue - a.currentValue || b.watchlistCount - a.watchlistCount || a.name.localeCompare(b.name));
+    const getTrendMetric = (artist: (typeof result)[number]) => mode === "absolute" ? artist.changeValue : artist.changePercent;
 
-    const payload = { artists: result, totalCount: result.length, availablePeriods: [], period, metric: "audience", mode: "current" };
+    if (mode === "current") {
+      result.sort((a, b) => b.currentValue - a.currentValue || b.watchlistCount - a.watchlistCount || a.name.localeCompare(b.name));
+    } else if (sort === "asc") {
+      result.sort((a, b) => getTrendMetric(a) - getTrendMetric(b));
+    } else if (sort === "desc") {
+      result.sort((a, b) => getTrendMetric(b) - getTrendMetric(a));
+    } else {
+      result.sort((a, b) => Math.abs(getTrendMetric(b)) - Math.abs(getTrendMetric(a)));
+    }
+
+    const payload = { artists: result, totalCount: result.length, availablePeriods, period, metric: legalMetric, mode };
     routeCache.set(cacheKey, { data: payload, expiresAt: Date.now() + CACHE_TTL_MS });
 
     return NextResponse.json(
       { ...payload, artists: result.slice(skip, skip + take) },
       { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300" } }
     );
-  }
-
-  const periodMs = PERIODS[period];
-  if (!periodMs) {
-    return NextResponse.json({ error: "Invalid period" }, { status: 400 });
   }
 
   // Serve from cache if fresh
@@ -179,8 +229,6 @@ export async function GET(req: Request) {
       { headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=300", "X-Cache": "HIT" } }
     );
   }
-
-  const cutoff = new Date(Date.now() - periodMs);
 
   // Determine which periods have data
   const oldestSnapshot = await prisma.artistSnapshot.findFirst({

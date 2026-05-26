@@ -4,6 +4,7 @@ import "./globals.css";
 import Providers from "@/components/Providers";
 import Navbar from "@/components/Navbar";
 import AppShell from "@/components/AppShell";
+import { auth } from "@/lib/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,18 +24,22 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const initialSession = process.env.NODE_ENV === "development"
+    ? await auth()
+    : undefined;
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full bg-[var(--background)]">
-        <Providers>
+        <Providers session={initialSession}>
           <Navbar />
           <AppShell>{children}</AppShell>
         </Providers>

@@ -1,28 +1,63 @@
 import { prisma } from "@/lib/prisma";
+import { getArtistInternalMetrics } from "@/lib/legal-rankings";
 
 /**
- * Record a snapshot of an artist's current stats across all platforms.
- * Called after every stat refresh so we can track growth over time.
+ * Record a snapshot of an artist's internal popularity/hype indices.
+ * Legalized mode avoids persisting raw platform counters here.
  */
 export async function recordSnapshot(artistId: string) {
-  const links = await prisma.artistLink.findMany({
-    where: { artistId },
-  });
-  if (links.length === 0) return;
+  const [artist, previousSnapshot, watchlistAggregate] = await Promise.all([
+    prisma.artist.findUnique({
+      where: { id: artistId },
+      select: {
+        id: true,
+        watchlistCount: true,
+        tracks: {
+          select: {
+            popularity: true,
+            previewUrl: true,
+            releaseDate: true,
+          },
+        },
+      },
+    }),
+    prisma.artistSnapshot.findFirst({
+      where: { artistId },
+      orderBy: { createdAt: "desc" },
+      select: {
+        monthlyListeners: true,
+        followerCount: true,
+      },
+    }),
+    prisma.artist.aggregate({
+      _max: { watchlistCount: true },
+    }),
+  ]);
 
-  const spotify = links.find((l) => l.platform === "SPOTIFY");
-  const youtube = links.find((l) => l.platform === "YOUTUBE");
-  const tiktok = links.find((l) => l.platform === "TIKTOK");
-  const instagram = links.find((l) => l.platform === "INSTAGRAM");
+  if (!artist) return;
+
+  const metrics = getArtistInternalMetrics({
+    tracks: artist.tracks,
+    watchlistCount: artist.watchlistCount,
+    maxWatchlistCount: watchlistAggregate._max.watchlistCount ?? 1,
+    previousSnapshot: previousSnapshot
+      && previousSnapshot.monthlyListeners <= 100
+      && previousSnapshot.followerCount <= 100
+      ? {
+          popularityIndex: previousSnapshot.monthlyListeners,
+          hypeIndex: previousSnapshot.followerCount,
+        }
+      : null,
+  });
 
   await prisma.artistSnapshot.create({
     data: {
       artistId,
-      monthlyListeners: spotify?.monthlyListeners ?? 0,
-      followerCount: spotify?.followerCount ?? 0,
-      youtubeSubscribers: youtube?.followerCount ?? 0,
-      tiktokFollowers: tiktok?.followerCount ?? 0,
-      instagramFollowers: instagram?.followerCount ?? 0,
+      monthlyListeners: metrics.popularityScore,
+      followerCount: metrics.hypeScore,
+      youtubeSubscribers: metrics.breakoutTrackCount,
+      tiktokFollowers: metrics.recentReleaseCount,
+      instagramFollowers: metrics.activeTrackCount,
     },
   });
 }
@@ -33,42 +68,67 @@ export async function recordSnapshot(artistId: string) {
 export async function recordTrackSnapshots(trackIds?: string[]) {
   const tracks = await prisma.track.findMany({
     where: trackIds ? { id: { in: trackIds } } : undefined,
-    select: { id: true, popularity: true },
+    select: {
+      id: true,
+      popularity: true,
+      spotifyPopularity: true,
+      youtubeViews: true,
+    },
   });
 
-  const tracksWithPopularity = tracks.filter((track) => track.popularity > 0);
+  const tracksWithSignals = tracks.filter(
+    (track) => track.popularity > 0 || track.spotifyPopularity > 0 || track.youtubeViews > 0
+  );
 
-  if (tracksWithPopularity.length === 0) return;
+  if (tracksWithSignals.length === 0) return;
 
   await prisma.trackSnapshot.createMany({
-    data: tracksWithPopularity.map((track) => ({
+    data: tracksWithSignals.map((track) => ({
       trackId: track.id,
       popularity: track.popularity,
+      spotifyPopularity: track.spotifyPopularity,
+      youtubeViews: track.youtubeViews,
     })),
   });
 }
 
 /**
- * Record today's rank for all artists (sorted by Spotify monthly listeners).
+ * Record today's rank for all artists using the latest internal popularity index.
  * Uses upsert to avoid duplicates if called multiple times per day.
  */
 export async function recordRankSnapshots() {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-  const artists = await prisma.artist.findMany({
-    include: {
-      links: {
-        where: { platform: "SPOTIFY" },
-        select: { monthlyListeners: true },
+  const [artists, latestSnapshots] = await Promise.all([
+    prisma.artist.findMany({
+      select: {
+        id: true,
+        name: true,
+        watchlistCount: true,
       },
-    },
-  });
+    }),
+    prisma.artistSnapshot.findMany({
+      orderBy: { createdAt: "desc" },
+      distinct: ["artistId"],
+      select: {
+        artistId: true,
+        monthlyListeners: true,
+      },
+    }),
+  ]);
 
-  // Sort the same way the leaderboard does: Spotify monthly listeners desc
+  const latestSnapshotMap = new Map(
+    latestSnapshots.map((snapshot) => [
+      snapshot.artistId,
+      snapshot.monthlyListeners <= 100 ? snapshot.monthlyListeners : 0,
+    ])
+  );
+
   artists.sort((a, b) => {
-    const aListeners = a.links[0]?.monthlyListeners ?? 0;
-    const bListeners = b.links[0]?.monthlyListeners ?? 0;
+    const aListeners = latestSnapshotMap.get(a.id) ?? 0;
+    const bListeners = latestSnapshotMap.get(b.id) ?? 0;
     if (bListeners !== aListeners) return bListeners - aListeners;
+    if (b.watchlistCount !== a.watchlistCount) return b.watchlistCount - a.watchlistCount;
     return a.name.localeCompare(b.name);
   });
 

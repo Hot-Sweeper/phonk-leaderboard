@@ -1,7 +1,17 @@
 import { prisma } from "@/lib/prisma";
-import { fetchPlatformStats, fetchSpotifyFullCatalog, fetchSpotifyArtistDetails, parseSpotifyUrl, resolveArtistToDeezer, fetchDeezerFullCatalog } from "@/lib/platforms";
+import {
+  fetchDeezerFullCatalog,
+  fetchPlatformStats,
+  fetchSpotifyArtistDetails,
+  fetchSpotifyFullCatalog,
+  fetchYouTubeVideoViews,
+  parseSpotifyUrl,
+  resolveArtistToDeezer,
+  searchYouTubeMusicVideoId,
+} from "@/lib/platforms";
 import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
+import { getTrackAudienceScore, isRecentlyReleased } from "@/lib/legal-rankings";
 
 type ArtistLinkForUpdate = {
   id: string;
@@ -54,6 +64,18 @@ async function buildDeezerArtistMap() {
   return deezerIdToArtistId;
 }
 
+function getInternalTrackPopularity(
+  popularity: number,
+  releaseDate: string | null | undefined,
+  previewUrl: string | null | undefined
+) {
+  return getTrackAudienceScore({
+    popularity,
+    releaseDate,
+    previewUrl,
+  });
+}
+
 function normTrackName(s: string) {
   return s
     .toLowerCase()
@@ -61,6 +83,161 @@ function normTrackName(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+type DeezerCatalogTrack = NonNullable<Awaited<ReturnType<typeof fetchDeezerFullCatalog>>>[number];
+type SpotifyCatalogTrack = NonNullable<Awaited<ReturnType<typeof fetchSpotifyFullCatalog>>>[number];
+type ArtistYouTubeTrack = {
+  id: string;
+  name: string;
+  spotifyPopularity: number;
+  popularity: number;
+  releaseDate: string | null;
+  youtubeVideoId: string | null;
+  youtubeViews: number;
+};
+
+const MAX_YOUTUBE_TRACKS_PER_ARTIST = 12;
+const MAX_YOUTUBE_SEARCHES_PER_ARTIST = 5;
+const MIN_YOUTUBE_SEARCH_SPOTIFY_POPULARITY = 35;
+const MIN_YOUTUBE_SEARCH_INTERNAL_POPULARITY = 55;
+
+function shouldResolveYouTubeTrack(track: ArtistYouTubeTrack) {
+  return track.spotifyPopularity >= MIN_YOUTUBE_SEARCH_SPOTIFY_POPULARITY
+    || track.popularity >= MIN_YOUTUBE_SEARCH_INTERNAL_POPULARITY
+    || isRecentlyReleased(track.releaseDate, 120);
+}
+
+async function refreshArtistYouTubeSignals(artistId: string, artistName: string) {
+  const tracks = await prisma.track.findMany({
+    where: { artistId },
+    orderBy: [
+      { spotifyPopularity: "desc" },
+      { popularity: "desc" },
+      { updatedAt: "desc" },
+    ],
+    select: {
+      id: true,
+      name: true,
+      spotifyPopularity: true,
+      popularity: true,
+      releaseDate: true,
+      youtubeVideoId: true,
+      youtubeViews: true,
+    },
+    take: MAX_YOUTUBE_TRACKS_PER_ARTIST,
+  });
+
+  if (tracks.length === 0) {
+    return;
+  }
+
+  const resolvedVideoIds = new Map<string, string>();
+  let searchCount = 0;
+
+  for (const track of tracks) {
+    if (track.youtubeVideoId) {
+      resolvedVideoIds.set(track.id, track.youtubeVideoId);
+      continue;
+    }
+
+    if (!shouldResolveYouTubeTrack(track) || searchCount >= MAX_YOUTUBE_SEARCHES_PER_ARTIST) {
+      continue;
+    }
+
+    const videoId = await searchYouTubeMusicVideoId(track.name, artistName);
+    searchCount += 1;
+
+    if (!videoId) {
+      continue;
+    }
+
+    resolvedVideoIds.set(track.id, videoId);
+
+    await prisma.track.update({
+      where: { id: track.id },
+      data: { youtubeVideoId: videoId },
+    }).catch(() => {});
+  }
+
+  const uniqueVideoIds = [...new Set(resolvedVideoIds.values())];
+  if (uniqueVideoIds.length === 0) {
+    return;
+  }
+
+  const viewsByVideoId = await fetchYouTubeVideoViews(uniqueVideoIds);
+  if (viewsByVideoId.size === 0) {
+    return;
+  }
+
+  for (const track of tracks) {
+    const videoId = resolvedVideoIds.get(track.id);
+    if (!videoId) {
+      continue;
+    }
+
+    const youtubeViews = viewsByVideoId.get(videoId);
+    if (youtubeViews == null) {
+      continue;
+    }
+
+    if (track.youtubeVideoId === videoId && track.youtubeViews === youtubeViews) {
+      continue;
+    }
+
+    await prisma.track.update({
+      where: { id: track.id },
+      data: {
+        youtubeVideoId: videoId,
+        youtubeViews,
+      },
+    }).catch(() => {});
+  }
+}
+
+function buildSpotifyTrackLookup(tracks: SpotifyCatalogTrack[]) {
+  const lookup = new Map<string, SpotifyCatalogTrack[]>();
+  for (const track of tracks) {
+    const key = normTrackName(track.name);
+    if (!key) continue;
+    const bucket = lookup.get(key);
+    if (bucket) {
+      bucket.push(track);
+      continue;
+    }
+    lookup.set(key, [track]);
+  }
+  return lookup;
+}
+
+function findMatchingSpotifyTrack(track: DeezerCatalogTrack, spotifyLookup: Map<string, SpotifyCatalogTrack[]>) {
+  const key = normTrackName(track.name);
+  if (!key) return null;
+
+  const matches = spotifyLookup.get(key) ?? [];
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return [...matches].sort((left, right) => {
+    const leftDurationDiff = Math.abs((left.durationMs ?? 0) - (track.durationMs ?? 0));
+    const rightDurationDiff = Math.abs((right.durationMs ?? 0) - (track.durationMs ?? 0));
+    if (leftDurationDiff !== rightDurationDiff) {
+      return leftDurationDiff - rightDurationDiff;
+    }
+
+    if (left.popularity !== right.popularity) {
+      return right.popularity - left.popularity;
+    }
+
+    const leftPreview = left.previewUrl ? 1 : 0;
+    const rightPreview = right.previewUrl ? 1 : 0;
+    if (leftPreview !== rightPreview) {
+      return rightPreview - leftPreview;
+    }
+
+    return (right.releaseDate ?? right.album.releaseDate ?? "").localeCompare(left.releaseDate ?? left.album.releaseDate ?? "");
+  })[0] ?? null;
 }
 
 export async function deduplicateStoredTracksForArtist(artistId: string) {
@@ -81,18 +258,36 @@ export async function deduplicateStoredTracksForArtist(artistId: string) {
 
   // Cross-link: if a losing track has a spotifyId that its duplicate winner lacks, transfer it
   for (const winner of keptTracks) {
-    if (winner.spotifyId) continue;
+    if (winner.spotifyId && winner.spotifyPopularity > 0) continue;
     const winnerNorm = normTrackName(winner.name);
     for (const loser of existingTracks) {
       if (keepIds.has(loser.id)) continue;
-      if (!loser.spotifyId) continue;
+      if (!loser.spotifyId && loser.spotifyPopularity <= 0) continue;
       if (normTrackName(loser.name) !== winnerNorm) continue;
+      const transferredSpotifyPopularity = loser.spotifyPopularity > winner.spotifyPopularity
+        ? loser.spotifyPopularity
+        : null;
+      const updateData = {
+        ...(!winner.spotifyId && loser.spotifyId ? { spotifyId: loser.spotifyId } : {}),
+        ...(!winner.spotifyUrl && loser.spotifyUrl ? { spotifyUrl: loser.spotifyUrl } : {}),
+        ...(transferredSpotifyPopularity != null ? {
+          spotifyPopularity: transferredSpotifyPopularity,
+          popularity: Math.max(
+            winner.popularity,
+            getInternalTrackPopularity(
+              transferredSpotifyPopularity,
+              winner.releaseDate,
+              winner.previewUrl
+            )
+          ),
+        } : {}),
+      };
+      if (Object.keys(updateData).length === 0) {
+        continue;
+      }
       await prisma.track.update({
         where: { id: winner.id },
-        data: {
-          spotifyId: loser.spotifyId,
-          ...(loser.spotifyUrl ? { spotifyUrl: loser.spotifyUrl } : {}),
-        },
+        data: updateData,
       }).catch(() => {});
       break;
     }
@@ -197,13 +392,33 @@ async function refreshArtistCatalogInternal(
     if (artistDetails) {
       await prisma.artist.update({
         where: { id: artist.id },
-        data: { genres: artistDetails.genres, spotifyPopularity: artistDetails.popularity },
+        data: { genres: artistDetails.genres },
       });
     }
   }
 
   const touchedTrackIds: string[] = [];
   let trackCount = 0;
+  const spotifyTracks = spotifyId ? await fetchSpotifyFullCatalog(spotifyId).catch(() => null) : null;
+  const spotifyTrackLookup = buildSpotifyTrackLookup(spotifyTracks ?? []);
+  const matchedSpotifyTrackIds = new Set<string>();
+  const existingTracks = await prisma.track.findMany({
+    where: { artistId: artist.id },
+    select: {
+      deezerId: true,
+      spotifyPopularity: true,
+      spotifyUrl: true,
+    },
+  });
+  const existingTrackByDeezerId = new Map(
+    existingTracks
+      .filter((track) => track.deezerId)
+      .map((track) => [track.deezerId as string, track])
+  );
+
+  if (spotifyId && !spotifyTracks) {
+    console.warn(`[Catalog] Spotify track catalog unavailable for ${artist.name}; keeping any stored Spotify track signals.`);
+  }
 
   if (deezerId) {
     const deezerTracks = await fetchDeezerFullCatalog(deezerId);
@@ -211,6 +426,10 @@ async function refreshArtistCatalogInternal(
     if (deezerTracks && deezerTracks.length > 0) {
       for (const track of deezerTracks) {
         const deezerTrackId = String(track.deezerId);
+        const existingTrack = existingTrackByDeezerId.get(deezerTrackId);
+        const matchedSpotifyTrack = findMatchingSpotifyTrack(track, spotifyTrackLookup);
+        const spotifyPopularity = matchedSpotifyTrack?.popularity ?? existingTrack?.spotifyPopularity ?? 0;
+        const spotifyUrl = matchedSpotifyTrack?.spotifyUrl ?? existingTrack?.spotifyUrl;
         const featured = dedupeNames(
           track.artists.filter((artistEntry) => artistEntry.deezerId !== deezerId).map((artistEntry) => artistEntry.name)
         );
@@ -231,10 +450,16 @@ async function refreshArtistCatalogInternal(
             albumImageUrl: track.album.imageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
-            popularity: track.popularity,
+            popularity: getInternalTrackPopularity(
+              spotifyPopularity,
+              track.releaseDate ?? track.album.releaseDate,
+              track.previewUrl
+            ),
+            spotifyPopularity,
             trackNumber: track.trackNumber,
             explicit: track.explicit,
             releaseDate: track.releaseDate ?? track.album.releaseDate,
+            spotifyUrl,
             deezerUrl: track.deezerUrl,
             bpm: track.bpm,
             gain: track.gain,
@@ -249,10 +474,16 @@ async function refreshArtistCatalogInternal(
             albumImageUrl: track.album.imageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
-            popularity: track.popularity,
+            popularity: getInternalTrackPopularity(
+              spotifyPopularity,
+              track.releaseDate ?? track.album.releaseDate,
+              track.previewUrl
+            ),
+            spotifyPopularity,
             trackNumber: track.trackNumber,
             explicit: track.explicit,
             releaseDate: track.releaseDate ?? track.album.releaseDate,
+            spotifyUrl,
             deezerUrl: track.deezerUrl,
             bpm: track.bpm,
             gain: track.gain,
@@ -262,6 +493,10 @@ async function refreshArtistCatalogInternal(
           select: { id: true },
         });
 
+        if (matchedSpotifyTrack) {
+          matchedSpotifyTrackIds.add(matchedSpotifyTrack.id);
+        }
+
         touchedTrackIds.push(savedTrack.id);
         trackCount++;
       }
@@ -270,12 +505,14 @@ async function refreshArtistCatalogInternal(
     }
 
     // ── Supplement: also fetch Spotify catalog to catch any tracks exclusive to Spotify ──
-    if (spotifyId) {
+    if (spotifyId && spotifyTracks) {
       try {
-        const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
-
-        if (spotifyTracks && spotifyTracks.length > 0) {
+        if (spotifyTracks.length > 0) {
           for (const track of spotifyTracks) {
+            if (matchedSpotifyTrackIds.has(track.id)) {
+              continue;
+            }
+
             const featured = dedupeNames(
               track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
             );
@@ -288,7 +525,12 @@ async function refreshArtistCatalogInternal(
                 albumImageUrl: track.album.imageUrl,
                 previewUrl: track.previewUrl,
                 durationMs: track.durationMs,
-                ...(track.popularity > 0 ? { popularity: track.popularity } : {}),
+                popularity: getInternalTrackPopularity(
+                  track.popularity,
+                  track.album.releaseDate,
+                  track.previewUrl
+                ),
+                spotifyPopularity: track.popularity,
                 trackNumber: track.trackNumber,
                 discNumber: track.discNumber,
                 explicit: track.explicit,
@@ -304,7 +546,12 @@ async function refreshArtistCatalogInternal(
                 albumImageUrl: track.album.imageUrl,
                 previewUrl: track.previewUrl,
                 durationMs: track.durationMs,
-                ...(track.popularity > 0 ? { popularity: track.popularity } : {}),
+                popularity: getInternalTrackPopularity(
+                  track.popularity,
+                  track.album.releaseDate,
+                  track.previewUrl
+                ),
+                spotifyPopularity: track.popularity,
                 trackNumber: track.trackNumber,
                 discNumber: track.discNumber,
                 explicit: track.explicit,
@@ -326,8 +573,6 @@ async function refreshArtistCatalogInternal(
       }
     }
   } else if (spotifyId) {
-    const spotifyTracks = await fetchSpotifyFullCatalog(spotifyId);
-
     if (spotifyTracks && spotifyTracks.length > 0) {
       for (const track of spotifyTracks) {
         const featured = dedupeNames(
@@ -342,7 +587,12 @@ async function refreshArtistCatalogInternal(
             albumImageUrl: track.album.imageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
-            ...(track.popularity > 0 ? { popularity: track.popularity } : {}),
+            popularity: getInternalTrackPopularity(
+              track.popularity,
+              track.album.releaseDate,
+              track.previewUrl
+            ),
+            spotifyPopularity: track.popularity,
             trackNumber: track.trackNumber,
             discNumber: track.discNumber,
             explicit: track.explicit,
@@ -358,7 +608,12 @@ async function refreshArtistCatalogInternal(
             albumImageUrl: track.album.imageUrl,
             previewUrl: track.previewUrl,
             durationMs: track.durationMs,
-            ...(track.popularity > 0 ? { popularity: track.popularity } : {}),
+            popularity: getInternalTrackPopularity(
+              track.popularity,
+              track.album.releaseDate,
+              track.previewUrl
+            ),
+            spotifyPopularity: track.popularity,
             trackNumber: track.trackNumber,
             discNumber: track.discNumber,
             explicit: track.explicit,
@@ -376,6 +631,8 @@ async function refreshArtistCatalogInternal(
       await deduplicateStoredTracksForArtist(artist.id);
     }
   }
+
+  await refreshArtistYouTubeSignals(artist.id, artist.name);
 
   return {
     trackCount,
@@ -525,18 +782,88 @@ export async function runFullUpdate(trigger: string = "manual"): Promise<UpdateR
 }
 
 /**
- * Run a song/track update for all artists — fetches top tracks + genres + popularity from Spotify.
+ * Get artists that need signal backfilling (have incomplete Spotify/YouTube coverage).
+ * Returns artists with fewer than SIGNAL_COVERAGE_THRESHOLD fully-covered tracks.
  */
-export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateResult> {
+async function getArtistsNeedingDeltaUpdate(): Promise<Awaited<ReturnType<typeof prisma.artist.findMany>>> {
+  const SIGNAL_COVERAGE_THRESHOLD = 5; // Artists with 5+ tracks with both signals are skipped
+
+  // Get artist IDs with sufficient signal coverage
+  const wellCovered = await prisma.artist.findMany({
+    where: {
+      tracks: {
+        some: {
+          // Track has both Spotify and YouTube signals
+          spotifyPopularity: { gt: 0 },
+          youtubeViews: { gt: 0 },
+        },
+      },
+    },
+    select: { id: true },
+  });
+
+  // Get all artist IDs that have ANY tracks
+  const allWithTracks = await prisma.artist.findMany({
+    where: { tracks: { some: {} } },
+    select: { id: true },
+  });
+
+  // Count fully-covered tracks per artist
+  const coverageStats = await prisma.track.groupBy({
+    by: ["artistId"],
+    where: {
+      spotifyPopularity: { gt: 0 },
+      youtubeViews: { gt: 0 },
+    },
+    _count: { id: true },
+  });
+
+  const sufficientCoverageIds = new Set(
+    coverageStats
+      .filter((stat) => (stat._count.id ?? 0) >= SIGNAL_COVERAGE_THRESHOLD)
+      .map((stat) => stat.artistId)
+  );
+
+  // Return all artists EXCEPT those with sufficient coverage
+  const needUpdateIds = allWithTracks
+    .map((a) => a.id)
+    .filter((id) => !sufficientCoverageIds.has(id));
+
+  // Always include artists with no tracks yet
+  const noTracksArtists = await prisma.artist.findMany({
+    where: { tracks: { none: {} } },
+    include: { links: { where: { platform: "SPOTIFY" } } },
+  });
+
+  if (needUpdateIds.length === 0) {
+    return noTracksArtists;
+  }
+
+  const needUpdateArtists = await prisma.artist.findMany({
+    where: { id: { in: needUpdateIds } },
+    include: { links: { where: { platform: "SPOTIFY" } } },
+  });
+
+  return [...noTracksArtists, ...needUpdateArtists];
+}
+
+/**
+ * Run a song/track update for all artists — fetches top tracks + genres + popularity from Spotify.
+ * If mode="delta", only processes artists with incomplete signal coverage (faster, see new data in realtime).
+ * If mode="full", processes all artists.
+ */
+export async function runSongUpdate(trigger: string = "manual", mode: "delta" | "full" = "delta"): Promise<UpdateResult> {
   if (await isUpdateRunning("songs")) {
     throw new Error("A song update is already running.");
   }
 
   const startTime = Date.now();
 
-  const artists = await prisma.artist.findMany({
-    include: { links: { where: { platform: "SPOTIFY" } } },
-  });
+  const artists = mode === "delta"
+    ? await getArtistsNeedingDeltaUpdate()
+    : await prisma.artist.findMany({
+        include: { links: { where: { platform: "SPOTIFY" } } },
+      });
 
   const log = await prisma.updateLog.create({
     data: {
@@ -544,6 +871,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
       updateType: "songs",
       status: "running",
       totalArtists: artists.length,
+      details: JSON.stringify({ mode, baseArtistCount: artists.length }),
     },
   });
 
@@ -593,7 +921,7 @@ export async function runSongUpdate(trigger: string = "manual"): Promise<UpdateR
         updatedCount: updated,
         failedCount: failed,
         durationMs: totalDuration,
-        details: JSON.stringify(details),
+        details: JSON.stringify({ mode, baseArtistCount: artists.length, artistDetails: details }),
         completedAt: new Date(),
       },
     });

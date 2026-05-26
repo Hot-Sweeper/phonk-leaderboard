@@ -11,42 +11,48 @@ import {
 import ArtistListView from "@/components/rankings/ArtistListView";
 import SongListView from "@/components/rankings/SongListView";
 import BubbleView from "@/components/rankings/BubbleView";
-import { SpotifyIcon, YouTubeIcon, InstagramIcon, TikTokIcon } from "@/components/platform-icons";
 
 type Entity = "artists" | "songs";
 type ViewMode = "list" | "bubbles";
-type SongMode = "popularity" | "day" | "week" | "month";
+type ArtistMode = "popularity" | "hype";
+type SongMode = "popularity" | "spotify" | "youtube" | "day" | "week" | "month";
 type TrendDisplayMode = "current" | "relative" | "absolute";
 type RankingModel = "standard" | "legal";
 
-const ARTIST_PLATFORMS: Array<{ key: string; Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }> = [
-  { key: "",          Icon: SpotifyIcon,   color: "#1DB954", label: "Spotify Listeners" },
-  { key: "YOUTUBE",   Icon: YouTubeIcon,   color: "#FF0000", label: "YouTube" },
-  { key: "INSTAGRAM", Icon: InstagramIcon, color: "#E4405F", label: "Instagram" },
-  { key: "TIKTOK",    Icon: TikTokIcon,    color: "#00f2ea", label: "TikTok" },
-];
+function getInitialArtistMode(rawMode: string | null, rankingModel: RankingModel): ArtistMode {
+  if (rankingModel !== "legal") return "popularity";
+  if (rawMode === "hype" || rawMode === "youtube") return "hype";
+  return "popularity";
+}
 
-const SONG_MODES: Array<{ key: SongMode; label: string }> = [
-  { key: "popularity", label: "Pop" },
-  { key: "day", label: "24H" },
-  { key: "week", label: "7D" },
-  { key: "month", label: "30D" },
+function getInitialSongMode(rawMode: string | null, rankingModel: RankingModel): SongMode {
+  if (rankingModel === "legal") {
+    if (rawMode === "youtube" || rawMode === "day") return "youtube";
+    return "spotify";
+  }
+
+  if (rawMode === "day" || rawMode === "week" || rawMode === "month") return rawMode;
+  return "popularity";
+}
+
+const LEGAL_ARTIST_MODES: Array<{ key: ArtistMode; label: string }> = [
+  { key: "popularity", label: "Popularity" },
+  { key: "hype", label: "Hype" },
 ];
 
 const LEGAL_SONG_MODES: Array<{ key: SongMode; label: string }> = [
-  { key: "popularity", label: "Audience" },
-  { key: "day", label: "24H" },
-];
-
-const TREND_DISPLAY_MODES: Array<{ key: TrendDisplayMode; label: string }> = [
-  { key: "relative", label: "% Change" },
-  { key: "absolute", label: "Abs Change" },
-  { key: "current", label: "Current" },
+  { key: "spotify", label: "Popularity" },
+  { key: "youtube", label: "Hype" },
 ];
 
 const SONG_TREND_DISPLAY_MODES: Array<{ key: Exclude<TrendDisplayMode, "current">; label: string }> = [
   { key: "relative", label: "% Change" },
   { key: "absolute", label: "Abs Change" },
+];
+
+const LEGAL_BUBBLE_DISPLAY_MODES: Array<{ key: Extract<TrendDisplayMode, "current" | "relative">; label: string }> = [
+  { key: "current", label: "Current" },
+  { key: "relative", label: "% Change" },
 ];
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -70,18 +76,22 @@ function RankingsInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const initialSort = searchParams.get("sort");
+  const initialEntity = (searchParams.get("entity") as Entity) || "artists";
+  const initialRankingModel: RankingModel = "legal";
+  const initialViewMode = (searchParams.get("view") as ViewMode) || "list";
 
   // Read initial state from URL params
-  const [entity, setEntity] = useState<Entity>((searchParams.get("entity") as Entity) || "artists");
-  const [viewMode, setViewMode] = useState<ViewMode>((searchParams.get("view") as ViewMode) || "list");
+  const [entity, setEntity] = useState<Entity>(initialEntity);
+  const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
   const [platform, setPlatform] = useState(searchParams.get("platform") || "");
-  const [songMode, setSongMode] = useState<SongMode>((searchParams.get("mode") as SongMode) || "popularity");
-  const [rankingModel, setRankingModel] = useState<RankingModel>(searchParams.get("model") === "legal" ? "legal" : "standard");
+  const [artistMode, setArtistMode] = useState<ArtistMode>(getInitialArtistMode(searchParams.get("mode"), initialRankingModel));
+  const [songMode, setSongMode] = useState<SongMode>(getInitialSongMode(searchParams.get("mode"), initialRankingModel));
+  const [rankingModel] = useState<RankingModel>(initialRankingModel);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   // Bubble-specific
-  const [metric, setMetric] = useState(searchParams.get("metric") || "listeners");
+  const [metric] = useState(searchParams.get("metric") || "listeners");
   const initialBubbleMode = searchParams.get("bmode");
   const [bubbleMode, setBubbleMode] = useState<TrendDisplayMode>(
     initialBubbleMode === "relative" || initialBubbleMode === "absolute" || initialBubbleMode === "current"
@@ -108,8 +118,8 @@ function RankingsInner() {
       if (s.entity) setEntity(s.entity as Entity);
       if (s.viewMode) setViewMode(s.viewMode as ViewMode);
       if ("platform" in s) setPlatform(s.platform);
+      if (s.artistMode === "popularity" || s.artistMode === "hype") setArtistMode(s.artistMode);
       if (s.songMode) setSongMode(s.songMode as SongMode);
-      if (s.rankingModel === "legal" || s.rankingModel === "standard") setRankingModel(s.rankingModel);
       if (s.bubbleMode === "relative" || s.bubbleMode === "absolute" || s.bubbleMode === "current") {
         setBubbleMode(s.bubbleMode);
       }
@@ -132,16 +142,28 @@ function RankingsInner() {
   useEffect(() => {
     if (rankingModel === "legal") {
       if (platform) setPlatform("");
-      if (bubbleMode !== "current") setBubbleMode("current");
-      if (entity === "songs" && songMode !== "popularity" && songMode !== "day") {
-        setSongMode("day");
+      if (entity === "songs") {
+        if (songMode === "youtube" || songMode === "spotify") return;
+        if (songMode === "day") {
+          setSongMode("youtube");
+          return;
+        }
+        setSongMode("spotify");
       }
     }
-  }, [rankingModel, entity, platform, bubbleMode, songMode]);
+  }, [rankingModel, entity, platform, songMode]);
 
   useEffect(() => {
     if (rankingModel === "legal") {
-      if (entity === "songs" && bubbleMode !== "current") {
+      if (viewMode !== "bubbles" && bubbleMode !== "current") {
+        setBubbleMode("current");
+        return;
+      }
+      if (viewMode === "bubbles" && bubbleMode === "absolute") {
+        setBubbleMode("relative");
+        return;
+      }
+      if (viewMode === "bubbles" && entity === "songs" && songMode === "spotify" && bubbleMode !== "current") {
         setBubbleMode("current");
       }
       return;
@@ -153,7 +175,7 @@ function RankingsInner() {
     if (entity === "songs" && songMode !== "popularity" && bubbleMode === "current") {
       setBubbleMode("absolute");
     }
-  }, [entity, songMode, bubbleMode, rankingModel]);
+  }, [entity, songMode, bubbleMode, rankingModel, viewMode]);
 
   // Sync URL params
   useEffect(() => {
@@ -162,18 +184,25 @@ function RankingsInner() {
     if (viewMode !== "list") params.set("view", viewMode);
     if (rankingModel === "legal") params.set("model", "legal");
     if (viewMode === "list" && entity === "artists" && platform) params.set("platform", platform);
-    if (entity === "songs" && songMode !== "popularity") params.set("mode", songMode);
+    if (entity === "artists" && rankingModel === "legal" && artistMode !== "popularity") params.set("mode", artistMode);
+    if (entity === "songs") {
+      if (rankingModel === "legal") {
+        if (songMode !== "spotify") params.set("mode", songMode);
+      } else if (songMode !== "popularity") {
+        params.set("mode", songMode);
+      }
+    }
     if (!collapseVersions) params.set("grouped", "false");
     if (viewMode === "bubbles") {
       if (entity === "artists") {
-        if (metric !== "listeners") params.set("metric", metric);
+        if (rankingModel === "standard" && metric !== "listeners") params.set("metric", metric);
         if (bubbleMode !== "current") params.set("bmode", bubbleMode);
         if (period !== "day") params.set("period", period);
         if (bubbleMode !== "current" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
       }
       if (entity === "songs") {
         if (bubbleMode !== "current") params.set("bmode", bubbleMode);
-        if (songMode !== "popularity" && bubbleMode !== "current" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
+        if ((rankingModel === "legal" || songMode !== "popularity") && bubbleMode !== "current" && changeSortOrder !== "desc") params.set("sort", changeSortOrder);
       }
     }
     const qs = params.toString();
@@ -189,6 +218,7 @@ function RankingsInner() {
         viewMode,
         rankingModel,
         platform,
+        artistMode,
         songMode,
         bubbleMode,
         period,
@@ -196,7 +226,7 @@ function RankingsInner() {
         changeSortOrder,
       }));
     } catch { /**/ }
-  }, [entity, viewMode, rankingModel, platform, songMode, metric, bubbleMode, period, collapseVersions, changeSortOrder, router]);
+  }, [entity, viewMode, rankingModel, platform, artistMode, songMode, metric, bubbleMode, period, collapseVersions, changeSortOrder, router]);
 
   const isBubbles = viewMode === "bubbles";
   const isArtists = entity === "artists";
@@ -247,15 +277,6 @@ function RankingsInner() {
             </button>
           </div>
 
-          <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-            <button onClick={() => setRankingModel("standard")} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${rankingModel === "standard" ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-              Standard
-            </button>
-            <button onClick={() => setRankingModel("legal")} className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${rankingModel === "legal" ? "bg-emerald-600 text-white shadow-[0_0_8px_rgba(16,185,129,0.45)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
-              Legal Mode
-            </button>
-          </div>
-
           {/* Search — right side */}
           <div className="relative flex-1 min-w-[160px] ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--muted-foreground)]" />
@@ -271,35 +292,19 @@ function RankingsInner() {
 
         {/* Row 2: Contextual filters */}
         <div className="flex items-center gap-2 pb-2.5 flex-wrap">
-
-          {/* Platform icons — artists */}
-          {isArtists && rankingModel === "standard" && (
+          {isArtists && rankingModel === "legal" && (
             <div className="flex gap-1">
-              {ARTIST_PLATFORMS.map((p) => {
-                const platformMetricMap: Record<string, string> = { "": "listeners", YOUTUBE: "youtube", TIKTOK: "tiktok", INSTAGRAM: "instagram" };
-                const active = isBubbles ? metric === platformMetricMap[p.key] : platform === p.key;
-                return (
-                  <button
-                    key={p.key}
-                    onClick={() => { setPlatform(p.key); if (isBubbles) setMetric(platformMetricMap[p.key]); }}
-                    title={p.label}
-                    aria-label={p.label}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all border ${active ? "border-white/30 bg-white/10" : "border-[var(--muted)] bg-[var(--secondary)] hover:bg-white/10"}`}
-                  >
-                    <p.Icon className="w-3.5 h-3.5" style={{ color: active ? p.color : undefined }} />
-                  </button>
-                );
-              })}
+              {LEGAL_ARTIST_MODES.map((m) => (
+                <button key={m.key} onClick={() => setArtistMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${artistMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
+                  {m.label}
+                </button>
+              ))}
             </div>
           )}
 
-          {/* Divider */}
-          {isArtists && rankingModel === "standard" && <div className="w-px h-5 bg-[var(--muted)]" />}
-
-          {/* Change/Current toggle — artists */}
-          {isArtists && rankingModel === "standard" && (
+          {rankingModel === "legal" && isBubbles && ((isArtists) || (!isArtists && songMode === "youtube")) && (
             <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
-              {TREND_DISPLAY_MODES.map((m) => (
+              {LEGAL_BUBBLE_DISPLAY_MODES.map((m) => (
                 <button key={m.key} onClick={() => setBubbleMode(m.key)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${bubbleMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
                   {m.label}
                 </button>
@@ -307,8 +312,7 @@ function RankingsInner() {
             </div>
           )}
 
-          {/* Period — artists change mode */}
-          {isArtists && rankingModel === "standard" && bubbleMode !== "current" && (
+          {isArtists && rankingModel === "legal" && isBubbles && bubbleMode !== "current" && (
             <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
               {ALL_PERIODS.map((p) => (
                 <button key={p} onClick={() => setPeriod(p)} className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}>
@@ -318,8 +322,7 @@ function RankingsInner() {
             </div>
           )}
 
-          {/* Sort order — artists change mode */}
-          {isArtists && rankingModel === "standard" && bubbleMode !== "current" && (
+          {rankingModel === "legal" && isBubbles && bubbleMode !== "current" && (
             <>
               <div className="w-px h-5 bg-[var(--muted)]" />
               <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
@@ -338,7 +341,7 @@ function RankingsInner() {
           {/* Song modes */}
           {!isArtists && (
             <div className="flex gap-1">
-              {(rankingModel === "legal" ? LEGAL_SONG_MODES : SONG_MODES).map((m) => (
+              {LEGAL_SONG_MODES.map((m) => (
                 <button key={m.key} onClick={() => setSongMode(m.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${songMode === m.key ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-[var(--secondary)] text-[var(--muted-foreground)] hover:text-white border border-[var(--muted)]"}`}>
                   {m.label}
                 </button>
@@ -417,10 +420,12 @@ function RankingsInner() {
           {rankingModel === "legal" && (
             <div className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-300">
               {isArtists
-                ? "Audience Score is driven mostly by top-song strength plus the average popularity across the full catalog, with YouTube and internal signals only acting as light tie-breakers."
-                : songMode === "popularity"
-                  ? "Legal Audience ranks songs by stored track strength only."
-                  : "Legal 24H Hype ranks songs by stored change over time, rewards early breakouts, and decays hype as songs age."}
+                ? artistMode === "popularity"
+                  ? "Popularity uses internal catalog ordering. Numeric values stay hidden and only the rank order is shown."
+                  : "Hype uses internal movement signals. Numeric values stay hidden and only the rank order is shown."
+                : songMode === "spotify"
+                  ? "Popularity uses a Spotify-led internal ordering. Numeric scores stay hidden and only the rank order is shown."
+                  : "Hype shows breakout songs only. Numeric scores stay hidden and only the rank order is shown."}
             </div>
           )}
         </div>
@@ -435,6 +440,7 @@ function RankingsInner() {
               metric={metric}
               mode={bubbleMode}
               period={period}
+              artistMode={artistMode}
               songMode={songMode}
               searchQuery={debouncedSearch}
               sortOrder={changeSortOrder}
@@ -450,6 +456,7 @@ function RankingsInner() {
               metric={metric}
               mode={bubbleMode}
               period={period}
+              artistMode={artistMode}
               songMode={songMode}
               searchQuery={debouncedSearch}
               collapseVersions={collapseVersions}
@@ -465,7 +472,7 @@ function RankingsInner() {
         <div className="px-6 pb-12">
           {artistListMounted && (
             <div className={!isArtists ? "hidden" : ""}>
-              <ArtistListView platform={platform} search={debouncedSearch} sortMode={bubbleMode} period={period} changeSortOrder={changeSortOrder} rankingModel={rankingModel} active={!isBubbles && isArtists} />
+              <ArtistListView platform={platform} artistMode={artistMode} search={debouncedSearch} sortMode={bubbleMode} period={period} changeSortOrder={changeSortOrder} rankingModel={rankingModel} active={!isBubbles && isArtists} />
             </div>
           )}
           {songListMounted && (

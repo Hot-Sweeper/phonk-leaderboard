@@ -24,11 +24,6 @@ import {
 import { useDetailPanel } from "@/lib/detail-panel";
 
 /* ── helpers ── */
-function fmt(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -40,11 +35,11 @@ function fmtDur(ms: number) {
 /* ── types ── */
 type ArtistSnap = { monthlyListeners: number; followerCount: number; youtubeSubscribers: number; tiktokFollowers: number; instagramFollowers: number; createdAt: string };
 type ArtistLink = { id: string; platform: string; url: string; handle: string | null; followerCount: number; monthlyListeners: number };
-type Artist = { id: string; name: string; imageUrl: string | null; bannerUrl: string | null; bio: string | null; genres: string[]; spotifyPopularity: number; watchlistCount: number; links: ArtistLink[] };
-type Track = { id: string; name: string; displayName?: string; albumImageUrl: string | null; previewUrl: string | null; deezerUrl?: string | null; deezerId?: string | null; spotifyUrl: string | null; durationMs: number; popularity: number; explicit: boolean; primaryVersion?: string; featuredArtists: string[]; recentGrowth?: number | null };
+type Artist = { id: string; name: string; imageUrl: string | null; bannerUrl: string | null; bio: string | null; genres: string[]; watchlistCount: number; links: ArtistLink[] };
+type Track = { id: string; name: string; displayName?: string; albumName?: string | null; albumImageUrl: string | null; previewUrl: string | null; deezerUrl?: string | null; deezerId?: string | null; spotifyUrl: string | null; durationMs: number; popularity: number; explicit: boolean; releaseDate?: string | null; primaryVersion?: string; featuredArtists: string[]; recentGrowth?: number | null };
 type RankData = { currentRank: number | null; previousRank: number | null; rankChange: number; podiumStreak: { current: number; best: number } };
 type ChartPeriod = "week" | "month" | "year";
-type ChartMetric = "listeners" | "followers" | "youtube" | "tiktok";
+type ChartMetric = "popularity" | "hype" | "breakouts" | "freshness";
 type ChartPoint = { value: number; date: string };
 
 /* ── platform SVG icons ── */
@@ -61,12 +56,12 @@ function InstagramIcon({ className, style }: { className?: string; style?: React
   return <svg className={className} style={style} viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C8.74 0 8.333.015 7.053.072 5.775.132 4.905.333 4.14.63c-.789.306-1.459.717-2.126 1.384S.935 3.35.63 4.14C.333 4.905.131 5.775.072 7.053.012 8.333 0 8.74 0 12s.015 3.667.072 4.947c.06 1.277.261 2.148.558 2.913.306.788.717 1.459 1.384 2.126.667.666 1.336 1.079 2.126 1.384.766.296 1.636.499 2.913.558C8.333 23.988 8.74 24 12 24s3.667-.015 4.947-.072c1.277-.06 2.148-.262 2.913-.558.788-.306 1.459-.718 2.126-1.384.666-.667 1.079-1.335 1.384-2.126.296-.765.499-1.636.558-2.913.06-1.28.072-1.687.072-4.947s-.015-3.667-.072-4.947c-.06-1.277-.262-2.149-.558-2.913-.306-.789-.718-1.459-1.384-2.126C21.319 1.347 20.651.935 19.86.63c-.765-.297-1.636-.499-2.913-.558C15.667.012 15.26 0 12 0zm0 2.16c3.203 0 3.585.016 4.85.071 1.17.055 1.805.249 2.227.415.562.217.96.477 1.382.896.419.42.679.819.896 1.381.164.422.36 1.057.413 2.227.057 1.266.07 1.646.07 4.85s-.015 3.585-.074 4.85c-.061 1.17-.256 1.805-.421 2.227-.224.562-.479.96-.899 1.382-.419.419-.824.679-1.38.896-.42.164-1.065.36-2.235.413-1.274.057-1.649.07-4.859.07-3.211 0-3.586-.015-4.859-.074-1.171-.061-1.816-.256-2.236-.421-.569-.224-.96-.479-1.379-.899-.421-.419-.69-.824-.9-1.38-.165-.42-.359-1.065-.42-2.235-.045-1.26-.061-1.649-.061-4.844 0-3.196.016-3.586.061-4.861.061-1.17.255-1.814.42-2.234.21-.57.479-.96.9-1.381.419-.419.81-.689 1.379-.898.42-.166 1.051-.361 2.221-.421 1.275-.045 1.65-.06 4.859-.06l.045.03zm0 3.678a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 1 0 0-12.324zM12 16c-2.21 0-4-1.79-4-4s1.79-4 4-4 4 1.79 4 4-1.79 4-4 4zm7.846-10.405a1.441 1.441 0 1 1-2.882 0 1.441 1.441 0 0 1 2.882 0z"/></svg>;
 }
 
-type PlatInfo = { Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string; metric: string };
+type PlatInfo = { Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string };
 const PLAT: Record<string, PlatInfo> = {
-  SPOTIFY:   { Icon: SpotifyIcon,   color: "#1DB954", label: "Spotify",   metric: "listeners" },
-  YOUTUBE:   { Icon: YouTubeIcon,   color: "#FF0000", label: "YouTube",   metric: "subscribers" },
-  TIKTOK:    { Icon: TikTokIcon,    color: "#00f2ea", label: "TikTok",    metric: "followers" },
-  INSTAGRAM: { Icon: InstagramIcon, color: "#E4405F", label: "Instagram", metric: "followers" },
+  SPOTIFY:   { Icon: SpotifyIcon,   color: "#1DB954", label: "Spotify" },
+  YOUTUBE:   { Icon: YouTubeIcon,   color: "#FF0000", label: "YouTube" },
+  TIKTOK:    { Icon: TikTokIcon,    color: "#00f2ea", label: "TikTok" },
+  INSTAGRAM: { Icon: InstagramIcon, color: "#E4405F", label: "Instagram" },
 };
 
 function slugify(name: string): string {
@@ -95,32 +90,21 @@ function CopyLinkButton({ artistName }: { artistName: string }) {
 
 /* ── famous card with cover-art play/pause ── */
 function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  async function togglePlay(e: React.MouseEvent) {
-    e.stopPropagation();
-    const a = audioRef.current; if (!a) return;
-    if (playing) { a.pause(); setPlaying(false); }
-    else { try { claimAudio(a); await a.play(); setPlaying(true); } catch { setPlaying(false); } }
-  }
-  const hasPreview = !!track.previewUrl;
+  const hasPlayer = !!track.spotifyUrl;
   return (
     <div className="group text-left">
-      {hasPreview && <audio ref={audioRef} src={toPreviewProxyUrl(track.previewUrl!, track.deezerId)} onEnded={() => setPlaying(false)} onPause={() => setPlaying(false)} preload="none" />}
-      <div className="relative aspect-square rounded-lg overflow-hidden cursor-pointer" onClick={hasPreview ? togglePlay : onOpen}>
+      <div className="relative aspect-square rounded-lg overflow-hidden cursor-pointer" onClick={onOpen}>
         {track.albumImageUrl ? (
-          <Image src={track.albumImageUrl} alt="" fill className="object-cover" />
+          <Image src={track.albumImageUrl} alt="" fill sizes="(min-width: 1024px) 9rem, 30vw" className="object-cover" />
         ) : (
           <div className="absolute inset-0 bg-white/[0.05] flex items-center justify-center"><Music className="w-6 h-6 text-white/20" /></div>
         )}
-        <div className={`absolute inset-0 transition-all ${playing ? "bg-black/40" : "bg-black/0 group-hover:bg-black/40"}`} />
-        {hasPreview && (
-          <div className={`absolute inset-0 flex items-center justify-center transition-opacity ${playing ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-            <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${playing ? "bg-[var(--accent)] text-white shadow-[0_0_12px_var(--accent-glow)]" : "bg-black/60 backdrop-blur-sm text-white/80 border border-white/20"}`}>
-              {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5 ml-0.5" />}
-            </div>
+        <div className="absolute inset-0 transition-all bg-black/0 group-hover:bg-black/40" />
+        <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100">
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${hasPlayer ? "bg-black/60 backdrop-blur-sm text-white/80 border border-white/20" : "bg-black/30 text-white/30 border border-white/10"}`}>
+            <Play className="w-3.5 h-3.5 ml-0.5" />
           </div>
-        )}
+        </div>
       </div>
       <button onClick={onOpen} className="mt-1.5 px-0.5 w-full text-left cursor-pointer">
         <div className="text-[11px] font-bold truncate leading-snug group-hover:text-[var(--accent)] transition-colors">{track.displayName ?? track.name}</div>
@@ -131,21 +115,19 @@ function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
 }
 
 /* ── mini player ── */
-function MiniPlayer({ url, deezerId }: { url: string; deezerId?: string | null }) {
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
-  async function toggle() {
-    const a = audioRef.current; if (!a) return;
-    if (playing) { a.pause(); setPlaying(false); }
-    else { try { claimAudio(a); await a.play(); setPlaying(true); } catch { setPlaying(false); } }
-  }
+function MiniPlayer({ onFallback }: { onFallback: () => void }) {
   return (
-    <>
-      <audio ref={audioRef} src={toPreviewProxyUrl(url, deezerId)} onEnded={() => setPlaying(false)} onPause={() => setPlaying(false)} preload="none" />
-      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggle(); }} className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all ${playing ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "bg-white/[0.08] text-white/40 hover:bg-white/15 hover:text-white"}`} aria-label={playing ? "Pause" : "Play"}>
-        {playing ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5 ml-0.5" />}
-      </button>
-    </>
+    <button
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onFallback();
+      }}
+      className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all bg-white/[0.08] text-white/40 hover:bg-[var(--accent)] hover:text-white"
+      aria-label="Open song player"
+    >
+      <Play className="w-2.5 h-2.5 ml-0.5" />
+    </button>
   );
 }
 
@@ -183,30 +165,74 @@ export default function ArtistPanel({ id }: { id: string }) {
   const { close, openSong } = useDetailPanel();
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tracksLoading, setTracksLoading] = useState(true);
   const [isWatched, setIsWatched] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [rankData, setRankData] = useState<RankData | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
-  const [spotifyPopularity, setSpotifyPopularity] = useState(0);
   const [snapshots, setSnapshots] = useState<ArtistSnap[]>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("month");
-  const [chartMetric, setChartMetric] = useState<ChartMetric>("listeners");
+  const [chartMetric, setChartMetric] = useState<ChartMetric>("popularity");
 
   useEffect(() => {
-    setLoading(true); setArtist(null); setTracks([]); setRankData(null); setSnapshots([]);
-    Promise.all([
-      fetchJsonWithSessionCache<Artist>(`artist:${id}:profile`, `/api/artists/${id}`, 60_000).catch(() => null),
-      fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 30_000).catch(() => [] as string[]),
-      fetchJsonWithSessionCache<RankData>(`artist:${id}:rank`, `/api/artists/${id}/rank`, 60_000).catch(() => null),
-      fetchJsonWithSessionCache<{ tracks?: Track[]; genres?: string[]; spotifyPopularity?: number }>(`artist:${id}:tracks:v2`, `/api/artists/${id}/tracks?view=panel-v2`, 15_000, { cache: "no-store" }).catch(() => null),
-    ]).then(([a, wl, r, td]) => {
-      if (a) setArtist(a);
-      if (Array.isArray(wl)) setIsWatched(wl.includes(id));
-      if (r) setRankData(r);
-      if (td) { setTracks(td.tracks ?? []); setGenres(td.genres ?? []); setSpotifyPopularity(td.spotifyPopularity ?? 0); }
-      setLoading(false);
-    });
+    let cancelled = false;
+
+    setLoading(true);
+    setTracksLoading(true);
+    setArtist(null);
+    setTracks([]);
+    setGenres([]);
+    setRankData(null);
+    setSnapshots([]);
+    setIsWatched(false);
+
+    fetchJsonWithSessionCache<Artist>(`artist:${id}:profile:panel`, `/api/artists/${id}?view=panel`, 60_000)
+      .then((a) => {
+        if (!cancelled && a) {
+          setArtist(a);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    fetchJsonWithSessionCache<string[]>("watchlist:ids", "/api/watchlist", 30_000)
+      .then((wl) => {
+        if (!cancelled && Array.isArray(wl)) {
+          setIsWatched(wl.includes(id));
+        }
+      })
+      .catch(() => {});
+
+    fetchJsonWithSessionCache<RankData>(`artist:${id}:rank`, `/api/artists/${id}/rank`, 60_000)
+      .then((rank) => {
+        if (!cancelled && rank) {
+          setRankData(rank);
+        }
+      })
+      .catch(() => {});
+
+    fetchJsonWithSessionCache<{ tracks?: Track[]; genres?: string[] }>(`artist:${id}:tracks:v2`, `/api/artists/${id}/tracks?view=panel-v2`, 15_000, { cache: "no-store" })
+      .then((trackData) => {
+        if (!cancelled && trackData) {
+          setTracks(trackData.tracks ?? []);
+          setGenres(trackData.genres ?? []);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setTracksLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   useEffect(() => {
@@ -228,6 +254,21 @@ export default function ArtistPanel({ id }: { id: string }) {
     } finally { setToggling(false); }
   }, [session, toggling, isWatched, id, artist]);
 
+  const openTrackSong = useCallback((track: Track) => {
+    if (!artist) return;
+
+    const artistInfo = {
+      id: artist.id,
+      name: artist.name,
+      imageUrl: artist.imageUrl,
+    };
+
+    openSong(track.id, {
+      ...track,
+      artist: artistInfo,
+    });
+  }, [artist, openSong]);
+
   /* ── loading skeleton ── */
   if (loading) return (
     <div className="flex flex-col h-full bg-[#08080c]">
@@ -246,24 +287,19 @@ export default function ArtistPanel({ id }: { id: string }) {
   );
 
   /* ── derived data ── */
-  const spotifyLink = artist.links.find(l => l.platform === "SPOTIFY");
-  const metricKey: Record<ChartMetric, keyof ArtistSnap> = { listeners: "monthlyListeners", followers: "followerCount", youtube: "youtubeSubscribers", tiktok: "tiktokFollowers" };
+  const metricKey: Record<ChartMetric, keyof ArtistSnap> = { popularity: "monthlyListeners", hype: "followerCount", breakouts: "youtubeSubscribers", freshness: "tiktokFollowers" };
   const chartPoints: ChartPoint[] = snapshots.map(s => ({ value: s[metricKey[chartMetric]] as number, date: s.createdAt }));
-  const currentVal = chartPoints.length > 0 ? chartPoints[chartPoints.length-1].value : 0;
   const changePercent = chartPoints.length >= 2 ? ((chartPoints[chartPoints.length-1].value - chartPoints[0].value) / Math.max(1, chartPoints[0].value)) * 100 : null;
-  const metricLabels: Record<ChartMetric, string> = { listeners: "Listeners", followers: "Followers", youtube: "YouTube", tiktok: "TikTok" };
-  const hasYT = artist.links.some(l => l.platform === "YOUTUBE"), hasTT = artist.links.some(l => l.platform === "TIKTOK");
-  // Spotify % change is based on monthly listeners (not followers) — omit "followers" tab
-  const metricOpts: ChartMetric[] = ["listeners", ...(hasYT ? ["youtube" as ChartMetric] : []), ...(hasTT ? ["tiktok" as ChartMetric] : [])];
+  const metricLabels: Record<ChartMetric, string> = { popularity: "Popularity", hype: "Hype", breakouts: "Breakouts", freshness: "Freshness" };
+  const metricOpts: ChartMetric[] = ["popularity", "hype", "breakouts", "freshness"];
   const periodOpts: { key: ChartPeriod; label: string }[] = [{ key: "week", label: "7d" }, { key: "month", label: "30d" }, { key: "year", label: "1y" }];
 
   /* platform pills data */
-  const pills: { url: string; Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string; value: string; metric: string }[] = [];
+  const pills: { url: string; Icon: React.FC<{ className?: string; style?: React.CSSProperties }>; color: string; label: string }[] = [];
   for (const link of artist.links) {
     const p = PLAT[link.platform];
     if (!p) continue;
-    const val = link.platform === "SPOTIFY" ? link.monthlyListeners : link.followerCount;
-    pills.push({ url: link.url, Icon: p.Icon, color: p.color, label: p.label, value: val > 0 ? fmt(val) : "", metric: p.metric });
+    pills.push({ url: link.url, Icon: p.Icon, color: p.color, label: p.label });
   }
 
   const hasBanner = !!artist.bannerUrl;
@@ -276,9 +312,9 @@ export default function ArtistPanel({ id }: { id: string }) {
         {/* Banner / blurred backdrop */}
         <div className={`relative overflow-hidden ${hasBanner ? "h-28" : "h-32"}`}>
           {hasBanner ? (
-            <Image src={artist.bannerUrl!} alt="" fill className="object-cover" />
+            <Image src={artist.bannerUrl!} alt="" fill sizes="(min-width: 1024px) 36vw, 100vw" className="object-cover" />
           ) : artist.imageUrl ? (
-            <Image src={artist.imageUrl} alt="" fill className="object-cover scale-[2] blur-3xl opacity-40" />
+            <Image src={artist.imageUrl} alt="" fill sizes="(min-width: 1024px) 36vw, 100vw" className="object-cover scale-[2] blur-3xl opacity-40" />
           ) : (
             <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/25 via-transparent to-transparent" />
           )}
@@ -347,11 +383,7 @@ export default function ArtistPanel({ id }: { id: string }) {
             {pills.map(p => (
               <a key={p.label} href={p.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full bg-white/[0.05] border border-white/[0.07] hover:bg-white/[0.1] hover:border-white/[0.15] transition-all group">
                 <p.Icon className="w-3.5 h-3.5 shrink-0" style={{ color: p.color }} />
-                {p.value ? (
-                  <span className="text-[11px] font-bold text-white/70 group-hover:text-white transition-colors tabular-nums">{p.value} <span className="text-white/30 font-medium">{p.metric}</span></span>
-                ) : (
-                  <span className="text-[11px] font-bold text-white/40 group-hover:text-white/60 transition-colors">{p.label}</span>
-                )}
+                <span className="text-[11px] font-bold text-white/40 group-hover:text-white/60 transition-colors">{p.label}</span>
               </a>
             ))}
           </div>
@@ -362,7 +394,7 @@ export default function ArtistPanel({ id }: { id: string }) {
           <div className="flex items-start justify-between px-4 pt-3 pb-0.5">
             <div>
               <div className="text-[8px] font-bold uppercase tracking-[0.2em] text-[var(--muted-foreground)] mb-0.5 flex items-center gap-1"><TrendingUp className="w-2.5 h-2.5" />{metricLabels[chartMetric]}</div>
-              <div className="text-2xl font-black leading-none tabular-nums">{currentVal > 0 ? fmt(currentVal) : "\u2014"}</div>
+              <div className="text-xs text-[var(--muted-foreground)]">Internal trend view</div>
               {changePercent !== null && <div className={`text-[10px] font-bold mt-0.5 flex items-center gap-0.5 ${changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>{changePercent >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}{changePercent >= 0 ? "+" : ""}{changePercent.toFixed(1)}%</div>}
             </div>
             <div className="flex gap-0.5">
@@ -387,7 +419,7 @@ export default function ArtistPanel({ id }: { id: string }) {
               <div className={`grid gap-2 ${famousThree.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
                 {famousThree.map((track) => (
                   <div key={track.id} className="relative">
-                    <FamousCard track={track} onOpen={() => openSong(track.id, track)} />
+                    <FamousCard track={track} onOpen={() => openTrackSong(track)} />
                   </div>
                 ))}
               </div>
@@ -395,28 +427,64 @@ export default function ArtistPanel({ id }: { id: string }) {
           );
         })()}
 
+        {tracksLoading && (
+          <div className="space-y-3">
+            <div>
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-2.5">Famous for</h3>
+              <div className="grid grid-cols-3 gap-2">
+                {Array.from({ length: 3 }, (_, index) => (
+                  <div key={index} className="space-y-1.5">
+                    <Skeleton className="aspect-square rounded-lg" />
+                    <Skeleton className="h-3 w-full" />
+                    <Skeleton className="h-2 w-10" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-2">More songs</h3>
+              <div className="rounded-xl border border-[var(--muted)]/30 bg-white/[0.02] divide-y divide-white/[0.04] overflow-hidden">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <div key={index} className="flex items-center gap-2.5 px-3 py-2">
+                    <Skeleton className="w-7 h-7 rounded-full shrink-0" />
+                    <Skeleton className="w-4 h-3 shrink-0" />
+                    <Skeleton className="w-7 h-7 rounded shrink-0" />
+                    <div className="flex-1 space-y-1">
+                      <Skeleton className="h-3 w-32" />
+                      <Skeleton className="h-2 w-12" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* MORE SONGS */}
         {tracks.length > 3 && (
           <div>
             <h3 className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted-foreground)] mb-2">More songs</h3>
             <div className="rounded-xl border border-[var(--muted)]/30 bg-white/[0.02] divide-y divide-white/[0.04] overflow-hidden">
               {tracks.slice(3, 10).map((track, i) => (
-                <button key={track.id} onClick={() => openSong(track.id, track)} className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors text-left">
-                  {track.previewUrl ? <MiniPlayer url={track.previewUrl} deezerId={track.deezerId} /> : <div className="w-7 h-7" />}
+                <div key={track.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors">
+                  {track.spotifyUrl ? <MiniPlayer onFallback={() => openTrackSong(track)} /> : <div className="w-7 h-7" />}
                   <span className="text-[10px] font-bold text-white/25 w-4 text-center tabular-nums shrink-0">{i + 4}</span>
-                  {track.albumImageUrl ? (
-                    <Image src={track.albumImageUrl} alt="" width={28} height={28} className="w-7 h-7 rounded shrink-0 object-cover" />
-                  ) : (
-                    <div className="w-7 h-7 rounded bg-white/5 flex items-center justify-center shrink-0"><Music className="w-3 h-3 text-white/20" /></div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-bold truncate leading-snug">{track.displayName ?? track.name}</div>
-                    <div className="text-[10px] text-white/20 tabular-nums">{fmtDur(track.durationMs)}</div>
-                  </div>
+                  <button type="button" onClick={() => openTrackSong(track)} className="min-w-0 flex flex-1 items-center gap-2.5 text-left group cursor-pointer">
+                    {track.albumImageUrl ? (
+                      <Image src={track.albumImageUrl} alt="" width={28} height={28} className="w-7 h-7 rounded shrink-0 object-cover" />
+                    ) : (
+                      <div className="w-7 h-7 rounded bg-white/5 flex items-center justify-center shrink-0"><Music className="w-3 h-3 text-white/20" /></div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] font-bold truncate leading-snug group-hover:text-[var(--accent)] transition-colors">{track.displayName ?? track.name}</div>
+                      <div className="text-[10px] text-white/20 tabular-nums">{fmtDur(track.durationMs)}</div>
+                    </div>
+                  </button>
                   {(track.deezerUrl ?? track.spotifyUrl) && (
                     <a href={(track.deezerUrl ?? track.spotifyUrl)!} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-white/15 hover:text-[var(--accent)] transition-colors shrink-0"><ExternalLink className="w-3 h-3" /></a>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           </div>

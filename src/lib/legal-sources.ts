@@ -21,10 +21,7 @@ function normalizeTrackTitle(value: string | null | undefined) {
     .trim();
 }
 
-function titlesLooselyMatch(left: string | null | undefined, right: string | null | undefined) {
-  const normalizedLeft = normalizeTrackTitle(left);
-  const normalizedRight = normalizeTrackTitle(right);
-
+function titlesLooselyMatch(normalizedLeft: string, normalizedRight: string) {
   if (!normalizedLeft || !normalizedRight) {
     return false;
   }
@@ -50,6 +47,8 @@ type AudiusTrendEntry = {
   position: number;
   title: string;
   artistName: string;
+  normalizedTitle: string;
+  normalizedArtistName: string;
   playCount: number;
   favoriteCount: number;
   repostCount: number;
@@ -59,12 +58,16 @@ type AppleChartEntry = {
   position: number;
   title: string;
   artistName: string;
+  normalizedTitle: string;
+  normalizedArtistName: string;
 };
 
 type LastFmTrendEntry = {
   position: number;
   title: string;
   artistName: string;
+  normalizedTitle: string;
+  normalizedArtistName: string;
   listeners: number;
   playCount: number;
 };
@@ -107,8 +110,10 @@ export type ExternalSignalTrack = {
 };
 
 const EXTERNAL_SIGNAL_CACHE_TTL = 10 * 60 * 1000;
+const EXTERNAL_FETCH_TIMEOUT_MS = 4_000;
 const LASTFM_PHONK_TAGS = ["phonk", "drift phonk", "brazilian phonk", "funk mandela"];
 const externalSignalCache = new Map<string, ExternalSignalCacheEntry>();
+let externalSignalPromise: Promise<ExternalSignalSnapshot> | null = null;
 
 export const EMPTY_EXTERNAL_SIGNAL_SNAPSHOT: ExternalSignalSnapshot = {
   deezerChartById: new Map(),
@@ -139,11 +144,26 @@ function parseLastFmCount(value: string | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+async function fetchWithTimeout(url: string) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), EXTERNAL_FETCH_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, { next: { revalidate: 600 }, signal: controller.signal });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function mapLastFmEntries(entries: LastFmTrackPayload[] | undefined) {
   return (entries ?? []).map((entry, index) => ({
     position: index + 1,
     title: entry.name ?? "",
     artistName: typeof entry.artist === "string" ? entry.artist : entry.artist?.name ?? "",
+    normalizedTitle: normalizeTrackTitle(entry.name ?? ""),
+    normalizedArtistName: normalizeName(typeof entry.artist === "string" ? entry.artist : entry.artist?.name ?? ""),
     listeners: parseLastFmCount(entry.listeners),
     playCount: parseLastFmCount(entry.playcount),
   }));
@@ -156,7 +176,7 @@ async function fetchLastFmJson(url: string) {
   }
 
   const joinedUrl = `${url}&api_key=${apiKey}&format=json`;
-  const response = await fetch(joinedUrl, { next: { revalidate: 600 } }).catch(() => null);
+  const response = await fetchWithTimeout(joinedUrl);
   if (!response?.ok) {
     return null;
   }
@@ -173,68 +193,84 @@ export async function fetchExternalTrendSignals() {
     return cached.data;
   }
 
-  const lastFmTagUrls = LASTFM_PHONK_TAGS.map((tag) =>
-    `https://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks&tag=${encodeURIComponent(tag)}&limit=100`
-  );
+  if (externalSignalPromise) {
+    return externalSignalPromise;
+  }
 
-  const [deezerChartResponse, audiusTrendingResponse, appleChartResponse, lastfmChartJson, ...lastfmTagPayloads] = await Promise.all([
-    fetch("https://api.deezer.com/chart/0/tracks?limit=100", { next: { revalidate: 600 } }).catch(() => null),
-    fetch("https://api.audius.co/v1/tracks/trending?genre=Electronic&limit=100&app_name=phonkforum", { next: { revalidate: 600 } }).catch(() => null),
-    fetch("https://rss.marketingtools.apple.com/api/v2/us/music/most-played/100/songs.json", { next: { revalidate: 600 } }).catch(() => null),
-    fetchLastFmJson("https://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit=100"),
-    ...lastFmTagUrls.map((url) => fetchLastFmJson(url)),
-  ]);
-
-  let deezerChartById = new Map<number, DeezerChartEntry>();
-  if (deezerChartResponse?.ok) {
-    const deezerJson = await deezerChartResponse.json().catch(() => null);
-    deezerChartById = new Map(
-      (deezerJson?.data ?? [])
-        .map((entry: { id?: number; position?: number }) => {
-          if (typeof entry.id !== "number") return null;
-          return [entry.id, { deezerId: entry.id, position: entry.position ?? 999 }] as const;
-        })
-        .filter((entry: readonly [number, DeezerChartEntry] | null): entry is readonly [number, DeezerChartEntry] => entry !== null)
+  externalSignalPromise = (async () => {
+    const lastFmTagUrls = LASTFM_PHONK_TAGS.map((tag) =>
+      `https://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks&tag=${encodeURIComponent(tag)}&limit=100`
     );
+
+    const [deezerChartResponse, audiusTrendingResponse, appleChartResponse, lastfmChartJson, ...lastfmTagPayloads] = await Promise.all([
+      fetchWithTimeout("https://api.deezer.com/chart/0/tracks?limit=100"),
+      fetchWithTimeout("https://api.audius.co/v1/tracks/trending?genre=Electronic&limit=100&app_name=phonkforum"),
+      fetchWithTimeout("https://rss.marketingtools.apple.com/api/v2/us/music/most-played/100/songs.json"),
+      fetchLastFmJson("https://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit=100"),
+      ...lastFmTagUrls.map((url) => fetchLastFmJson(url)),
+    ]);
+
+    let deezerChartById = new Map<number, DeezerChartEntry>();
+    if (deezerChartResponse?.ok) {
+      const deezerJson = await deezerChartResponse.json().catch(() => null);
+      deezerChartById = new Map(
+        (deezerJson?.data ?? [])
+          .map((entry: { id?: number; position?: number }) => {
+            if (typeof entry.id !== "number") return null;
+            return [entry.id, { deezerId: entry.id, position: entry.position ?? 999 }] as const;
+          })
+          .filter((entry: readonly [number, DeezerChartEntry] | null): entry is readonly [number, DeezerChartEntry] => entry !== null)
+      );
+    }
+
+    let audiusTrending: AudiusTrendEntry[] = [];
+    if (audiusTrendingResponse?.ok) {
+      const audiusJson = await audiusTrendingResponse.json().catch(() => null);
+      audiusTrending = (audiusJson?.data ?? []).map((entry: {
+        title?: string;
+        play_count?: number;
+        favorite_count?: number;
+        repost_count?: number;
+        user?: { name?: string };
+      }, index: number) => ({
+        position: index + 1,
+        title: entry.title ?? "",
+        artistName: entry.user?.name ?? "",
+        normalizedTitle: normalizeTrackTitle(entry.title ?? ""),
+        normalizedArtistName: normalizeName(entry.user?.name ?? ""),
+        playCount: entry.play_count ?? 0,
+        favoriteCount: entry.favorite_count ?? 0,
+        repostCount: entry.repost_count ?? 0,
+      }));
+    }
+
+    let appleChart: AppleChartEntry[] = [];
+    if (appleChartResponse?.ok) {
+      const appleJson = await appleChartResponse.json().catch(() => null);
+      appleChart = (appleJson?.feed?.results ?? []).map((entry: { name?: string; artistName?: string }, index: number) => ({
+        position: index + 1,
+        title: entry.name ?? "",
+        artistName: entry.artistName ?? "",
+        normalizedTitle: normalizeTrackTitle(entry.name ?? ""),
+        normalizedArtistName: normalizeName(entry.artistName ?? ""),
+      }));
+    }
+
+    const lastfmChart = mapLastFmEntries(lastfmChartJson?.tracks?.track);
+    const lastfmTagCharts = Object.fromEntries(
+      LASTFM_PHONK_TAGS.map((tag, index) => [tag, mapLastFmEntries(lastfmTagPayloads[index]?.tracks?.track ?? lastfmTagPayloads[index]?.toptracks?.track)])
+    );
+
+    const snapshot = { deezerChartById, audiusTrending, appleChart, lastfmChart, lastfmTagCharts };
+    externalSignalCache.set(cacheKey, { data: snapshot, timestamp: Date.now() });
+    return snapshot;
+  })();
+
+  try {
+    return await externalSignalPromise;
+  } finally {
+    externalSignalPromise = null;
   }
-
-  let audiusTrending: AudiusTrendEntry[] = [];
-  if (audiusTrendingResponse?.ok) {
-    const audiusJson = await audiusTrendingResponse.json().catch(() => null);
-    audiusTrending = (audiusJson?.data ?? []).map((entry: {
-      title?: string;
-      play_count?: number;
-      favorite_count?: number;
-      repost_count?: number;
-      user?: { name?: string };
-    }, index: number) => ({
-      position: index + 1,
-      title: entry.title ?? "",
-      artistName: entry.user?.name ?? "",
-      playCount: entry.play_count ?? 0,
-      favoriteCount: entry.favorite_count ?? 0,
-      repostCount: entry.repost_count ?? 0,
-    }));
-  }
-
-  let appleChart: AppleChartEntry[] = [];
-  if (appleChartResponse?.ok) {
-    const appleJson = await appleChartResponse.json().catch(() => null);
-    appleChart = (appleJson?.feed?.results ?? []).map((entry: { name?: string; artistName?: string }, index: number) => ({
-      position: index + 1,
-      title: entry.name ?? "",
-      artistName: entry.artistName ?? "",
-    }));
-  }
-
-  const lastfmChart = mapLastFmEntries(lastfmChartJson?.tracks?.track);
-  const lastfmTagCharts = Object.fromEntries(
-    LASTFM_PHONK_TAGS.map((tag, index) => [tag, mapLastFmEntries(lastfmTagPayloads[index]?.tracks?.track ?? lastfmTagPayloads[index]?.toptracks?.track)])
-  );
-
-  const snapshot = { deezerChartById, audiusTrending, appleChart, lastfmChart, lastfmTagCharts };
-  externalSignalCache.set(cacheKey, { data: snapshot, timestamp: now });
-  return snapshot;
 }
 
 function scoreAudiusMatch(entry: AudiusTrendEntry) {
@@ -259,17 +295,21 @@ function scoreAppleChartMatch(position: number) {
 
 function matchTrackEntry<T extends { title: string; artistName: string }>(
   track: ExternalSignalTrack,
-  entries: T[]
+  entries: Array<T & { normalizedTitle: string; normalizedArtistName: string }>
 ) {
   const candidateArtists = getArtistCandidates(track);
+  const normalizedTrackTitle = normalizeTrackTitle(track.name);
+
+  if (!normalizedTrackTitle || candidateArtists.length === 0) {
+    return undefined;
+  }
 
   return entries.find((entry) => {
-    if (!titlesLooselyMatch(track.name, entry.title)) {
+    if (!titlesLooselyMatch(normalizedTrackTitle, entry.normalizedTitle)) {
       return false;
     }
 
-    const normalizedArtist = normalizeName(entry.artistName);
-    return candidateArtists.includes(normalizedArtist);
+    return candidateArtists.includes(entry.normalizedArtistName);
   });
 }
 

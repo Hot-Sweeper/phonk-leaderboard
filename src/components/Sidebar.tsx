@@ -32,6 +32,7 @@ export default function Sidebar() {
   const path = usePathname();
   const [watchlistArtists, setWatchlistArtists] = useState<WatchlistArtist[]>([]);
   const [watchlistOpen, setWatchlistOpen] = useState(true);
+  const watchlistLoadDelayMs = process.env.NODE_ENV === "development" ? 1200 : 0;
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
@@ -62,8 +63,18 @@ export default function Sidebar() {
   }, [session]);
 
   useEffect(() => {
-    refreshWatchlist();
-  }, [refreshWatchlist]);
+    if (!session) {
+      setWatchlistArtists([]);
+      return;
+    }
+    if (!watchlistOpen) return;
+
+    const timeoutId = window.setTimeout(() => {
+      void refreshWatchlist();
+    }, watchlistLoadDelayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [session, watchlistOpen, watchlistLoadDelayMs, refreshWatchlist]);
 
   useEffect(() => {
     const handler = () => {

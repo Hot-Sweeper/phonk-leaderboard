@@ -1,11 +1,11 @@
-import { dedupeArtistTracks } from "@/lib/track-dedupe";
-
 type ArtistTrackInput = {
-  id: string;
-  artistId: string;
-  name: string;
+  id?: string;
+  artistId?: string;
+  name?: string;
   albumName?: string | null;
   popularity: number;
+  spotifyPopularity?: number;
+  youtubeViews?: number;
   previewUrl?: string | null;
   durationMs?: number;
   releaseDate?: string | null;
@@ -13,12 +13,30 @@ type ArtistTrackInput = {
   contributorIds?: string[];
 };
 
+const TRACK_YOUTUBE_VIEW_MAX = 100_000_000;
+export const TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS = 45;
+
 type ArtistScoreInput = {
   watchlistCount: number;
   youtubeSubscribers: number;
   tracks: ArtistTrackInput[];
   maxYoutubeSubscribers: number;
   maxWatchlistCount: number;
+};
+
+type ArtistScoreSummaryInput = {
+  top5Average: number;
+  top10Average: number;
+  top20Average: number;
+  catalogPopularityScore: number;
+  strongTrackCount: number;
+  activeTrackCount: number;
+  recentReleaseCount: number;
+  youtubeSubscribers: number;
+  watchlistCount: number;
+  maxYoutubeSubscribers: number;
+  maxWatchlistCount: number;
+  trackCount: number;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -51,6 +69,36 @@ export function normalizePopularityForScore(popularity: number) {
   return clamp(normalized, 0, 100);
 }
 
+export function normalizeYouTubeViewsForScore(youtubeViews: number | null | undefined) {
+  return Math.round(normalizeLog(Math.max(0, youtubeViews ?? 0), TRACK_YOUTUBE_VIEW_MAX));
+}
+
+export function getTrackSignalScore(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "youtubeViews">
+) {
+  const popularityFallback = normalizePopularityForScore(track.popularity);
+  const hasSpotifySignal = (track.spotifyPopularity ?? 0) > 0;
+  const hasYouTubeSignal = (track.youtubeViews ?? 0) > 0;
+  const spotifyScore = hasSpotifySignal
+    ? normalizePopularityForScore(track.spotifyPopularity ?? 0)
+    : 0;
+  const youtubeScore = normalizeYouTubeViewsForScore(track.youtubeViews);
+
+  if (hasSpotifySignal && hasYouTubeSignal) {
+    return Math.round(clamp((spotifyScore * 0.68) + (youtubeScore * 0.32), 0, 100));
+  }
+
+  if (hasSpotifySignal) {
+    return spotifyScore;
+  }
+
+  if (hasYouTubeSignal) {
+    return youtubeScore;
+  }
+
+  return popularityFallback;
+}
+
 export function getRecencyScore(releaseDate: string | null | undefined) {
   const ageInDays = getAgeInDays(releaseDate);
   if (ageInDays == null) return 25;
@@ -66,35 +114,99 @@ export function isRecentlyReleased(releaseDate: string | null | undefined, days:
   return ageInDays != null && ageInDays <= days;
 }
 
-export function getTrackAudienceScore(track: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl">) {
-  const popularityScore = normalizePopularityForScore(track.popularity);
+const ARTIST_PLATFORM_MAX = 10_000_000;
+
+type AudienceScoreFallbackMode = "default" | "strictLegacyPopularity";
+
+function roundPercent(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+export function getTrackAudienceScore(
+  track: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl">,
+  _signal: "composite" | "spotify" | "youtube" = "composite",
+  _fallbackMode: AudienceScoreFallbackMode = "default"
+) {
+  void _signal;
+  void _fallbackMode;
   const recencyScore = getRecencyScore(track.releaseDate);
   const previewScore = track.previewUrl ? 100 : 0;
+  const popularityScore = normalizePopularityForScore(track.popularity);
 
   return Math.round(
-    popularityScore * 0.8 +
-    recencyScore * 0.15 +
-    previewScore * 0.05
+    popularityScore * 0.72 +
+    recencyScore * 0.2 +
+    previewScore * 0.08
   );
 }
 
-export function getTrackHypeScore(track: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl"> & { previousPopularity?: number | null }) {
-  const previousPopularity = track.previousPopularity ?? null;
-  if (previousPopularity == null || previousPopularity <= 0 || track.popularity <= 0) {
+export function getTrackHypeScore(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "youtubeViews" | "releaseDate" | "previewUrl"> & {
+    previousPopularity?: number | null;
+    previousSpotifyPopularity?: number | null;
+    previousYoutubeViews?: number | null;
+  }
+) {
+  const currentSignalScore = getTrackSignalScore(track);
+  const previousSignalScore = (() => {
+    if ((track.previousSpotifyPopularity ?? 0) > 0 || (track.previousYoutubeViews ?? 0) > 0) {
+      return getTrackSignalScore({
+        popularity: track.previousPopularity ?? 0,
+        spotifyPopularity: track.previousSpotifyPopularity,
+        youtubeViews: track.previousYoutubeViews,
+      });
+    }
+
+    const previousPopularity = track.previousPopularity ?? null;
+    if (previousPopularity == null || previousPopularity <= 0) {
+      return null;
+    }
+
+    return normalizePopularityForScore(previousPopularity);
+  })();
+
+  if (previousSignalScore == null || previousSignalScore <= 0 || currentSignalScore <= 0) {
     return 0;
   }
 
-  const trendDelta = track.popularity - previousPopularity;
-  const trendPercent = ((track.popularity - previousPopularity) / previousPopularity) * 100;
+  const trendDelta = currentSignalScore - previousSignalScore;
+  const trendPercent = ((currentSignalScore - previousSignalScore) / previousSignalScore) * 100;
 
   if (trendDelta <= 0) {
     return 0;
   }
 
+  const currentSpotifyScore = (track.spotifyPopularity ?? 0) > 0
+    ? normalizePopularityForScore(track.spotifyPopularity ?? 0)
+    : null;
+  const previousSpotifyScore = (() => {
+    if ((track.previousSpotifyPopularity ?? 0) > 0) {
+      return normalizePopularityForScore(track.previousSpotifyPopularity ?? 0);
+    }
+    return null;
+  })();
+  const spotifyDeltaScore = currentSpotifyScore != null && previousSpotifyScore != null && currentSpotifyScore > previousSpotifyScore
+    ? clamp(((currentSpotifyScore - previousSpotifyScore) / 18) * 100, 0, 100)
+    : 0;
+  const spotifyPercentScore = currentSpotifyScore != null && previousSpotifyScore != null && currentSpotifyScore > previousSpotifyScore
+    ? clamp(((((currentSpotifyScore - previousSpotifyScore) / Math.max(previousSpotifyScore, 1)) * 100) / 120) * 100, 0, 100)
+    : 0;
+
+  const currentYouTubeScore = normalizeYouTubeViewsForScore(track.youtubeViews);
+  const previousYouTubeScore = (track.previousYoutubeViews ?? 0) > 0
+    ? normalizeYouTubeViewsForScore(track.previousYoutubeViews)
+    : null;
+  const youtubeDeltaScore = previousYouTubeScore != null && currentYouTubeScore > previousYouTubeScore
+    ? clamp(((currentYouTubeScore - previousYouTubeScore) / 30) * 100, 0, 100)
+    : 0;
+  const youtubePercentScore = previousYouTubeScore != null && currentYouTubeScore > previousYouTubeScore
+    ? clamp(((((currentYouTubeScore - previousYouTubeScore) / Math.max(previousYouTubeScore, 1)) * 100) / 200) * 100, 0, 100)
+    : 0;
+
   const ageInDays = getAgeInDays(track.releaseDate);
   const deltaScore = clamp((trendDelta / 18) * 100, 0, 100);
   const percentScore = clamp((trendPercent / 120) * 100, 0, 100);
-  const audienceScore = getTrackAudienceScore(track);
+  const signalScore = currentSignalScore;
   const freshnessScore = (() => {
     if (ageInDays == null) return 18;
     if (ageInDays <= 14) return 100;
@@ -119,21 +231,29 @@ export function getTrackHypeScore(track: Pick<ArtistTrackInput, "popularity" | "
 
   const ageAdjustedDeltaScore = clamp(deltaScore * decayMultiplier, 0, 100);
   const ageAdjustedPercentScore = clamp(percentScore * Math.max(0.18, decayMultiplier), 0, 100);
-  const earlyBreakoutScore = clamp(((ageAdjustedDeltaScore * 0.65) + (freshnessScore * 0.35)), 0, 100);
+  const rawDeltaScore = clamp((spotifyDeltaScore * 0.55) + (youtubeDeltaScore * 0.45), 0, 100);
+  const rawPercentScore = clamp((spotifyPercentScore * 0.45) + (youtubePercentScore * 0.55), 0, 100);
 
   return Math.round(
-    ageAdjustedDeltaScore * 0.45 +
-    ageAdjustedPercentScore * 0.2 +
-    freshnessScore * 0.2 +
-    earlyBreakoutScore * 0.1 +
-    audienceScore * 0.05
+    ageAdjustedDeltaScore * 0.35 +
+    ageAdjustedPercentScore * 0.15 +
+    rawDeltaScore * 0.2 +
+    rawPercentScore * 0.1 +
+    freshnessScore * 0.12 +
+    signalScore * 0.08
   );
 }
 
-export function getEmergingTrackHypeScore(track: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl"> & { firstSeenAt?: string | Date | null }) {
+export function getEmergingTrackHypeScore(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "youtubeViews" | "releaseDate" | "previewUrl"> & {
+    firstSeenAt?: string | Date | null;
+  }
+) {
+  const signalScore = getTrackSignalScore(track);
   const ageInDays = getAgeInDays(track.releaseDate);
   const audienceScore = getTrackAudienceScore(track);
-  if (audienceScore < 55) {
+  const breakoutReadinessScore = Math.round(clamp((signalScore * 0.75) + (audienceScore * 0.25), 0, 100));
+  if (breakoutReadinessScore < 55) {
     return 0;
   }
 
@@ -144,11 +264,11 @@ export function getEmergingTrackHypeScore(track: Pick<ArtistTrackInput, "popular
     return Math.max(0, (Date.now() - parsed) / (24 * 60 * 60 * 1000));
   })();
 
-  if (firstSeenDays != null && firstSeenDays > 7) {
+  if (firstSeenDays != null && firstSeenDays > TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS) {
     return 0;
   }
 
-  const maxEligibleAgeDays = audienceScore >= 72 ? 90 : 75;
+  const maxEligibleAgeDays = breakoutReadinessScore >= 72 ? 90 : 75;
   if (ageInDays == null || ageInDays > maxEligibleAgeDays) {
     return 0;
   }
@@ -163,46 +283,35 @@ export function getEmergingTrackHypeScore(track: Pick<ArtistTrackInput, "popular
 
   const firstSeenBoost = (() => {
     if (firstSeenDays == null) return 0;
-    if (firstSeenDays <= 2) return 100;
-    if (firstSeenDays <= 4) return 82;
-    if (firstSeenDays <= 7) return 60;
+    if (firstSeenDays <= 3) return 100;
+    if (firstSeenDays <= 7) return 82;
+    if (firstSeenDays <= 14) return 68;
+    if (firstSeenDays <= 30) return 60;
+    if (firstSeenDays <= TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS) return 52;
     return 0;
   })();
 
   return Math.round(
-    audienceScore * 0.68 +
-    breakoutWindowScore * 0.24 +
-    firstSeenBoost * 0.08
+    breakoutReadinessScore * 0.62 +
+    breakoutWindowScore * 0.26 +
+    firstSeenBoost * 0.12
   );
 }
 
-export function getArtistAudienceScore(input: ArtistScoreInput) {
-  const dedupedTracks = dedupeArtistTracks(input.tracks);
-  const catalogPopularityScore = average(
-    dedupedTracks.map((track) => normalizePopularityForScore(track.popularity))
-  );
-  const trackScores = dedupedTracks
-    .map((track) => getTrackAudienceScore(track))
-    .sort((left, right) => right - left);
-
+export function getArtistAudienceScoreFromSummary(input: ArtistScoreSummaryInput) {
   const topTracksScore =
-    averageTop(trackScores, 5) * 0.5 +
-    averageTop(trackScores, 10) * 0.3 +
-    averageTop(trackScores, 20) * 0.2;
+    input.top5Average * 0.5 +
+    input.top10Average * 0.3 +
+    input.top20Average * 0.2;
 
-  const strongTracks = trackScores.filter((score) => score >= 65).length;
-  const activeTracks = trackScores.filter((score) => score >= 45).length;
-  const depthScore = clamp(strongTracks * 14 + activeTracks * 4, 0, 100);
-
-  const recentReleases = dedupedTracks.filter((track) => isRecentlyReleased(track.releaseDate, 90)).length;
-  const releaseScore = clamp(recentReleases * 34, 0, 100);
-
+  const depthScore = clamp(input.strongTrackCount * 14 + input.activeTrackCount * 4, 0, 100);
+  const releaseScore = clamp(input.recentReleaseCount * 34, 0, 100);
   const youtubeScore = normalizeLog(input.youtubeSubscribers, input.maxYoutubeSubscribers);
   const watchlistScore = normalizeLog(input.watchlistCount, input.maxWatchlistCount);
 
   const audienceScore = Math.round(
     topTracksScore * 0.5 +
-    catalogPopularityScore * 0.3 +
+    input.catalogPopularityScore * 0.3 +
     depthScore * 0.1 +
     releaseScore * 0.04 +
     youtubeScore * 0.04 +
@@ -212,11 +321,234 @@ export function getArtistAudienceScore(input: ArtistScoreInput) {
   return {
     audienceScore,
     topTracksScore: Math.round(topTracksScore),
-    catalogPopularityScore: Math.round(catalogPopularityScore),
+    catalogPopularityScore: Math.round(input.catalogPopularityScore),
     depthScore: Math.round(depthScore),
     releaseScore: Math.round(releaseScore),
     youtubeScore: Math.round(youtubeScore),
     watchlistScore: Math.round(watchlistScore),
-    trackCount: dedupedTracks.length,
+    trackCount: input.trackCount,
+  };
+}
+
+export function getArtistAudienceScore(input: ArtistScoreInput) {
+  const catalogPopularityScore = average(
+    input.tracks.map((track) => normalizePopularityForScore(track.popularity))
+  );
+  const trackScores = input.tracks
+    .map((track) => getTrackAudienceScore(track))
+    .sort((left, right) => right - left);
+
+  const strongTracks = trackScores.filter((score) => score >= 65).length;
+  const activeTracks = trackScores.filter((score) => score >= 45).length;
+  const recentReleases = input.tracks.filter((track) => isRecentlyReleased(track.releaseDate, 90)).length;
+  return getArtistAudienceScoreFromSummary({
+    top5Average: averageTop(trackScores, 5),
+    top10Average: averageTop(trackScores, 10),
+    top20Average: averageTop(trackScores, 20),
+    catalogPopularityScore,
+    strongTrackCount: strongTracks,
+    activeTrackCount: activeTracks,
+    recentReleaseCount: recentReleases,
+    youtubeSubscribers: input.youtubeSubscribers,
+    watchlistCount: input.watchlistCount,
+    maxYoutubeSubscribers: input.maxYoutubeSubscribers,
+    maxWatchlistCount: input.maxWatchlistCount,
+    trackCount: input.tracks.length,
+  });
+}
+
+export type ArtistInternalSnapshotInput = {
+  popularityIndex: number;
+  hypeIndex: number;
+};
+
+type ArtistInternalMetricsInput = {
+  watchlistCount: number;
+  maxWatchlistCount: number;
+  tracks: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl">[];
+  previousSnapshot?: Partial<ArtistInternalSnapshotInput> | null;
+};
+
+export function getArtistInternalMetrics(input: ArtistInternalMetricsInput) {
+  const trackScores = input.tracks
+    .map((track) => getTrackAudienceScore(track))
+    .sort((left, right) => right - left);
+
+  const catalogPopularityScore = average(
+    input.tracks.map((track) => normalizePopularityForScore(track.popularity))
+  );
+  const strongTrackCount = trackScores.filter((score) => score >= 65).length;
+  const activeTrackCount = trackScores.filter((score) => score >= 45).length;
+  const recentReleaseCount = input.tracks.filter((track) => isRecentlyReleased(track.releaseDate, 90)).length;
+  const breakoutTrackCount = input.tracks.filter((track) => getEmergingTrackHypeScore(track) >= 55).length;
+
+  const audience = getArtistAudienceScoreFromSummary({
+    top5Average: averageTop(trackScores, 5),
+    top10Average: averageTop(trackScores, 10),
+    top20Average: averageTop(trackScores, 20),
+    catalogPopularityScore,
+    strongTrackCount,
+    activeTrackCount,
+    recentReleaseCount,
+    youtubeSubscribers: 0,
+    watchlistCount: input.watchlistCount,
+    maxYoutubeSubscribers: 1,
+    maxWatchlistCount: Math.max(1, input.maxWatchlistCount),
+    trackCount: input.tracks.length,
+  });
+
+  const popularityScore = audience.audienceScore;
+  const previousPopularity = input.previousSnapshot?.popularityIndex ?? null;
+  const previousHype = input.previousSnapshot?.hypeIndex ?? null;
+
+  const popularityChangeValue = previousPopularity != null ? popularityScore - previousPopularity : 0;
+  const popularityChangePercent = previousPopularity != null && previousPopularity > 0
+    ? roundPercent(((popularityScore - previousPopularity) / previousPopularity) * 100)
+    : 0;
+
+  const watchlistScore = normalizeLog(input.watchlistCount, Math.max(1, input.maxWatchlistCount));
+  const breakoutScore = clamp(breakoutTrackCount * 24, 0, 100);
+  const releaseScore = clamp(recentReleaseCount * 28, 0, 100);
+  const activeScore = clamp(activeTrackCount * 6, 0, 100);
+  const growthScore = previousPopularity != null && previousPopularity > 0
+    ? clamp(((popularityChangePercent + 20) / 1.6), 0, 100)
+    : breakoutScore * 0.75;
+
+  const hypeScore = Math.round(clamp(
+    growthScore * 0.45 +
+    breakoutScore * 0.25 +
+    releaseScore * 0.15 +
+    activeScore * 0.08 +
+    watchlistScore * 0.04 +
+    popularityScore * 0.03,
+    0,
+    100
+  ));
+
+  const hypeChangeValue = previousHype != null ? hypeScore - previousHype : breakoutTrackCount > 0 ? hypeScore : 0;
+  const hypeChangePercent = previousHype != null && previousHype > 0
+    ? roundPercent(((hypeScore - previousHype) / previousHype) * 100)
+    : previousPopularity != null && previousPopularity > 0
+      ? popularityChangePercent
+      : breakoutTrackCount > 0
+        ? roundPercent(breakoutTrackCount * 10)
+        : 0;
+
+  return {
+    ...audience,
+    popularityScore,
+    popularityChangeValue,
+    popularityChangePercent,
+    hypeScore,
+    hypeChangeValue,
+    hypeChangePercent,
+    hasHypeData: previousHype != null || previousPopularity != null || breakoutTrackCount > 0,
+    breakoutTrackCount,
+    strongTrackCount,
+    activeTrackCount,
+    recentReleaseCount,
+  };
+}
+
+export type ArtistPlatformSnapshotInput = {
+  monthlyListeners: number;
+  followerCount: number;
+  youtubeSubscribers: number;
+  tiktokFollowers: number;
+  instagramFollowers: number;
+};
+
+type ArtistHypeMetrics = {
+  hypeScore: number;
+  changePercent: number;
+  changeValue: number;
+  hasData: boolean;
+};
+
+function getPlatformPercentChange(current: number, previous: number) {
+  if (current <= 0 && previous <= 0) return 0;
+  if (previous <= 0) return current > 0 ? 100 : 0;
+  return ((current - previous) / previous) * 100;
+}
+
+export function getArtistPlatformPopularityScore(input: ArtistPlatformSnapshotInput) {
+  const spotifyReach = normalizeLog(input.monthlyListeners, ARTIST_PLATFORM_MAX);
+  const spotifyFollowers = normalizeLog(input.followerCount, ARTIST_PLATFORM_MAX);
+  const youtubeReach = normalizeLog(input.youtubeSubscribers, ARTIST_PLATFORM_MAX);
+  const tiktokReach = normalizeLog(input.tiktokFollowers, ARTIST_PLATFORM_MAX);
+  const instagramReach = normalizeLog(input.instagramFollowers, ARTIST_PLATFORM_MAX);
+
+  return Math.round(clamp(
+    spotifyReach * 0.44 +
+    youtubeReach * 0.28 +
+    tiktokReach * 0.14 +
+    instagramReach * 0.09 +
+    spotifyFollowers * 0.05,
+    0,
+    100
+  ));
+}
+
+export function getArtistPlatformHypeMetrics(
+  current: ArtistPlatformSnapshotInput,
+  previous?: Partial<ArtistPlatformSnapshotInput> | null
+): ArtistHypeMetrics {
+  if (!previous) {
+    return {
+      hypeScore: 0,
+      changePercent: 0,
+      changeValue: 0,
+      hasData: false,
+    };
+  }
+
+  const metrics = [
+    { current: current.monthlyListeners, previous: previous.monthlyListeners ?? 0, weight: 0.42 },
+    { current: current.youtubeSubscribers, previous: previous.youtubeSubscribers ?? 0, weight: 0.28 },
+    { current: current.tiktokFollowers, previous: previous.tiktokFollowers ?? 0, weight: 0.16 },
+    { current: current.instagramFollowers, previous: previous.instagramFollowers ?? 0, weight: 0.09 },
+    { current: current.followerCount, previous: previous.followerCount ?? 0, weight: 0.05 },
+  ];
+
+  let weightedPercent = 0;
+  let weightedGrowthScore = 0;
+  let activeWeight = 0;
+  let breakoutSignals = 0;
+
+  for (const metric of metrics) {
+    if (metric.current <= 0 && metric.previous <= 0) continue;
+
+    const percentChange = getPlatformPercentChange(metric.current, metric.previous);
+    const boundedPercent = clamp(percentChange, -95, 220);
+    const presenceScore = normalizeLog(metric.current, ARTIST_PLATFORM_MAX);
+    const growthScore = clamp(((boundedPercent + 20) / 1.8) * 0.74 + presenceScore * 0.26, 0, 100);
+
+    weightedPercent += boundedPercent * metric.weight;
+    weightedGrowthScore += growthScore * metric.weight;
+    activeWeight += metric.weight;
+
+    if (boundedPercent >= 22 && presenceScore >= 28) {
+      breakoutSignals += 1;
+    }
+  }
+
+  if (activeWeight === 0) {
+    return {
+      hypeScore: 0,
+      changePercent: 0,
+      changeValue: 0,
+      hasData: false,
+    };
+  }
+
+  const averagePercent = weightedPercent / activeWeight;
+  const breakoutBoost = Math.min(12, breakoutSignals * 4);
+  const hypeScore = Math.round(clamp((weightedGrowthScore / activeWeight) + breakoutBoost, 0, 100));
+
+  return {
+    hypeScore,
+    changePercent: Math.round(averagePercent * 100) / 100,
+    changeValue: Math.round((hypeScore - 50) * 100) / 100,
+    hasData: true,
   };
 }

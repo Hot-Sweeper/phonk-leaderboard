@@ -5,6 +5,21 @@ import type { Platform } from "@prisma/client";
 import { fetchPlatformStats } from "@/lib/platforms";
 import { hydrateArtistNow } from "@/lib/update-runner";
 
+function stripLinkMetrics<T extends { followerCount: number; monthlyListeners: number }>(links: T[]): T[] {
+  return links.map((link) => ({
+    ...link,
+    followerCount: 0,
+    monthlyListeners: 0,
+  }));
+}
+
+function sanitizeArtistPayload<T extends { links: Array<{ followerCount: number; monthlyListeners: number }> }>(artist: T): T {
+  return {
+    ...artist,
+    links: stripLinkMetrics(artist.links),
+  };
+}
+
 async function enrichLink<T extends {
   id: string;
   platform: string;
@@ -16,10 +31,10 @@ async function enrichLink<T extends {
 }>(link: T): Promise<T> {
   const needsSpotifyRefresh =
     link.platform === "SPOTIFY" &&
-    (link.followerCount === 0 || link.platformId === null || link.monthlyListeners === 0);
+    link.platformId === null;
   const needsSocialRefresh =
     (link.platform === "TIKTOK" || link.platform === "INSTAGRAM") &&
-    (!link.handle || link.followerCount === 0);
+    !link.handle;
 
   if (!needsSpotifyRefresh && !needsSocialRefresh) {
     return link;
@@ -33,8 +48,8 @@ async function enrichLink<T extends {
   const nextLink = {
     ...link,
     handle: stats.handle ?? link.handle,
-    followerCount: stats.followerCount || link.followerCount,
-    monthlyListeners: stats.monthlyListeners || link.monthlyListeners,
+    followerCount: stats.followerCount,
+    monthlyListeners: stats.monthlyListeners,
     platformId: stats.platformId ?? link.platformId,
   };
 
@@ -53,24 +68,34 @@ async function enrichLink<T extends {
 
 // GET single artist with all links
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const { searchParams } = new URL(req.url);
+  const isPanelView = searchParams.get("view") === "panel";
 
   const artist = await prisma.artist.findUnique({
     where: { id },
-    include: {
-      links: { orderBy: { platform: "asc" } },
-      suggestions: {
-        where: { status: "PENDING" },
-        select: { id: true, platform: true, url: true, note: true, createdAt: true },
-      },
-    },
+    include: isPanelView
+      ? {
+          links: { orderBy: { platform: "asc" } },
+        }
+      : {
+          links: { orderBy: { platform: "asc" } },
+          suggestions: {
+            where: { status: "PENDING" },
+            select: { id: true, platform: true, url: true, note: true, createdAt: true },
+          },
+        },
   });
 
   if (!artist) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (isPanelView) {
+    return NextResponse.json(sanitizeArtistPayload(artist));
   }
 
   const enrichedArtist = {
@@ -78,7 +103,7 @@ export async function GET(
     links: await Promise.all(artist.links.map((link) => enrichLink(link))),
   };
 
-  return NextResponse.json(enrichedArtist);
+  return NextResponse.json(sanitizeArtistPayload(enrichedArtist));
 }
 
 export async function PATCH(
@@ -146,19 +171,12 @@ export async function PATCH(
     }) => {
       const trimmedUrl = link.url.trim();
       const stats = await fetchPlatformStats(link.platform, trimmedUrl);
-      const shouldUseProvidedSpotifyStats =
-        link.platform === "SPOTIFY" &&
-        typeof link.followerCount === "number" &&
-        Boolean(link.platformId) &&
-        (!stats || stats.followerCount === 0);
 
       linkEntries.push({
         platform: link.platform as Platform,
         url: trimmedUrl,
         handle: stats?.handle ?? link.handle?.trim() ?? null,
-        followerCount: shouldUseProvidedSpotifyStats
-          ? link.followerCount ?? 0
-          : (stats?.followerCount ?? 0),
+        followerCount: stats?.followerCount ?? 0,
         monthlyListeners: stats?.monthlyListeners ?? 0,
         platformId: stats?.platformId ?? link.platformId ?? null,
       });
@@ -193,7 +211,7 @@ export async function PATCH(
 
   await hydrateArtistNow(updatedArtist.id);
 
-  return NextResponse.json(updatedArtist);
+  return NextResponse.json(sanitizeArtistPayload(updatedArtist));
 }
 
 // DELETE — remove an artist (admin only)

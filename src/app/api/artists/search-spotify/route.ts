@@ -2,6 +2,14 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { searchSpotifyArtists, fetchSpotifyArtist } from "@/lib/platforms";
 
+function sanitizeSpotifyArtist<T extends { followerCount: number; monthlyListeners: number }>(artist: T): T {
+  return {
+    ...artist,
+    followerCount: 0,
+    monthlyListeners: 0,
+  };
+}
+
 // POST — search Spotify artists by name, or look up a Spotify URL
 export async function POST(req: Request) {
   const session = await auth();
@@ -27,7 +35,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json([
       {
-        ...artist,
+        ...sanitizeSpotifyArtist(artist),
         url: url.trim(),
       },
     ]);
@@ -41,7 +49,7 @@ export async function POST(req: Request) {
   try {
     const results = await searchSpotifyArtists(q.trim(), 8);
     const withUrls = results.map((r) => ({
-      ...r,
+      ...sanitizeSpotifyArtist(r),
       url: `https://open.spotify.com/artist/${r.platformId}`,
     }));
     return NextResponse.json(withUrls);

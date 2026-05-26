@@ -34,10 +34,11 @@ function formatCount(n: number): string {
 }
 
 const PAGE_SIZE = 100;
-const SONG_BUBBLE_CACHE_VERSION = "v4";
+const SONG_BUBBLE_CACHE_VERSION = "v6";
+const ARTIST_BUBBLE_CACHE_VERSION = "v3";
 
 const ARTIST_METRICS = [
-  { key: "listeners", label: "Monthly Listeners" },
+  { key: "listeners", label: "Spotify" },
   { key: "followers", label: "Spotify Followers" },
   { key: "youtube", label: "YouTube Subs" },
   { key: "tiktok", label: "TikTok Followers" },
@@ -49,6 +50,7 @@ interface BubbleViewProps {
   metric: string;
   mode: "current" | "relative" | "absolute";
   period: string;
+  artistMode?: "popularity" | "hype";
   songMode?: string;
   searchQuery?: string;
   collapseVersions?: boolean;
@@ -57,7 +59,7 @@ interface BubbleViewProps {
   active?: boolean;
 }
 
-export default function BubbleView({ entity, metric, mode, period, songMode, searchQuery, collapseVersions = true, sortOrder = "desc", rankingModel = "standard", active = true }: BubbleViewProps) {
+export default function BubbleView({ entity, metric, mode, period, artistMode = "popularity", songMode, searchQuery, collapseVersions = true, sortOrder = "desc", rankingModel = "legal", active = true }: BubbleViewProps) {
   const { openArtist, openSong } = useDetailPanel();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -126,13 +128,36 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         .catch(() => { setSearchStatus("not-found"); });
     } else {
       // Artists: scan pages sequentially up to 5
+      if (rankingModel === "legal" && mode === "current") {
+        const params = new URLSearchParams({
+          q,
+          skip: "0",
+          take: "1",
+          rankingModel: "legal",
+          mode: artistMode,
+        });
+        fetch(`/api/artists?${params.toString()}`)
+          .then(r => r.json())
+          .then((data: { artists?: Array<{ globalRank?: number }> }) => {
+            const artist = data.artists?.[0];
+            if (artist?.globalRank != null) {
+              const targetPage = Math.floor((artist.globalRank - 1) / PAGE_SIZE);
+              if (targetPage !== page) setPage(targetPage);
+            } else {
+              setSearchStatus("not-found");
+            }
+          })
+          .catch(() => { setSearchStatus("not-found"); });
+        return;
+      }
+
       const scan = async () => {
         for (let p = 0; p < Math.min(totalPages, 5); p++) {
           if (p === page) continue;
           const skip = p * PAGE_SIZE;
           const params = new URLSearchParams({
             period,
-            metric: rankingModel === "legal" ? "audience" : metric,
+            metric: rankingModel === "legal" ? artistMode : metric,
             mode,
             sort: sortOrder,
             skip: String(skip),
@@ -176,9 +201,42 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
     const skip = page * PAGE_SIZE;
 
     if (entity === "artists") {
+      if (rankingModel === "legal" && mode === "current") {
+        const params = new URLSearchParams({
+          skip: String(skip),
+          take: String(PAGE_SIZE),
+          rankingModel: "legal",
+          mode: artistMode,
+        });
+        const url = `/api/artists?${params.toString()}`;
+        fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; globalRank?: number; popularityScore?: number; hypeScore?: number; audienceScore?: number }>; totalCount?: number }>(
+          `rank:bubbles:artists:${ARTIST_BUBBLE_CACHE_VERSION}:${rankingModel}:${artistMode}:current:${skip}`,
+          url,
+          45_000
+        )
+          .then((data) => {
+            const artists = (data.artists ?? []).map((a, idx) => ({
+              id: a.id,
+              name: a.name,
+              imageUrl: a.imageUrl,
+              value: artistMode === "hype" ? (a.hypeScore ?? 0) : (a.popularityScore ?? a.audienceScore ?? 0),
+              changeValue: 0,
+              changePercent: 0,
+              hasData: false,
+              rank: a.globalRank ?? (skip + idx + 1),
+              isWatchlisted: false,
+            }));
+            setItems(artists);
+            setTotalCount(data.totalCount ?? 0);
+          })
+          .catch(() => {})
+          .finally(() => setLoading(false));
+        return;
+      }
+
       const params = new URLSearchParams({
         period,
-        metric: rankingModel === "legal" ? "audience" : metric,
+        metric: rankingModel === "legal" ? artistMode : metric,
         mode,
         sort: sortOrder,
         skip: String(skip),
@@ -187,7 +245,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
       if (rankingModel === "legal") params.set("rankingModel", "legal");
       const url = `/api/artists/changes?${params.toString()}`;
       fetchJsonWithSessionCache<{ artists?: Array<{ id: string; name: string; imageUrl: string | null; currentValue: number; changeValue: number; changePercent: number; hasData: boolean }>; totalCount?: number }>(
-        `rank:bubbles:artists:${period}:${metric}:${mode}:${sortOrder}:${skip}`,
+        `rank:bubbles:artists:${ARTIST_BUBBLE_CACHE_VERSION}:${rankingModel}:${artistMode}:${period}:${mode}:${sortOrder}:${skip}`,
         url,
         45_000
       )
@@ -246,7 +304,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
         .catch(() => {})
         .finally(() => setLoading(false));
     }
-  }, [active, entity, page, period, metric, mode, songMode, collapseVersions, sortOrder, rankingModel]);
+  }, [active, entity, page, period, metric, mode, artistMode, songMode, collapseVersions, sortOrder, rankingModel]);
 
   // Build bubbles from items
   useEffect(() => {
@@ -519,7 +577,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
             ctx.fillText(changeText, b.x, b.y + fontSize * 0.5);
           } else {
             ctx.fillStyle = "rgba(255,255,255,0.7)";
-            ctx.fillText(formatCount(b.value), b.x, b.y + fontSize * 0.5);
+            ctx.fillText(rankingModel === "legal" ? `#${b.rank}` : formatCount(b.value), b.x, b.y + fontSize * 0.5);
           }
         }
 
@@ -562,7 +620,7 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
       cancelAnimationFrame(animRef.current);
       window.removeEventListener("resize", resize);
     };
-  }, [items, mode]);
+  }, [items, mode, rankingModel]);
 
   // Mouse handlers
   const getCanvasPos = useCallback((e: React.MouseEvent | MouseEvent) => {
@@ -648,11 +706,11 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
   }, [handleClick, handleMouseUp]);
 
   const metricLabel = entity === "artists"
-    ? (rankingModel === "legal" ? "audience score" : (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase())
+    ? (rankingModel === "legal" ? (artistMode === "hype" ? "hype" : "popularity") : (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase())
     : songMode === "popularity"
-      ? (rankingModel === "legal" ? "audience score" : "popularity")
+      ? (rankingModel === "legal" ? "popularity" : "popularity")
       : rankingModel === "legal"
-        ? "hype score"
+        ? "hype"
       : mode === "relative"
         ? `${songMode ?? "trend"} % change`
         : mode === "absolute"
@@ -697,7 +755,9 @@ export default function BubbleView({ entity, metric, mode, period, songMode, sea
                 {hovered.isWatchlisted && <span className="text-pink-400 text-xs">Watchlist</span>}
               </div>
               <div className="flex items-center gap-3 text-xs">
-                {hovered.value > 0 && (
+                {rankingModel === "legal" ? (
+                  <span className="text-[var(--muted-foreground)]">{mode === "current" ? `Internal ${metricLabel} order` : `${metricLabel} movement`}</span>
+                ) : hovered.value > 0 && (
                   <span className="text-[var(--muted-foreground)] tabular-nums">{formatCount(hovered.value)} {metricLabel}</span>
                 )}
                 {hovered.hasData && (mode === "relative" ? hovered.changePercent !== 0 : hovered.changeValue !== 0) && (

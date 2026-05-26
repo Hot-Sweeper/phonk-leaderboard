@@ -10,6 +10,7 @@ import {
 import { recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeNames } from "@/lib/track-dedupe";
 import { deduplicateStoredTracksForArtist } from "@/lib/update-runner";
+import { getTrackAudienceScore } from "@/lib/legal-rankings";
 
 function normStr(s: string) {
   return s
@@ -18,6 +19,18 @@ function normStr(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getInternalTrackPopularity(
+  popularity: number,
+  releaseDate: string | null | undefined,
+  previewUrl: string | null | undefined
+) {
+  return getTrackAudienceScore({
+    popularity,
+    releaseDate,
+    previewUrl,
+  });
 }
 
 function parseDeezerResourceUrl(url: string) {
@@ -121,7 +134,12 @@ async function importDeezerTracksForArtist(artistId: string, deezerTrackIds: num
         albumImageUrl: track.album.imageUrl,
         previewUrl: track.previewUrl,
         durationMs: track.durationMs,
-        popularity: track.popularity,
+        popularity: getInternalTrackPopularity(
+          0,
+          track.releaseDate ?? track.album.releaseDate,
+          track.previewUrl
+        ),
+        spotifyPopularity: 0,
         trackNumber: track.trackNumber,
         explicit: track.explicit,
         releaseDate: track.releaseDate ?? track.album.releaseDate,
@@ -139,7 +157,12 @@ async function importDeezerTracksForArtist(artistId: string, deezerTrackIds: num
         albumImageUrl: track.album.imageUrl,
         previewUrl: track.previewUrl,
         durationMs: track.durationMs,
-        popularity: track.popularity,
+        popularity: getInternalTrackPopularity(
+          0,
+          track.releaseDate ?? track.album.releaseDate,
+          track.previewUrl
+        ),
+        spotifyPopularity: 0,
         trackNumber: track.trackNumber,
         explicit: track.explicit,
         releaseDate: track.releaseDate ?? track.album.releaseDate,

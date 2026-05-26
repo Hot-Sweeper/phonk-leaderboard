@@ -27,9 +27,6 @@ import {
   Play,
   Pause,
   Music,
-  Disc3,
-  Hash,
-  Users,
   Eye,
   CalendarDays,
 } from "lucide-react";
@@ -106,13 +103,6 @@ function extractHandleFromUrl(platform: string, url: string): string | null {
   }
 }
 
-const STAT_LABELS: Record<string, string> = {
-  YOUTUBE: "subscribers",
-  SPOTIFY: "monthly listeners",
-  TIKTOK: "followers",
-  INSTAGRAM: "followers",
-};
-
 const PLATFORM_META: Record<string, { label: string; color: string; textColor: string; bg: string; border: string }> = {
   SPOTIFY: { label: "Spotify", color: "#1DB954", textColor: "text-green-400", bg: "bg-green-950/60", border: "border-green-800/40" },
   YOUTUBE: { label: "YouTube", color: "#FF0000", textColor: "text-red-400", bg: "bg-red-950/60", border: "border-red-800/40" },
@@ -145,7 +135,6 @@ type Artist = {
   bannerUrl: string | null;
   bio: string | null;
   genres: string[];
-  spotifyPopularity: number;
   watchlistCount: number;
   links: ArtistLink[];
   suggestions: Suggestion[];
@@ -226,14 +215,15 @@ type RankData = {
 };
 
 /* ─── Track Preview Player ─── */
-function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null }) {
+function TrackPreview({ url, deezerId, spotifyUrl }: { url: string | null; deezerId?: string | null; spotifyUrl: string | null }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
+  const hasPreview = !!url || !!deezerId;
 
   async function toggle() {
     const audio = audioRef.current;
-    if (!audio || failed) return;
+    if (!hasPreview || !audio || failed) return;
 
     if (playing) {
       audio.pause();
@@ -252,26 +242,32 @@ function TrackPreview({ url, deezerId }: { url: string; deezerId?: string | null
 
   return (
     <>
-      <audio
-        ref={audioRef}
-        src={toPreviewProxyUrl(url, deezerId)}
-        onEnded={() => setPlaying(false)}
-        onPause={() => setPlaying(false)}
-        onError={() => {
-          setPlaying(false);
-        }}
-        preload="none"
-      />
+      {hasPreview && (
+        <audio
+          ref={audioRef}
+          src={toPreviewProxyUrl(url, deezerId)}
+          onEnded={() => setPlaying(false)}
+          onPause={() => setPlaying(false)}
+          onError={() => {
+            setPlaying(false);
+          }}
+          preload="none"
+        />
+      )}
       <button
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          void toggle();
+          if (hasPreview) {
+            void toggle();
+            return;
+          }
+          return;
         }}
-        title={playing ? "Pause preview" : "Play preview"}
+        title={hasPreview ? (playing ? "Pause preview" : "Play preview") : "Preview unavailable"}
         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all shrink-0 ${playing ? "bg-[var(--accent)] text-white shadow-[0_0_10px_var(--accent-glow)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-white"}`}
       >
-        {playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
+        {hasPreview ? (playing ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />) : <Play className="w-3 h-3 ml-0.5" />}
       </button>
     </>
   );
@@ -298,7 +294,6 @@ function GrowthChart({ artistId }: { artistId: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setLoading(true);
     fetch(`/api/artists/${artistId}/snapshots?period=${period}`)
       .then((r) => r.json())
       .then((data) => setSnapshots(data ?? []))
@@ -320,7 +315,7 @@ function GrowthChart({ artistId }: { artistId: string }) {
 
     const w = rect.width;
     const h = rect.height;
-    const pad = { top: 20, right: 16, bottom: 30, left: 50 };
+    const pad = { top: 20, right: 16, bottom: 30, left: 16 };
     const chartW = w - pad.left - pad.right;
     const chartH = h - pad.top - pad.bottom;
 
@@ -344,20 +339,6 @@ function GrowthChart({ artistId }: { artistId: string }) {
       ctx.moveTo(pad.left, y);
       ctx.lineTo(w - pad.right, y);
       ctx.stroke();
-    }
-
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.font = "10px sans-serif";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let i = 0; i <= 4; i++) {
-      const val = minVal + ((maxVal - minVal) / 4) * (4 - i);
-      const y = pad.top + (chartH / 4) * i;
-      let label: string;
-      if (val >= 1_000_000) label = `${(val / 1_000_000).toFixed(1)}M`;
-      else if (val >= 1_000) label = `${(val / 1_000).toFixed(0)}K`;
-      else label = String(Math.round(val));
-      ctx.fillText(label, pad.left - 6, y);
     }
 
     ctx.textAlign = "center";
@@ -411,13 +392,17 @@ function GrowthChart({ artistId }: { artistId: string }) {
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-black uppercase tracking-wider text-[var(--muted-foreground)] flex items-center gap-2">
-          <TrendingUp className="w-4 h-4" /> Growth
+          <TrendingUp className="w-4 h-4" /> Popularity Trend
         </h2>
         <div className="flex gap-1 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
           {CHART_PERIODS.map((p) => (
             <button
               key={p.key}
-              onClick={() => setPeriod(p.key)}
+              onClick={() => {
+                if (period === p.key) return;
+                setLoading(true);
+                setPeriod(p.key);
+              }}
               className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all ${
                 period === p.key
                   ? "bg-[var(--accent)] text-white"
@@ -437,7 +422,7 @@ function GrowthChart({ artistId }: { artistId: string }) {
           </div>
         ) : snapshots.length < 2 ? (
           <div className="h-44 flex items-center justify-center text-[var(--muted-foreground)] text-sm">
-            Not enough data yet. Stats are recorded on each refresh.
+            Not enough internal history yet. Trend data builds after each refresh.
           </div>
         ) : (
           <>
@@ -446,7 +431,7 @@ function GrowthChart({ artistId }: { artistId: string }) {
                 <span className={`text-lg font-black tabular-nums ${changePercent >= 0 ? "text-green-400" : "text-red-400"}`}>
                   {changePercent >= 0 ? "+" : ""}{changePercent.toFixed(2)}%
                 </span>
-                <span className="text-xs text-[var(--muted-foreground)]">monthly listeners change</span>
+                <span className="text-xs text-[var(--muted-foreground)]">internal popularity change</span>
               </div>
             )}
             <canvas ref={canvasRef} className="w-full h-44" />
@@ -472,7 +457,7 @@ export default function ArtistPage() {
   const [suggestNote, setSuggestNote] = useState("");
   const [suggestSent, setSuggestSent] = useState(false);
   const [ytSearchQuery, setYtSearchQuery] = useState("");
-  const [ytSearchResults, setYtSearchResults] = useState<Array<{ name: string; imageUrl: string | null; subscriberCount: number; handle: string | null; platformId: string | null }>>([]);
+  const [ytSearchResults, setYtSearchResults] = useState<Array<{ name: string; imageUrl: string | null; handle: string | null; platformId: string | null }>>([]);
   const [ytSearching, setYtSearching] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
@@ -482,8 +467,6 @@ export default function ArtistPage() {
   const [rankData, setRankData] = useState<RankData | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [genres, setGenres] = useState<string[]>([]);
-  const [spotifyPopularity, setSpotifyPopularity] = useState(0);
-
   const loadArtist = useCallback(async () => {
     const res = await fetch(`/api/artists/${id}`);
     if (res.ok) setArtist(await res.json());
@@ -512,7 +495,6 @@ export default function ArtistPage() {
       .then((d) => {
         setTracks(d.tracks ?? []);
         setGenres(d.genres ?? []);
-        setSpotifyPopularity(d.spotifyPopularity ?? 0);
       })
       .catch(() => {});
   }, [loadArtist, checkWatchlist, id]);
@@ -644,14 +626,13 @@ export default function ArtistPage() {
       <div className="min-h-screen flex flex-col items-center justify-center gap-4">
         <User className="w-16 h-16 text-[var(--muted-foreground)]" />
         <p className="text-xl font-bold">Artist not found</p>
-        <Link href="/leaderboard" className="text-[var(--accent)] hover:underline flex items-center gap-1">
-          <ArrowLeft className="w-4 h-4" /> Back to Phonk Ranks
+        <Link href="/rankings?entity=artists&model=legal" className="text-[var(--accent)] hover:underline flex items-center gap-1">
+          <ArrowLeft className="w-4 h-4" /> Back to Rankings
         </Link>
       </div>
     );
   }
 
-  const spotifyLink = artist.links.find((l) => l.platform === "SPOTIFY");
   const existingPlatforms = new Set(artist.links.map((l) => l.platform));
   const missingPlatforms = Object.keys(PLATFORM_META).filter((p) => !existingPlatforms.has(p));
   const isPrivileged = session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
@@ -682,10 +663,10 @@ export default function ArtistPage() {
         <div className="max-w-7xl mx-auto px-4 md:px-8 relative -mt-24 md:-mt-28 pb-6">
           {/* Back link */}
           <Link
-            href="/leaderboard"
+            href="/rankings?entity=artists&model=legal"
             className="inline-flex items-center gap-1.5 text-white/60 hover:text-white text-xs mb-4 transition-colors relative z-10"
           >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Phonk Ranks
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Rankings
           </Link>
 
           <div className="flex items-end gap-5 md:gap-7">
@@ -831,42 +812,15 @@ export default function ArtistPage() {
         )}
 
         {/* ─── Metric Cards ─── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          {/* Spotify Monthly Listeners */}
-          {spotifyLink && spotifyLink.monthlyListeners > 0 && (
-            <div className="rounded-xl border border-green-800/30 bg-green-950/20 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <SpotifyIcon className="w-4 h-4 text-green-400" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-green-400/70">Monthly Listeners</span>
-              </div>
-              <div className="text-2xl font-black tabular-nums text-white">{formatCount(spotifyLink.monthlyListeners)}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
+          <div className="rounded-xl border border-emerald-800/30 bg-emerald-950/20 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 text-emerald-300" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/70">Internal Signals</span>
             </div>
-          )}
-          {/* Spotify Followers */}
-          {spotifyLink && spotifyLink.followerCount > 0 && (
-            <div className="rounded-xl border border-green-800/30 bg-green-950/20 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Users className="w-4 h-4 text-green-400" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-green-400/70">Followers</span>
-              </div>
-              <div className="text-2xl font-black tabular-nums text-white">{formatCount(spotifyLink.followerCount)}</div>
-            </div>
-          )}
-          {/* Spotify Popularity */}
-          {spotifyPopularity > 0 && (
-            <div className="rounded-xl border border-purple-800/30 bg-purple-950/20 p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className="w-4 h-4 text-purple-400" />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400/70">Popularity</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-2xl font-black tabular-nums text-white">{spotifyPopularity}</div>
-                <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                  <div className="h-full rounded-full bg-purple-400" style={{ width: `${spotifyPopularity}%` }} />
-                </div>
-              </div>
-            </div>
-          )}
+            <div className="text-sm font-bold text-white">Order and charts stay internal</div>
+            <div className="text-xs text-white/55 mt-1">Profiles show rank movement and internal trend lines, not external platform totals.</div>
+          </div>
           {/* Watchlist */}
           <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4">
             <div className="flex items-center gap-2 mb-2">
@@ -875,22 +829,6 @@ export default function ArtistPage() {
             </div>
             <div className="text-2xl font-black tabular-nums text-white">{artist.watchlistCount}</div>
           </div>
-          {/* Other platform stats */}
-          {artist.links.filter((l) => l.platform !== "SPOTIFY" && l.followerCount > 0).map((link) => {
-            const Icon = PLATFORM_ICONS[link.platform];
-            const meta = PLATFORM_META[link.platform];
-            return (
-              <div key={link.id} className={`rounded-xl border ${meta.border} ${meta.bg} p-4`}>
-                <div className="flex items-center gap-2 mb-2">
-                  {Icon && <Icon className={`w-4 h-4 ${meta.textColor}`} />}
-                  <span className={`text-[10px] font-bold uppercase tracking-wider ${meta.textColor} opacity-70`}>
-                    {STAT_LABELS[link.platform] ?? "Followers"}
-                  </span>
-                </div>
-                <div className="text-2xl font-black tabular-nums text-white">{formatCount(link.followerCount)}</div>
-              </div>
-            );
-          })}
           {/* Podium streak */}
           {rankData?.podiumStreak?.best !== undefined && rankData.podiumStreak.best > 0 && (
             <div className="rounded-xl border border-yellow-800/30 bg-yellow-950/20 p-4">
@@ -933,14 +871,7 @@ export default function ArtistPage() {
                           ? `@${link.handle ?? extractHandleFromUrl(link.platform, link.url)}`
                           : artist.name}
                       </div>
-                      {link.platform === "SPOTIFY" && link.monthlyListeners > 0 && (
-                        <div className="text-white/70 text-xs mt-0.5 tabular-nums">{formatCount(link.monthlyListeners)} monthly listeners</div>
-                      )}
-                      {link.followerCount > 0 && (
-                        <div className="text-[var(--muted-foreground)] text-xs tabular-nums">
-                          {formatCount(link.followerCount)} {link.platform === "SPOTIFY" ? "followers" : (STAT_LABELS[link.platform] ?? "followers")}
-                        </div>
-                      )}
+                      <div className="text-[var(--muted-foreground)] text-xs mt-0.5">Exact platform totals are hidden on profiles.</div>
                     </div>
                   </div>
                   <ExternalLink className="w-4 h-4 text-[var(--muted-foreground)] group-hover:text-white transition-colors" />
@@ -955,7 +886,17 @@ export default function ArtistPage() {
             return (
               <button
                 key={platform}
-                onClick={() => { setSuggestPlatform(platform); setSuggestUrl(""); setYtSearchResults([]); setYtSearchQuery(platform === "YOUTUBE" && artist ? artist.name : ""); session ? setShowSuggest(true) : signIn("google"); }}
+                onClick={() => {
+                  setSuggestPlatform(platform);
+                  setSuggestUrl("");
+                  setYtSearchResults([]);
+                  setYtSearchQuery(platform === "YOUTUBE" && artist ? artist.name : "");
+                  if (session) {
+                    setShowSuggest(true);
+                    return;
+                  }
+                  void signIn("google");
+                }}
                 className="rounded-xl border border-dashed border-[var(--muted)] p-4 transition-all hover:border-[var(--accent)] group text-left"
               >
                 <div className="flex items-center gap-3">
@@ -1006,8 +947,8 @@ export default function ArtistPage() {
                   <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
                     {/* Play */}
                     <div className="flex justify-center">
-                      {track.previewUrl ? (
-                        <TrackPreview url={track.previewUrl} deezerId={track.deezerId} />
+                      {(track.previewUrl || track.spotifyUrl) ? (
+                        <TrackPreview url={track.previewUrl} deezerId={track.deezerId} spotifyUrl={track.spotifyUrl} />
                       ) : <div className="w-7 h-7" />}
                     </div>
 
@@ -1165,7 +1106,7 @@ export default function ArtistPage() {
                             <div className="flex-1 min-w-0">
                               <div className="font-bold truncate">{ch.name}</div>
                               {ch.handle && <div className="text-xs text-[var(--muted-foreground)]">@{ch.handle}</div>}
-                              <div className="text-sm text-red-400 font-bold tabular-nums mt-0.5">{formatCount(ch.subscriberCount)} subscribers</div>
+                              <div className="text-sm text-[var(--muted-foreground)] mt-0.5">Channel lookup result</div>
                             </div>
                           </button>
                         ))}

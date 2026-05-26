@@ -1,11 +1,9 @@
 ﻿"use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
-import { toPreviewProxyUrl } from "@/lib/preview";
-import { claimAudio } from "@/lib/global-audio";
 import { fetchJsonWithSessionCache } from "@/lib/client-cache";
 import {
-  Music, Play, Pause, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2,
+  Music, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2,
 } from "lucide-react";
 import { useDetailPanel } from "@/lib/detail-panel";
 
@@ -21,6 +19,13 @@ function fmtPop(n: number): string {
 }
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function toSpotifyEmbedUrl(spotifyUrl: string | null | undefined): string | null {
+  if (!spotifyUrl) return null;
+  const match = spotifyUrl.match(/\/track\/([a-zA-Z0-9]+)/);
+  if (!match?.[1]) return null;
+  return `https://open.spotify.com/embed/track/${match[1]}?utm_source=generator`;
 }
 
 const NEW_RELEASE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
@@ -120,27 +125,49 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
   const { close, openArtist } = useDetailPanel();
   const [fetched, setFetched] = useState<SongData | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const [playing, setPlaying] = useState(false);
   const [snaps, setSnaps] = useState<TrackSnap[]>([]);
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>("month");
+  const shouldHydrateSongDetail = Boolean(id) && !Array.isArray(data?.allArtists);
 
-  useEffect(() => { setPlaying(false); setFetched(null); setLoadError(false); }, [id]);
+  useEffect(() => { setFetched(null); setLoadError(false); }, [id]);
 
-  // Self-load song data when not provided inline
+  // Hydrate the full song detail whenever the inline payload does not include
+  // the resolved artist-credit list.
   useEffect(() => {
-    if (data || !id) return;
+    if (!shouldHydrateSongDetail) return;
+
+    let cancelled = false;
+
     fetchJsonWithSessionCache<SongData>(`song:${id}:detail`, `/api/songs/${id}`, 120_000)
-      .then(d => { if (d) setFetched(d); else setLoadError(true); })
-      .catch(() => setLoadError(true));
-  }, [id, data]);
+      .then(d => {
+        if (cancelled) return;
+        if (d) setFetched(d);
+        else if (!data) setLoadError(true);
+      })
+      .catch(() => {
+        if (!cancelled && !data) setLoadError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, data, shouldHydrateSongDetail]);
 
   useEffect(() => {
     if (!id) return;
     fetchJsonWithSessionCache<TrackSnap[]>(`song:${id}:snaps:${chartPeriod}:v3`, `/api/songs/${id}/snapshots?period=${chartPeriod}`, 120_000).then(d => setSnaps(d ?? [])).catch(() => {});
   }, [id, chartPeriod]);
 
-  const song = data ?? fetched;
+  const song = fetched
+    ? {
+        ...data,
+        ...fetched,
+        previewUrl: fetched.previewUrl ?? data?.previewUrl ?? null,
+        deezerId: fetched.deezerId ?? data?.deezerId ?? null,
+        deezerUrl: fetched.deezerUrl ?? data?.deezerUrl ?? null,
+        spotifyUrl: fetched.spotifyUrl ?? data?.spotifyUrl ?? null,
+      }
+    : data ?? null;
 
   if (!song && loadError) return (
     <div className="flex flex-col items-center justify-center py-20 gap-3"><Music className="w-10 h-10 text-[var(--muted-foreground)]" /><p className="text-sm font-bold text-[var(--muted-foreground)]">Song not found</p></div>
@@ -149,17 +176,12 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
     <div className="flex flex-col items-center justify-center py-20 gap-3"><Loader2 className="w-8 h-8 text-[var(--accent)] animate-spin" /><p className="text-sm font-bold text-[var(--muted-foreground)]">Loading song…</p></div>
   );
 
-  async function togglePlay() {
-    const a = audioRef.current; if (!a) return;
-    if (playing) { a.pause(); setPlaying(false); }
-    else { try { claimAudio(a); await a.play(); setPlaying(true); } catch { setPlaying(false); } }
-  }
-
   const chartPoints: ChartPoint[] = snaps.map(s => ({ value: s.popularity, date: s.createdAt }));
   const lastVal = song.popularity;
   const changePercent = chartPoints.length >= 2 ? ((chartPoints[chartPoints.length-1].value - chartPoints[0].value) / Math.max(1, chartPoints[0].value)) * 100 : null;
   const periodOpts: { key: ChartPeriod; label: string }[] = [{ key: "week", label: "7d" }, { key: "month", label: "30d" }, { key: "year", label: "1y" }];
   const isNewSong = isRecentRelease(song.releaseDate);
+  const artistCards = song.allArtists?.filter((artist): artist is ArtistInfo => Boolean(artist?.id)) ?? (song.artist ? [song.artist] : []);
 
   return (
     <div className="relative flex flex-col h-full overflow-hidden bg-[#08080c]">
@@ -168,7 +190,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
       <div className="relative shrink-0">
         <div className="relative h-32 overflow-hidden">
           {song.albumImageUrl ? (
-            <Image src={song.albumImageUrl} alt="" fill className="object-cover scale-[1.6] blur-3xl opacity-50" />
+            <Image src={song.albumImageUrl} alt="" fill sizes="(min-width: 1024px) 36vw, 100vw" className="object-cover scale-[1.6] blur-3xl opacity-50" />
           ) : (
             <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/25 to-transparent" />
           )}
@@ -187,15 +209,6 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
                 <div className="w-full h-full bg-[var(--secondary)] flex items-center justify-center"><Music className="w-16 h-16 text-[var(--muted-foreground)]" /></div>
               )}
             </div>
-            {/* Play button overlaid on cover */}
-            {song.previewUrl && (
-              <>
-                <audio ref={audioRef} src={toPreviewProxyUrl(song.previewUrl, song.deezerId)} onEnded={() => setPlaying(false)} onPause={() => setPlaying(false)} preload="none" />
-                <button onClick={togglePlay} className={`absolute bottom-2 right-2 w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-xl ${playing ? "bg-[var(--accent)] text-white shadow-[0_0_16px_var(--accent-glow)] scale-110" : "bg-black/70 backdrop-blur-sm text-white/80 border border-white/20 opacity-0 group-hover:opacity-100 hover:bg-[var(--accent)] hover:text-white hover:border-[var(--accent)]"}`} aria-label={playing ? "Pause preview" : "Play preview"}>
-                  {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
-                </button>
-              </>
-            )}
           </div>
 
           {/* Song title */}
@@ -246,7 +259,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
         <div className="mx-4 mt-3">
           <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-2">Artists</h3>
           <div className="space-y-1.5">
-            {(song.allArtists ?? [song.artist]).map(a => (
+            {artistCards.map(a => (
               <button key={a.id} onClick={() => openArtist(a.id)} className="w-full flex items-center gap-3 rounded-xl border border-[var(--muted)]/35 bg-white/[0.025] p-2.5 hover:bg-white/[0.06] hover:border-[var(--accent)]/30 transition-all text-left group">
                 {a.imageUrl ? (
                   <Image src={a.imageUrl} alt={a.name} width={40} height={40} className="w-10 h-10 rounded-full object-cover shrink-0 ring-1 ring-white/10 group-hover:ring-[var(--accent)]/40 transition-all" />

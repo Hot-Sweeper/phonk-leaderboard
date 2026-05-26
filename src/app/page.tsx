@@ -234,7 +234,6 @@ export default function HomePage() {
               </div>
               <div className="flex gap-2 flex-wrap">
                 {topArtists.slice(0, 10).map((artist, i) => {
-                  const listeners = artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
                   return (
                     <button key={artist.id} onClick={() => openArtist(artist.id)} className="group flex items-center gap-2 rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/60 hover:border-[var(--accent)]/40 hover:bg-[var(--muted)] px-3 py-2 transition-all cursor-pointer">
                       <div className="relative shrink-0">
@@ -247,7 +246,7 @@ export default function HomePage() {
                       </div>
                       <div className="text-left">
                         <div className="text-xs font-bold text-white group-hover:text-[var(--accent)] transition-colors truncate max-w-[90px]">{artist.name}</div>
-                        {listeners > 0 && <div className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{fmt(listeners)}</div>}
+                        <div className="text-[10px] text-[var(--muted-foreground)]">Top artist</div>
                       </div>
                     </button>
                   );

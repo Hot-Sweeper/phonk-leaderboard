@@ -4,28 +4,137 @@ import { prisma } from "@/lib/prisma";
 import type { Platform } from "@prisma/client";
 import { fetchPlatformStats, parseSpotifyUrl, fetchSpotifyArtist } from "@/lib/platforms";
 import { hydrateArtistNow } from "@/lib/update-runner";
-import { getArtistAudienceScore } from "@/lib/legal-rankings";
+import { getArtistInternalMetrics } from "@/lib/legal-rankings";
 
 // Server-side in-memory cache for artist list
+type CachedArtist = {
+  id: string;
+  name: string;
+  imageUrl: string | null;
+  watchlistCount: number;
+  createdAt: Date;
+  links: Array<{
+    platform: string;
+    handle: string | null;
+    monthlyListeners: number;
+    followerCount: number;
+  }>;
+  snapshots?: Array<{
+    monthlyListeners: number;
+  }>;
+};
+
 type ArtistCacheEntry = {
-  artists: Awaited<ReturnType<typeof prisma.artist.findMany<{ include: { links: { orderBy: { platform: "asc" } } } }>>>;
+  artists: CachedArtist[];
   timestamp: number;
 };
 const artistListCache = new Map<string, ArtistCacheEntry>();
 const ARTIST_CACHE_TTL = 120_000; // 2 minutes
 const legalArtistCache = new Map<string, { artists: Array<Record<string, unknown>>; timestamp: number }>();
+const legalArtistCacheInFlight = new Map<string, Promise<Array<Record<string, unknown>>>>();
+const LEGAL_ARTIST_HYPE_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+
+type LegalArtistMode = "popularity" | "hype";
+
+function stripLinkMetrics<T extends { followerCount: number; monthlyListeners: number }>(links: T[]): T[] {
+  return links.map((link) => ({
+    ...link,
+    followerCount: 0,
+    monthlyListeners: 0,
+  }));
+}
+
+async function buildLegalArtistList(mode: LegalArtistMode) {
+  const hypeCutoff = new Date(Date.now() - LEGAL_ARTIST_HYPE_PERIOD_MS);
+  const [artists, oldSnapshots, watchlistAggregate] = await Promise.all([
+    prisma.artist.findMany({
+      include: {
+        links: { orderBy: { platform: "asc" } },
+        tracks: {
+          select: {
+            popularity: true,
+            previewUrl: true,
+            releaseDate: true,
+          },
+        },
+      },
+    }),
+    prisma.artistSnapshot.findMany({
+      where: {
+        createdAt: { lte: hypeCutoff },
+      },
+      orderBy: { createdAt: "desc" },
+      distinct: ["artistId"],
+      select: {
+        artistId: true,
+        monthlyListeners: true,
+        followerCount: true,
+      },
+    }),
+    prisma.artist.aggregate({
+      _max: { watchlistCount: true },
+    }),
+  ]);
+
+  const oldSnapshotMap = new Map(oldSnapshots.map((snapshot) => [snapshot.artistId, snapshot]));
+  const maxWatchlistCount = Math.max(1, watchlistAggregate._max.watchlistCount ?? 0);
+
+  const fullList = artists.map((artist) => {
+    const oldSnapshot = oldSnapshotMap.get(artist.id);
+    const metrics = getArtistInternalMetrics({
+      tracks: artist.tracks,
+      watchlistCount: artist.watchlistCount,
+      maxWatchlistCount,
+      previousSnapshot: oldSnapshot
+        && oldSnapshot.monthlyListeners <= 100
+        && oldSnapshot.followerCount <= 100
+        ? {
+            popularityIndex: oldSnapshot.monthlyListeners,
+            hypeIndex: oldSnapshot.followerCount,
+          }
+        : null,
+    });
+
+    return {
+      id: artist.id,
+      name: artist.name,
+      imageUrl: artist.imageUrl,
+      watchlistCount: artist.watchlistCount,
+      createdAt: artist.createdAt,
+      links: stripLinkMetrics(artist.links),
+      audienceScore: metrics.popularityScore,
+      popularityScore: metrics.popularityScore,
+      hypeScore: metrics.hypeScore,
+      hasHypeData: metrics.hasHypeData,
+      hypeChangePercent: metrics.hypeChangePercent,
+    };
+  });
+
+  fullList.sort((a, b) => {
+    const scoreDelta = mode === "hype"
+      ? Number((b.hypeScore as number | undefined) ?? 0) - Number((a.hypeScore as number | undefined) ?? 0)
+      : Number((b.popularityScore as number | undefined) ?? 0) - Number((a.popularityScore as number | undefined) ?? 0);
+    if (scoreDelta !== 0) return scoreDelta;
+    const watchlistDelta = Number((b.watchlistCount as number | undefined) ?? 0) - Number((a.watchlistCount as number | undefined) ?? 0);
+    if (watchlistDelta !== 0) return watchlistDelta;
+    return String(a.name ?? "").localeCompare(String(b.name ?? ""));
+  });
+
+  return fullList;
+}
 
 // GET artists with optional search + platform filter + pagination
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q")?.trim();
   const platform = searchParams.get("platform")?.toUpperCase();
-  const rankingModel = searchParams.get("rankingModel") === "legal" ? "legal" : "standard";
+  const rankingModel = "legal";
+  const legalMode: LegalArtistMode = searchParams.get("mode") === "hype" ? "hype" : "popularity";
   const skip = parseInt(searchParams.get("skip") ?? "0", 10) || 0;
   const take = Math.min(parseInt(searchParams.get("take") ?? "50", 10) || 50, 100);
 
   if (rankingModel === "legal") {
-    const cacheKey = `legal:${q ?? ""}`;
+    const cacheKey = `legal:${legalMode}:all`;
     const now = Date.now();
     const cached = legalArtistCache.get(cacheKey);
 
@@ -34,62 +143,21 @@ export async function GET(req: Request) {
     if (cached && now - cached.timestamp < ARTIST_CACHE_TTL) {
       fullList = cached.artists;
     } else {
-      const artists = await prisma.artist.findMany({
-        include: {
-          links: { orderBy: { platform: "asc" } },
-          tracks: {
-            select: {
-              id: true,
-              artistId: true,
-              name: true,
-              albumName: true,
-              popularity: true,
-              previewUrl: true,
-              durationMs: true,
-              releaseDate: true,
-              featuredArtists: true,
-              contributorIds: true,
-            },
-          },
-        },
-      });
-
-      const maxYoutubeSubscribers = Math.max(
-        1,
-        ...artists.map((artist) => artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0)
-      );
-      const maxWatchlistCount = Math.max(1, ...artists.map((artist) => artist.watchlistCount));
-
-      fullList = artists.map((artist) => {
-        const youtubeSubscribers = artist.links.find((link) => link.platform === "YOUTUBE")?.followerCount ?? 0;
-        const score = getArtistAudienceScore({
-          watchlistCount: artist.watchlistCount,
-          youtubeSubscribers,
-          tracks: artist.tracks,
-          maxYoutubeSubscribers,
-          maxWatchlistCount,
-        });
-
-        return {
-          id: artist.id,
-          name: artist.name,
-          imageUrl: artist.imageUrl,
-          watchlistCount: artist.watchlistCount,
-          createdAt: artist.createdAt,
-          links: artist.links,
-          audienceScore: score.audienceScore,
-        };
-      });
-
-      fullList.sort((a, b) => {
-        const scoreDelta = Number((b.audienceScore as number | undefined) ?? 0) - Number((a.audienceScore as number | undefined) ?? 0);
-        if (scoreDelta !== 0) return scoreDelta;
-        const watchlistDelta = Number((b.watchlistCount as number | undefined) ?? 0) - Number((a.watchlistCount as number | undefined) ?? 0);
-        if (watchlistDelta !== 0) return watchlistDelta;
-        return String(a.name ?? "").localeCompare(String(b.name ?? ""));
-      });
-
-      legalArtistCache.set(cacheKey, { artists: fullList, timestamp: now });
+      const inFlight = legalArtistCacheInFlight.get(cacheKey);
+      if (inFlight) {
+        fullList = await inFlight;
+      } else {
+        const request = buildLegalArtistList(legalMode);
+        legalArtistCacheInFlight.set(cacheKey, request);
+        try {
+          fullList = await request;
+          legalArtistCache.set(cacheKey, { artists: fullList, timestamp: now });
+        } finally {
+          if (legalArtistCacheInFlight.get(cacheKey) === request) {
+            legalArtistCacheInFlight.delete(cacheKey);
+          }
+        }
+      }
     }
 
     const globalRankMap = new Map<string, number>();
@@ -117,17 +185,15 @@ export async function GET(req: Request) {
     );
   }
 
-  const metricForArtist = (artist: ArtistCacheEntry["artists"][number], plat?: string) => {
-    if (plat === "YOUTUBE") return artist.links.find((l) => l.platform === "YOUTUBE")?.followerCount ?? 0;
-    if (plat === "SPOTIFY") return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
-    if (plat === "TIKTOK") return artist.links.find((l) => l.platform === "TIKTOK")?.followerCount ?? 0;
-    if (plat === "INSTAGRAM") return artist.links.find((l) => l.platform === "INSTAGRAM")?.followerCount ?? 0;
-    return artist.links.find((l) => l.platform === "SPOTIFY")?.monthlyListeners ?? 0;
+  const metricForArtist = (artist: ArtistCacheEntry["artists"][number]) => {
+    const latestSnapshotValue = artist.snapshots?.[0]?.monthlyListeners ?? 0;
+    return latestSnapshotValue <= 100 ? latestSnapshotValue : 0;
   };
 
   const sortArtists = (list: ArtistCacheEntry["artists"], plat?: string) => {
     list.sort((a, b) => {
-      const metricDelta = metricForArtist(b, plat) - metricForArtist(a, plat);
+      void plat;
+      const metricDelta = metricForArtist(b) - metricForArtist(a);
       if (metricDelta !== 0) return metricDelta;
       const watchlistDelta = b.watchlistCount - a.watchlistCount;
       if (watchlistDelta !== 0) return watchlistDelta;
@@ -148,10 +214,21 @@ export async function GET(req: Request) {
     if (platform && ["YOUTUBE", "SPOTIFY", "TIKTOK", "INSTAGRAM"].includes(platform)) {
       globalWhere.links = { some: { platform } };
     }
-    globalList = await prisma.artist.findMany({
+    const rawGlobalList = await prisma.artist.findMany({
       where: globalWhere,
-      include: { links: { orderBy: { platform: "asc" } } },
+      include: {
+        links: { orderBy: { platform: "asc" } },
+        snapshots: {
+          take: 1,
+          orderBy: { createdAt: "desc" },
+          select: { monthlyListeners: true },
+        },
+      },
     });
+    globalList = rawGlobalList.map((artist) => ({
+      ...artist,
+      links: stripLinkMetrics(artist.links),
+    }));
     sortArtists(globalList, platform ?? undefined);
     artistListCache.set(globalKey, { artists: globalList, timestamp: now });
   }

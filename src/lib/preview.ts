@@ -19,10 +19,17 @@ export function isValidPreviewUrl(previewUrl: string | null | undefined) {
   }
 }
 
-export function toPreviewProxyUrl(previewUrl: string, deezerId?: string | null) {
-  if (deezerId) {
-    return `/api/preview?deezerId=${encodeURIComponent(deezerId)}`;
+export function toPreviewProxyUrl(previewUrl: string | null | undefined, deezerId?: string | null) {
+  const params = new URLSearchParams();
+  const trimmedPreviewUrl = previewUrl?.trim() ?? "";
+
+  if (trimmedPreviewUrl.length > 0) {
+    params.set("src", trimmedPreviewUrl);
   }
 
-  return `/api/preview?src=${encodeURIComponent(previewUrl.trim())}`;
+  if (deezerId) {
+    params.set("deezerId", deezerId);
+  }
+
+  return `/api/preview?${params.toString()}`;
 }

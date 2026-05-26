@@ -22,9 +22,9 @@ import {
 
 type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
-type LeaderboardMode = "popularity" | "day" | "week" | "month";
+type LeaderboardMode = "popularity" | "spotify" | "youtube" | "day" | "week" | "month";
 type RankingModel = "standard" | "legal";
-const SONG_RANKINGS_CACHE_VERSION = "v4";
+const SONG_RANKINGS_CACHE_VERSION = "v12";
 
 type Track = {
   id: string;
@@ -108,6 +108,14 @@ function formatTrendPercent(percent: number) {
 
 const NEW_RELEASE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
 
+function isLegalPopularityMode(mode: LeaderboardMode, rankingModel: RankingModel) {
+  return rankingModel === "legal" && (mode === "spotify" || mode === "popularity");
+}
+
+function usesPopularityPresentation(mode: LeaderboardMode, rankingModel: RankingModel) {
+  return mode === "popularity" || isLegalPopularityMode(mode, rankingModel);
+}
+
 function isRecentRelease(releaseDate: string | null | undefined) {
   if (!releaseDate) return false;
   const parsed = Date.parse(releaseDate);
@@ -139,7 +147,7 @@ function hasVisibleTrendMetric(track: Track, mode: LeaderboardMode) {
 }
 
 function isLegalHypeMode(mode: LeaderboardMode, rankingModel: RankingModel) {
-  return rankingModel === "legal" && mode !== "popularity";
+  return rankingModel === "legal" && !isLegalPopularityMode(mode, rankingModel);
 }
 
 function getLegalHypeSubtext(track: Track) {
@@ -152,10 +160,7 @@ function getLegalHypeSubtext(track: Track) {
 
 function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (mode === "day") return "24H Hype";
-    if (mode === "week") return "7D Hype";
-    if (mode === "month") return "30D Hype";
-    return "Audience";
+    return isLegalPopularityMode(mode, rankingModel) ? "Popularity" : "Hype";
   }
   switch (mode) {
     case "day": return valueMode === "relative" ? "24H %" : "24H Hype";
@@ -167,10 +172,10 @@ function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "re
 
 function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (mode === "popularity") return formatPopularity(track.audienceScore ?? track.metricValue);
-    if (track.isEmergingHype) return formatPopularity(track.metricValue);
-    if (!track.hasTrendData) return "--";
-    return formatPopularity(track.metricValue);
+    if (isLegalPopularityMode(mode, rankingModel)) return "Ranked";
+    if (track.isEmergingHype) return "Breakout";
+    if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building";
+    return "Trending";
   }
   if (mode === "popularity") return formatPopularity(track.popularity);
   if (isFreshTrendEntry(track, mode)) return valueMode === "relative" ? "--" : formatTrendDelta(track.metricValue);
@@ -180,8 +185,10 @@ function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute
 
 function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (mode === "popularity") return "Stored-only score";
-    return getLegalHypeSubtext(track);
+    if (isLegalPopularityMode(mode, rankingModel)) return "Internal blended order";
+    if (track.isEmergingHype) return "Early breakout";
+    if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building history";
+    return "Internal momentum order";
   }
   if (mode === "popularity") return null;
   if (valueMode === "relative") {
@@ -194,7 +201,7 @@ function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absol
 
 function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (mode === "popularity") return "text-emerald-300";
+    if (isLegalPopularityMode(mode, rankingModel)) return "text-emerald-300";
     if (track.isEmergingHype) return "text-fuchsia-300";
     if (!track.hasTrendData) return "text-[var(--muted-foreground)]";
     return "text-cyan-300";
@@ -210,7 +217,7 @@ function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "abs
 
 function getMetricBarClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (mode === "popularity") return "bg-emerald-500";
+    if (isLegalPopularityMode(mode, rankingModel)) return "bg-emerald-500";
     if (track.isEmergingHype) return "bg-fuchsia-500";
     if (!track.hasTrendData || track.metricValue === 0) return "bg-zinc-600";
     return "bg-cyan-500";
@@ -281,8 +288,8 @@ function SongsSkeleton() {
   );
 }
 
-function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenArtist, rankingModel }: {
-  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, url: string, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenArtist: (id: string) => void; rankingModel: RankingModel;
+function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenDock, onOpenArtist, rankingModel }: {
+  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, previewUrl?: string | null, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenDock: (track: Track) => void; onOpenArtist: (id: string) => void; rankingModel: RankingModel;
 }) {
   const isFirst = rank === 1;
   const artists = getTrackArtists(track);
@@ -294,7 +301,7 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
     metricValue: track.metricValue,
     trendPercent: track.trendPercent,
     hasTrendData: track.hasTrendData || isFreshTrendEntry(track, mode),
-    showCollectingData: mode === "popularity",
+    showCollectingData: usesPopularityPresentation(mode, rankingModel),
   });
 
   const theme = {
@@ -430,14 +437,18 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
 
           {/* Play + Score stacked in center */}
           <div className="relative z-30 flex flex-col items-center space-y-2">
-              {isValidPreviewUrl(track.previewUrl) && (
-                  <button 
-                    onClick={() => onTogglePreview(track.id, track.previewUrl!, track.deezerId)} 
-                    className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${isPlaying ? `text-black scale-110 ring-4 ring-white/20` : 'bg-black/50 border border-white/20 text-white hover:bg-white hover:text-black hover:scale-105'}`}
-                    style={isPlaying ? { backgroundColor: `rgb(${theme.accentHex})`, boxShadow: `0 0 30px rgba(${theme.accentHex}, 0.6)` } : {}}
-                  >
-                      {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 ml-0.5 fill-current" />}
-                  </button>
+              {!!track.spotifyUrl && (
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenDock(track);
+                  }}
+                  className={`w-10 h-10 md:w-11 md:h-11 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl ${isPlaying ? `text-white scale-110 ring-4 ring-white/20` : 'bg-black/50 border border-white/20 text-white hover:bg-[var(--accent)] hover:text-white hover:border-[var(--accent)] hover:scale-105'}`}
+                  style={isPlaying ? { backgroundColor: `var(--accent)`, boxShadow: `0 0 30px var(--accent-glow)` } : {}}
+                  title="Open song player"
+                >
+                  {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 ml-0.5 fill-current" />}
+                </button>
               )}
               <span className={`font-black ${theme.scoreSize} tracking-tighter`} style={{ color: `rgb(${theme.accentHex})`, textShadow: `0 0 25px rgba(${theme.accentHex}, 0.4)` }}>
                 {getMetricText(track, mode, valueMode, rankingModel)}
@@ -464,8 +475,8 @@ interface SongListViewProps {
   active?: boolean;
 }
 
-export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "standard", active = true }: SongListViewProps) {
-  const { openArtist, openSong } = useDetailPanel();
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "legal", active = true }: SongListViewProps) {
+  const { openArtist, openSong, openDockSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loadingPodium, setLoadingPodium] = useState(true);
@@ -619,9 +630,9 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     return () => observer.disconnect();
   }, [active, tracks.length, totalCount, loadingMore, loadingList]);
 
-  async function togglePreview(trackId: string, previewUrl: string, deezerId?: string | null) {
+  async function togglePreview(trackId: string, previewUrl?: string | null, deezerId?: string | null) {
     if (playingTrackId === trackId) { stopCurrentAudio(); return; }
-    if (!isValidPreviewUrl(previewUrl)) { stopCurrentAudio(); return; }
+    if (!isValidPreviewUrl(previewUrl) && !deezerId) { stopCurrentAudio(); return; }
     stopCurrentAudio();
     
     // We expect the <audio> element to be rendered in the DOM
@@ -633,7 +644,9 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     
     // Setup Audio Context if not initialized
     if (!audioCtxRef.current) {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const audioWindow = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+      const AudioContextClass = audioWindow.AudioContext || audioWindow.webkitAudioContext;
+      if (!AudioContextClass) return;
       audioCtxRef.current = new AudioContextClass();
       analyserRef.current = audioCtxRef.current.createAnalyser();
       analyserRef.current.fftSize = 64; // Small size = Fast response for bass/kick
@@ -707,14 +720,14 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       {/* Podium */}
       {podiumTracks.length === 3 && (
         <div className="flex flex-row items-end justify-center h-[560px] md:h-[660px] gap-2 md:gap-5 mb-16 px-2 md:px-0">
-          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
-          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
-          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
+          <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
         </div>
       )}
 
       {/* Trend notice */}
-      {mode !== "popularity" && !hasTrendData && tracks.length > 0 && (
+      {!usesPopularityPresentation(mode, rankingModel) && !hasTrendData && tracks.length > 0 && (
         <div className="mb-6 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/50 px-4 py-3 text-sm text-[var(--muted-foreground)]">
           {rankingModel === "legal"
             ? "Legal hype score needs at least two stored song snapshots across the selected period. It will fill in as updates keep running."
@@ -775,7 +788,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
               metricValue: track.metricValue,
               trendPercent: track.trendPercent,
               hasTrendData: track.hasTrendData || isFreshTrendEntry(track, mode),
-              showCollectingData: mode === "popularity",
+              showCollectingData: usesPopularityPresentation(mode, rankingModel),
             });
             const metricBarWidth = rankingModel === "legal"
               ? maxTrendMetric > 0
@@ -789,8 +802,15 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
               <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_5rem_3rem] lg:grid-cols-[2rem_3rem_minmax(0,1.25fr)_6rem_6.5rem_3.5rem_5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
                 {/* Play */}
                 <div className="flex justify-center">
-                  {isValidPreviewUrl(track.previewUrl) ? (
-                    <button onClick={() => togglePreview(track.id, track.previewUrl!, track.deezerId)} className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${isPlaying ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-green-600 hover:text-white"}`} title={isPlaying ? "Pause" : "Play 30s preview"}>
+                  {!!track.spotifyUrl ? (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openDockSong(track);
+                      }}
+                      className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${isPlaying ? "bg-[var(--accent)] text-white shadow-[0_0_10px_var(--accent-glow)]" : "bg-[var(--muted)] text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-white"}`}
+                      title="Open song player"
+                    >
                       {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 ml-0.5" />}
                     </button>
                   ) : <div className="w-7 h-7" />}
@@ -841,9 +861,11 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                 <div className="flex flex-col items-end gap-0.5">
                   <span className={`text-xs font-bold tabular-nums ${getMetricTextClass(track, mode, valueMode, rankingModel)}`}>{getMetricText(track, mode, valueMode, rankingModel)}</span>
                   {(mode !== "popularity" || rankingModel === "legal") && <span className="text-[10px] text-[var(--muted-foreground)] tabular-nums">{getMetricSubtext(track, mode, valueMode, rankingModel)}</span>}
-                  <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
-                    <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode, rankingModel)}`} style={{ width: `${metricBarWidth}%` }} />
-                  </div>
+                  {rankingModel !== "legal" && (
+                    <div className="w-12 h-1 rounded-full bg-[var(--muted)] overflow-hidden">
+                      <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode, rankingModel)}`} style={{ width: `${metricBarWidth}%` }} />
+                    </div>
+                  )}
                 </div>
 
                 {/* External link */}

@@ -8,6 +8,14 @@ import {
   searchYouTubeChannels,
 } from "@/lib/platforms";
 
+function sanitizeSpotifyArtist<T extends { followerCount: number; monthlyListeners: number }>(artist: T): T {
+  return {
+    ...artist,
+    followerCount: 0,
+    monthlyListeners: 0,
+  };
+}
+
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -46,7 +54,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Query required" }, { status: 400 });
     }
     const channels = await searchYouTubeChannels(q, 5);
-    return NextResponse.json(channels);
+    return NextResponse.json(
+      channels.map((channel) => ({
+        ...channel,
+        subscriberCount: 0,
+      }))
+    );
   }
 
   // YouTube URL lookup mode
@@ -80,13 +93,13 @@ export async function POST(req: Request) {
       name: yt.name,
       handle: yt.handle,
       imageUrl: yt.imageUrl,
-      subscriberCount: yt.subscriberCount,
+      subscriberCount: 0,
       platformId: yt.platformId,
       url: url.trim(),
     },
     spotifyMatch: spotifyMatch
       ? {
-          ...spotifyMatch,
+          ...sanitizeSpotifyArtist(spotifyMatch),
           url: spotifyUrl,
         }
       : null,
