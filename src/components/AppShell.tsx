@@ -56,17 +56,6 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
   const imageUrl = track?.albumImageUrl ?? null;
   const trackUri = toSpotifyTrackUri(track);
 
-  const finishLoadingSoon = useCallback((uri: string) => {
-    if (loadingTimeoutRef.current) {
-      clearTimeout(loadingTimeoutRef.current);
-    }
-    loadingTimeoutRef.current = setTimeout(() => {
-      if (pendingUriRef.current === uri) {
-        setState("ready");
-      }
-    }, 1800);
-  }, []);
-
   const loadUriForPlayback = useCallback((uri: string) => {
     const controller = controllerRef.current;
     if (!controller) {
@@ -81,16 +70,19 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
     lastRequestedUriRef.current = uri;
 
     try {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
       controller.loadUri?.(uri);
       controller.play?.();
-      setState("loading");
-      finishLoadingSoon(uri);
+      setState("ready");
       return true;
     } catch {
       setState("error");
       return false;
     }
-  }, [finishLoadingSoon]);
+  }, []);
 
   const loadUriWithoutPlayback = useCallback((uri: string) => {
     const controller = controllerRef.current;
@@ -187,7 +179,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
           }
         }
 
-        setState(trackUri ? "ready" : "idle");
+        setState(nextUri ? "ready" : "idle");
       });
       controller.addListener?.("playback_started", () => {
         if (loadingTimeoutRef.current) {
@@ -217,7 +209,7 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
       controllerRef.current?.destroy?.();
       controllerRef.current = null;
     };
-  }, [apiReady, trackUri]);
+  }, [apiReady, loadUriForPlayback]);
 
   useEffect(() => {
     registerDockPlaybackHandler((nextTrack) => {
@@ -287,28 +279,27 @@ function RightDock({ track, registerDockPlaybackHandler }: { track: DockTrack | 
         ) : null}
       </div>
       <div className="flex-1 min-h-0 p-2">
-        {trackUri ? (
-          <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/8 bg-black/30">
-            <div ref={containerRef} className="absolute inset-0" />
-            {(state === "loading" || !apiReady) && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-sm text-white/55">
-                <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-2 text-xs font-semibold">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Starting Spotify player
-                </div>
+        <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/8 bg-black/30">
+          <div ref={containerRef} className={`absolute inset-0 ${trackUri ? "opacity-100" : "pointer-events-none opacity-0"}`} />
+          {!trackUri && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-center text-xs text-white/35">
+              Click a song to load the docked Spotify player here.
+            </div>
+          )}
+          {trackUri && (state === "loading" || !apiReady) && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/35 backdrop-blur-sm text-white/55">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-2 text-xs font-semibold">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Starting Spotify player
               </div>
-            )}
-            {state === "error" && (
-              <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-white/60">
-                Spotify did not start playback automatically. Use the controls inside the player or the Open button.
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 text-center text-xs text-white/35">
-            Click a song to load the docked Spotify player here.
-          </div>
-        )}
+            </div>
+          )}
+          {trackUri && state === "error" && (
+            <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-white/60">
+              Spotify did not start playback automatically. Use the controls inside the player or the Open button.
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
