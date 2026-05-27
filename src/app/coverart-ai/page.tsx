@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Sparkles, Crown, Zap, Lock, Wand2, Download, RefreshCcw } from "lucide-react";
+import { Sparkles, Crown, Zap, Lock, Download, RefreshCcw, ArrowUp, ChevronDown, Check } from "lucide-react";
 
 type ModelId = "pulse-mini" | "nova-prime";
 
@@ -67,172 +67,208 @@ export default function CoverartAiPage() {
   }
 
   return (
-    <main className="relative isolate flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden bg-[var(--background)] px-5 pb-6 pt-5 text-[var(--foreground)]">
+    <main className="relative isolate flex min-h-[calc(100vh-4rem)] w-full flex-col items-center overflow-hidden bg-[var(--background)] px-5 pb-8 pt-6 text-[var(--foreground)]">
       <MeshBackdrop />
 
-      {/* Hero title */}
-      <header className="relative z-10 mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.32em] text-white/60 backdrop-blur">
+      <div className="relative z-10 flex w-full max-w-2xl flex-col items-center gap-6">
+        {/* Header */}
+        <header className="flex flex-col items-center gap-2">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.32em] text-white/60 backdrop-blur">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)] opacity-75" />
               <span className="relative h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
             </span>
             Engine · Online
+            <span className="ml-1 text-white/30">·</span>
+            <span className="text-white/40">1 : 1</span>
           </div>
-          <span className="text-[10px] font-black uppercase tracking-[0.32em] text-white/30">1 : 1</span>
-        </div>
-        <h1 className="bg-gradient-to-r from-white via-white to-white/50 bg-clip-text text-2xl font-black leading-none tracking-tight text-transparent">
-          Coverart <span className="bg-gradient-to-r from-[var(--accent)] via-fuchsia-400 to-violet-300 bg-clip-text text-transparent">AI</span>
-        </h1>
-      </header>
+          <h1 className="bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-center text-3xl font-black leading-none tracking-tight text-transparent sm:text-4xl">
+            Coverart{" "}
+            <span className="bg-gradient-to-r from-[var(--accent)] via-fuchsia-400 to-violet-300 bg-clip-text text-transparent">
+              AI
+            </span>
+          </h1>
+        </header>
 
-      {/* Hero preview */}
-      <section className="relative z-10">
-        <div className="pointer-events-none absolute -inset-6 -z-10 rounded-[3rem] bg-[conic-gradient(from_120deg_at_50%_50%,var(--accent)_0deg,transparent_90deg,#7c3aed_180deg,transparent_270deg,var(--accent)_360deg)] opacity-30 blur-3xl" />
-        <div className="mx-auto w-full">
-          <PreviewCanvas status={status} resultUrl={resultUrl} model={model.name} />
-        </div>
-      </section>
+        {/* Hero preview */}
+        <section className="relative w-full">
+          <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[3rem] bg-[conic-gradient(from_120deg_at_50%_50%,var(--accent)_0deg,transparent_90deg,#7c3aed_180deg,transparent_270deg,var(--accent)_360deg)] opacity-25 blur-3xl" />
+          <div className="mx-auto w-full max-w-[440px]">
+            <PreviewCanvas status={status} resultUrl={resultUrl} model={model.name} />
+          </div>
+        </section>
 
-      {/* Control console */}
-      <section className="relative z-10 mt-4 flex-1">
-        <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[var(--secondary)]/40 p-4 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7),0_0_40px_-10px_var(--accent-glow)] backdrop-blur-2xl">
-          <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[var(--accent)]/25 blur-3xl" />
+        {/* Island prompt bar */}
+        <section className="w-full">
+          <div className="group relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[var(--secondary)]/50 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7),0_0_60px_-20px_var(--accent-glow)] backdrop-blur-2xl transition-colors focus-within:border-[var(--accent)]/50">
+            <div className="pointer-events-none absolute -right-20 -top-20 h-44 w-44 rounded-full bg-[var(--accent)]/25 blur-3xl" />
 
-          <div className="relative flex flex-col gap-4">
-            <ModelSwitch
-              value={modelId}
-              onChange={(v) => {
-                setModelId(v);
-                const next = MODELS.find((m) => m.id === v)!;
-                if (resIndex > next.resolutions.length - 1) {
-                  setResIndex(next.resolutions.length - 1);
+            {/* Prompt area */}
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  generate();
                 }
               }}
+              placeholder="Describe your cover art… lone samurai under neon rain, brazilian phonk poster, glowing red sigil"
+              rows={2}
+              className="relative block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14px] leading-6 text-white placeholder:text-white/35 outline-none"
             />
 
-            <ResolutionControl
-              resolutions={model.resolutions}
-              index={resIndex}
-              onChange={setResIndex}
-            />
+            {/* Toolbar */}
+            <div className="relative flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+              <div className="flex items-center gap-1.5">
+                <ModelChip
+                  value={modelId}
+                  onChange={(v) => {
+                    setModelId(v);
+                    const next = MODELS.find((m) => m.id === v)!;
+                    if (resIndex > next.resolutions.length - 1) {
+                      setResIndex(next.resolutions.length - 1);
+                    }
+                  }}
+                />
+                <ResolutionDropdown
+                  resolutions={model.resolutions}
+                  index={resIndex}
+                  onChange={setResIndex}
+                />
+              </div>
 
-            <div className="relative">
-              <label className="mb-1.5 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
-                <span className="flex items-center gap-1.5">
-                  <Wand2 className="h-3 w-3 text-[var(--accent)]" />
-                  Prompt
-                </span>
-                <span className="tabular-nums text-white/30">{prompt.trim().length} chars</span>
-              </label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="lone samurai under neon rain, brazilian phonk poster, heavy grain, glowing red sigil…"
-                rows={3}
-                className="w-full resize-none rounded-2xl border border-white/[0.07] bg-black/30 px-4 py-3 text-[13px] leading-6 text-white placeholder:text-white/30 outline-none transition-all focus:border-[var(--accent)]/70 focus:bg-black/50 focus:shadow-[0_0_0_4px_var(--accent-glow)]"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={generate}
-              disabled={!canGenerate}
-              className="group/btn relative overflow-hidden rounded-2xl px-5 py-3.5 text-sm font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_60px_-10px_var(--accent-glow)] transition-all disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <span className="absolute inset-0 bg-gradient-to-r from-[var(--accent)] via-fuchsia-500 to-violet-500" />
-              <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-1000 group-hover/btn:translate-x-full" />
-              <span className="relative z-10 flex items-center justify-center gap-2">
-                {status === "generating" ? (
-                  <>
+              <button
+                type="button"
+                onClick={generate}
+                disabled={!canGenerate}
+                aria-label="Generate"
+                className="group/btn relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-white shadow-[0_10px_30px_-6px_var(--accent-glow)] transition-all hover:scale-105 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:scale-100"
+              >
+                <span className="absolute inset-0 bg-gradient-to-br from-[var(--accent)] via-fuchsia-500 to-violet-500" />
+                <span className="relative z-10">
+                  {status === "generating" ? (
                     <RefreshCcw className="h-4 w-4 animate-spin" />
-                    Rendering · {resolution}px
-                  </>
-                ) : status === "done" ? (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Regenerate · {resolution}px
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Generate · {resolution}px
-                  </>
-                )}
-              </span>
-            </button>
+                  ) : (
+                    <ArrowUp className="h-4 w-4" strokeWidth={3} />
+                  )}
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
-      </section>
+
+          {/* Hint row */}
+          <div className="mt-2 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/30">
+            <span>Press Enter to generate</span>
+            <span className="tabular-nums">
+              {model.name} · {resolution}px
+            </span>
+          </div>
+        </section>
+      </div>
 
       <KeyframeStyles />
     </main>
   );
 }
 
-/* ─────────────────────────── Model segmented control ─────────────────────────── */
+/* ─────────────────────────── Model chip (compact toggle) ─────────────────────────── */
 
-function ModelSwitch({
+function ModelChip({
   value,
   onChange,
 }: {
   value: ModelId;
   onChange: (v: ModelId) => void;
 }) {
-  const activeIdx = MODELS.findIndex((m) => m.id === value);
+  const [open, setOpen] = useState(false);
+  const current = MODELS.find((m) => m.id === value)!;
+  const CurrentIcon = current.icon;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
+
   return (
-    <div>
-      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
-        <Sparkles className="h-3 w-3 text-[var(--accent)]" />
-        Model class
-      </div>
-      <div className="relative grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.07] bg-black/30 p-1">
-        <div
-          className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-xl bg-gradient-to-br from-[var(--accent)]/90 via-fuchsia-500/80 to-violet-500/80 shadow-[0_0_30px_var(--accent-glow)] transition-transform duration-500 ease-out"
-          style={{ transform: `translateX(${activeIdx * 100}%)` }}
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        className="group/chip inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+      >
+        <span
+          className={`flex h-5 w-5 items-center justify-center rounded-full ${
+            current.tier === "Premium"
+              ? "bg-gradient-to-br from-[var(--accent)] to-violet-500 text-white shadow-[0_0_12px_var(--accent-glow)]"
+              : "bg-white/10 text-[var(--accent)]"
+          }`}
+        >
+          <CurrentIcon className="h-3 w-3" />
+        </span>
+        <span className="leading-none">{current.name}</span>
+        {current.tier === "Premium" && <Lock className="h-3 w-3 text-amber-200/80" />}
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-white/40 transition-transform ${open ? "rotate-180" : ""}`}
         />
-        {MODELS.map((m) => {
-          const Icon = m.icon;
-          const selected = m.id === value;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onChange(m.id)}
-              className={`relative z-10 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${
-                selected ? "text-white" : "text-white/55 hover:text-white/80"
-              }`}
-            >
-              <span
-                className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
-                  selected ? "bg-white/15" : "bg-white/[0.04]"
+      </button>
+
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute bottom-full left-0 z-30 mb-2 w-64 overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-1.5 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.8),0_0_30px_-10px_var(--accent-glow)] backdrop-blur-2xl"
+        >
+          {MODELS.map((m) => {
+            const Icon = m.icon;
+            const selected = m.id === value;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  onChange(m.id);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors ${
+                  selected ? "bg-white/[0.06]" : "hover:bg-white/[0.04]"
                 }`}
               >
-                <Icon className="h-3.5 w-3.5" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="truncate text-[12px] font-black leading-tight">{m.name}</span>
-                  {m.tier === "Premium" && (
-                    <Lock className="h-2.5 w-2.5 flex-shrink-0 text-amber-200/90" />
-                  )}
+                <span
+                  className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
+                    m.tier === "Premium"
+                      ? "bg-gradient-to-br from-[var(--accent)] to-violet-500 text-white shadow-[0_0_12px_var(--accent-glow)]"
+                      : "bg-white/[0.06] text-[var(--accent)]"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
                 </span>
-                <span className="block truncate text-[9.5px] font-bold uppercase tracking-[0.18em] opacity-70">
-                  {m.tier} · {m.resolutions[m.resolutions.length - 1]}px
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-[12px] font-black text-white">
+                    {m.name}
+                    {m.tier === "Premium" && <Lock className="h-2.5 w-2.5 text-amber-200/80" />}
+                  </span>
+                  <span className="block text-[10px] text-white/40">
+                    {m.tier} · up to {m.resolutions[m.resolutions.length - 1]}px
+                  </span>
                 </span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
+                {selected && <Check className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)]" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ─────────────────────────── Resolution snap slider ─────────────────────────── */
+/* ─────────────────────────── Resolution dropdown ─────────────────────────── */
 
-function ResolutionControl({
+function ResolutionDropdown({
   resolutions,
   index,
   onChange,
@@ -241,64 +277,70 @@ function ResolutionControl({
   index: number;
   onChange: (i: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const safeIdx = Math.min(index, resolutions.length - 1);
-  const pct = resolutions.length === 1 ? 100 : (safeIdx / (resolutions.length - 1)) * 100;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [open]);
+
+  const fmt = (r: number) =>
+    r >= 1000 ? `${(r / 1000).toFixed(r % 1000 === 0 ? 0 : 1)}K` : `${r}`;
 
   return (
-    <div>
-      <div className="mb-2 flex items-end justify-between">
-        <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
-          <Sparkles className="h-3 w-3 text-[var(--accent)]" />
-          Resolution
-        </div>
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-2xl font-black tabular-nums leading-none text-white">
-            {resolutions[safeIdx]}
-          </span>
-          <span className="text-[10px] font-black uppercase tracking-[0.24em] text-white/40">px²</span>
-        </div>
-      </div>
-      <div className="relative h-9">
-        {/* Track */}
-        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-white/[0.06]" />
-        {/* Filled */}
-        <div
-          className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-[var(--accent)] to-fuchsia-400 shadow-[0_0_12px_var(--accent-glow)]"
-          style={{ width: `${pct}%` }}
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((o) => !o);
+        }}
+        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+      >
+        <span className="tabular-nums leading-none">
+          {resolutions[safeIdx]}
+          <span className="ml-0.5 text-[10px] text-white/40">px</span>
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 text-white/40 transition-transform ${open ? "rotate-180" : ""}`}
         />
-        {/* Ticks */}
-        {resolutions.map((r, i) => {
-          const tickPct = resolutions.length === 1 ? 50 : (i / (resolutions.length - 1)) * 100;
-          const active = i <= safeIdx;
-          return (
-            <button
-              key={r}
-              type="button"
-              onClick={() => onChange(i)}
-              className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full p-1"
-              style={{ left: `${tickPct}%` }}
-              aria-label={`${r} pixels`}
-            >
-              <span
-                className={`block rounded-full transition-all ${
-                  i === safeIdx
-                    ? "h-4 w-4 bg-white shadow-[0_0_16px_var(--accent-glow)] ring-4 ring-[var(--accent)]/40"
-                    : active
-                      ? "h-2.5 w-2.5 bg-white/80"
-                      : "h-2 w-2 bg-white/25"
+      </button>
+
+      {open && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute bottom-full left-0 z-30 mb-2 w-40 overflow-hidden rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-1.5 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.8)] backdrop-blur-2xl"
+        >
+          {resolutions.map((r, i) => {
+            const selected = i === safeIdx;
+            return (
+              <button
+                key={r}
+                type="button"
+                onClick={() => {
+                  onChange(i);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-[12px] font-bold transition-colors ${
+                  selected ? "bg-white/[0.06] text-white" : "text-white/70 hover:bg-white/[0.04] hover:text-white"
                 }`}
-              />
-            </button>
-          );
-        })}
-      </div>
-      <div className="mt-1 flex justify-between text-[9px] font-black tabular-nums uppercase tracking-[0.2em] text-white/30">
-        {resolutions.map((r, i) => (
-          <span key={r} className={i === safeIdx ? "text-white/80" : ""}>
-            {r >= 1000 ? `${(r / 1000).toFixed(r % 1000 === 0 ? 0 : 1)}k` : r}
-          </span>
-        ))}
-      </div>
+              >
+                <span className="tabular-nums">
+                  {r}
+                  <span className="ml-0.5 text-[10px] text-white/40">px</span>
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/35">
+                  {fmt(r)}
+                </span>
+                {selected && <Check className="ml-1.5 h-3.5 w-3.5 text-[var(--accent)]" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
