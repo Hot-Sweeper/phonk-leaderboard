@@ -24,7 +24,7 @@ const MIN_BASELINE_DISTANCE_MS: Record<keyof typeof TREND_PERIODS, number> = {
 // Server-side in-memory caches
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const rankedTracksCache = new Map<string, { rankedTracks: any[]; timestamp: number }>();
-const RANKED_CACHE_TTL = 120_000; // 2 minutes
+const RANKED_CACHE_TTL = 600_000; // 10 minutes
 
 type SongsLeaderboardMode = "popularity" | "spotify" | "youtube" | keyof typeof TREND_PERIODS;
 type TrendSortOrder = "desc" | "abs" | "asc";
@@ -932,25 +932,19 @@ export async function GET(req: Request) {
         }> = [];
 
         try {
-          oldSnapshots = await prisma.trackSnapshot.findMany({
-            where: {
-              createdAt: { lte: cutoff },
-              OR: [
-                { popularity: { gt: 0, lte: 100 } },
-                { spotifyPopularity: { gt: 0 } },
-                { youtubeViews: { gt: 0 } },
-              ],
-            },
-            orderBy: { createdAt: "desc" },
-            distinct: ["trackId"],
-            select: {
-              trackId: true,
-              popularity: true,
-              spotifyPopularity: true,
-              youtubeViews: true,
-              createdAt: true,
-            },
-          });
+          oldSnapshots = await prisma.$queryRaw<Array<{
+            trackId: string;
+            popularity: number;
+            spotifyPopularity: number;
+            youtubeViews: number;
+            createdAt: Date;
+          }>>`
+            SELECT DISTINCT ON ("trackId") "trackId", popularity, "spotifyPopularity", "youtubeViews", "createdAt"
+            FROM "TrackSnapshot"
+            WHERE "createdAt" <= ${cutoff}
+              AND (popularity > 0 AND popularity <= 100 OR "spotifyPopularity" > 0 OR "youtubeViews" > 0)
+            ORDER BY "trackId", "createdAt" DESC
+          `;
         } catch {
           oldSnapshots = [];
         }
