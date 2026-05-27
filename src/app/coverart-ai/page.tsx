@@ -67,12 +67,12 @@ export default function CoverartAiPage() {
   }
 
   return (
-    <main className="relative isolate flex min-h-[calc(100vh-4rem)] w-full flex-col items-center overflow-hidden bg-[var(--background)] px-5 pb-8 pt-6 text-[var(--foreground)]">
+    <main className="relative isolate flex min-h-[calc(100vh-4rem)] w-full flex-col items-center overflow-hidden bg-[var(--background)] px-5 pb-6 pt-5 text-[var(--foreground)]">
       <MeshBackdrop />
 
-      <div className="relative z-10 flex w-full max-w-2xl flex-col items-center gap-6">
+      <div className="relative z-10 flex w-full max-w-2xl flex-1 flex-col items-center">
         {/* Header */}
-        <header className="flex flex-col items-center gap-2">
+        <header className="flex flex-col items-center gap-1.5">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.32em] text-white/60 backdrop-blur">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)] opacity-75" />
@@ -82,7 +82,7 @@ export default function CoverartAiPage() {
             <span className="ml-1 text-white/30">·</span>
             <span className="text-white/40">1 : 1</span>
           </div>
-          <h1 className="bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-center text-3xl font-black leading-none tracking-tight text-transparent sm:text-4xl">
+          <h1 className="bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-center text-2xl font-black leading-none tracking-tight text-transparent sm:text-3xl">
             Coverart{" "}
             <span className="bg-gradient-to-r from-[var(--accent)] via-fuchsia-400 to-violet-300 bg-clip-text text-transparent">
               AI
@@ -90,18 +90,23 @@ export default function CoverartAiPage() {
           </h1>
         </header>
 
-        {/* Hero preview */}
-        <section className="relative w-full">
-          <div className="pointer-events-none absolute -inset-8 -z-10 rounded-[3rem] bg-[conic-gradient(from_120deg_at_50%_50%,var(--accent)_0deg,transparent_90deg,#7c3aed_180deg,transparent_270deg,var(--accent)_360deg)] opacity-25 blur-3xl" />
-          <div className="mx-auto w-full max-w-[440px]">
+        {/* Hero preview — fills available vertical space */}
+        <section className="relative flex w-full flex-1 items-center justify-center py-4">
+          <div className="pointer-events-none absolute inset-4 -z-10 rounded-[3rem] bg-[conic-gradient(from_120deg_at_50%_50%,var(--accent)_0deg,transparent_90deg,#7c3aed_180deg,transparent_270deg,var(--accent)_360deg)] opacity-25 blur-3xl" />
+          <div
+            className="aspect-square w-full"
+            style={{ maxWidth: "min(100%, calc(100vh - 22rem))" }}
+          >
             <PreviewCanvas status={status} resultUrl={resultUrl} model={model.name} />
           </div>
         </section>
 
-        {/* Island prompt bar */}
+        {/* Island prompt bar — anchored to bottom of column */}
         <section className="w-full">
-          <div className="group relative overflow-hidden rounded-[1.75rem] border border-white/10 bg-[var(--secondary)]/50 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7),0_0_60px_-20px_var(--accent-glow)] backdrop-blur-2xl transition-colors focus-within:border-[var(--accent)]/50">
-            <div className="pointer-events-none absolute -right-20 -top-20 h-44 w-44 rounded-full bg-[var(--accent)]/25 blur-3xl" />
+          <div className="group relative rounded-[1.75rem] border border-white/10 bg-[var(--secondary)]/50 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7),0_0_60px_-20px_var(--accent-glow)] backdrop-blur-2xl transition-colors focus-within:border-[var(--accent)]/50">
+            <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.75rem]">
+              <div className="absolute -right-20 -top-20 h-44 w-44 rounded-full bg-[var(--accent)]/25 blur-3xl" />
+            </div>
 
             {/* Prompt area */}
             <textarea
@@ -381,7 +386,7 @@ function PreviewCanvas({
   }, [status, phrases.length]);
 
   return (
-    <div className="relative aspect-square w-full max-w-[520px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-black shadow-[inset_0_0_60px_rgba(0,0,0,0.8)]">
+    <div className="relative aspect-square h-full w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-black shadow-[inset_0_0_60px_rgba(0,0,0,0.8)]">
       {/* Always-on subtle ambient swirl */}
       <div className="pointer-events-none absolute inset-0 opacity-60">
         <div className="absolute inset-0 animate-coverart-aurora bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent)_0deg,transparent_120deg,#7c3aed_240deg,transparent_360deg)] opacity-25 blur-3xl" />
