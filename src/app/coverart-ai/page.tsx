@@ -205,7 +205,7 @@ function ModelChip({
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        className="group/chip inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+        className="group/chip inline-flex h-9 items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] pl-1.5 pr-3 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
       >
         <span
           className={`flex h-5 w-5 items-center justify-center rounded-full ${
@@ -303,7 +303,7 @@ function ResolutionDropdown({
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
+        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-4 text-[12px] font-bold text-white/85 transition-colors hover:border-white/20 hover:bg-white/[0.08]"
       >
         <span className="tabular-nums leading-none">
           {resolutions[safeIdx]}
