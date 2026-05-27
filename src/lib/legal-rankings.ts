@@ -294,9 +294,7 @@ export function getHypeLeaderboardPopularityScore(
   track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity">
 ) {
   const spotifyScore = normalizePopularityForScore(track.spotifyPopularity ?? 0);
-  if (spotifyScore > 0) return Math.round(spotifyScore);
-
-  return Math.round(normalizePopularityForScore(track.popularity));
+  return Math.round(spotifyScore);
 }
 
 export function getHypeLeaderboardHypeScore(
@@ -306,22 +304,48 @@ export function getHypeLeaderboardHypeScore(
   const baseScore = getHypeLeaderboardPopularityScore(track);
   const ageInDays = getAgeInDays(track.releaseDate);
 
+  if (baseScore <= 0 || ageInDays == null) {
+    return 0;
+  }
+
   const ageMultiplier = (() => {
-    if (ageInDays == null) return 0.35;
-    if (ageInDays <= 7) return 1.8;
-    if (ageInDays <= 14) return 1.5;
-    if (ageInDays <= 30) return 1.1;
-    if (ageInDays <= 60) return 0.65;
-    if (ageInDays <= 90) return 0.3;
+    if (ageInDays <= 7) return 1.2;
+    if (ageInDays <= 14) return 1.05;
+    if (ageInDays <= 30) return 0.78;
+    if (ageInDays <= 45) return 0.55;
+    if (ageInDays <= 60) return 0.36;
+    if (ageInDays <= 90) return 0.18;
+    if (ageInDays <= 120) return 0.08;
+    if (ageInDays <= 180) return 0.03;
+    return 0;
+  })();
+
+  const freshnessBonus = (() => {
+    if (ageInDays <= 7) return 24;
+    if (ageInDays <= 14) return 18;
+    if (ageInDays <= 30) return 12;
+    if (ageInDays <= 45) return 6;
+    if (ageInDays <= 60) return 2;
+    return 0;
+  })();
+
+  const velocityMultiplier = (() => {
+    if (ageInDays <= 30) return 1;
+    if (ageInDays <= 60) return 0.7;
+    if (ageInDays <= 90) return 0.35;
     if (ageInDays <= 180) return 0.1;
-    return 0.03;
+    return 0;
   })();
 
   const velocityBonus = trendPercent > 0
-    ? clamp((trendPercent / 100) * 25, 0, 30)
+    ? clamp((trendPercent / 100) * 40, 0, 35) * velocityMultiplier
     : 0;
 
-  return Math.round(clamp((baseScore + velocityBonus) * ageMultiplier, 0, 100));
+  const underdogBonus = trendPercent >= 20 && ageInDays <= 60 && baseScore < 65
+    ? clamp(((65 - baseScore) / 65) * 12, 0, 12) * velocityMultiplier
+    : 0;
+
+  return Math.round(clamp((baseScore * ageMultiplier) + freshnessBonus + velocityBonus + underdogBonus, 0, 100));
 }
 
 export function getEmergingTrackHypeScore(

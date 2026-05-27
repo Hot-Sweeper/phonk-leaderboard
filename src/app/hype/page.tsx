@@ -68,7 +68,7 @@ type Track = {
 };
 
 const MODES: Array<{ key: HypeMode; label: string; shortLabel: string; icon: typeof Gauge }> = [
-  { key: "hype-pop", label: "Popularity", shortLabel: "Pop", icon: Gauge },
+  { key: "hype-pop", label: "Spotify Chart", shortLabel: "Chart", icon: Gauge },
   { key: "hype-trend", label: "Hype", shortLabel: "Hype", icon: Flame },
 ];
 
@@ -194,7 +194,7 @@ function getScoreMeta(track: Track, mode: HypeMode) {
     return {
       label: "Spotify",
       value: formatScore(spotifyScore),
-      sublabel: "chart score",
+      sublabel: "chart rank",
       className: spotifyScore >= 70 ? "text-green-300" : spotifyScore >= 50 ? "text-yellow-300" : "text-[var(--muted-foreground)]",
     };
   }
@@ -337,7 +337,7 @@ export default function HypePage() {
     ? "Loading hype rankings..."
     : totalCount > 0
       ? mode === "hype-pop"
-        ? `${totalCount} tracks ranked by pure Spotify chart strength`
+        ? `${totalCount} tracks ranked by Spotify chart strength only`
         : `${totalCount} tracks ranked by freshness, Spotify strength, and ${period === "week" ? "7-day" : "30-day"} growth`
       : debouncedSearch
         ? "No tracks matched your search."
@@ -562,9 +562,9 @@ export default function HypePage() {
                       <>
                         <span className="inline-flex items-center gap-1 font-bold text-white">
                           <CalendarDays className="w-3 h-3" />
-                          No age decay
+                          Spotify only
                         </span>
-                        <span>Spotify rank</span>
+                        <span>No age decay</span>
                       </>
                     )}
                   </div>
