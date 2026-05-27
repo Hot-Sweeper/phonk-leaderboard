@@ -40,9 +40,10 @@ async function main() {
 
   for (let i = 0; i < allSpotifyIds.length; i += BATCH) {
     const batch = allSpotifyIds.slice(i, i + BATCH);
-    let dateMap: Record<string, string>;
+    let dateMap: Record<string, string | null>;
     try {
-      dateMap = await batchFetchSpotifyTrackDates(batch);
+      const results = await batchFetchSpotifyTrackDates(batch);
+      dateMap = Object.fromEntries(results.map((r) => [r.id, r.releaseDate]));
     } catch (e) {
       console.error(`Batch ${i}-${i + BATCH} failed:`, e);
       errors += batch.length;
