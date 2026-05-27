@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Sparkles, Crown, Zap, Lock, Download, RefreshCcw, ArrowUp, ChevronDown, Check } from "lucide-react";
 
-type ModelId = "pulse-mini" | "nova-prime";
+type ModelId = "memphis-turbo" | "memphis-2-pro";
 
 type ModelDef = {
   id: ModelId;
@@ -17,16 +17,16 @@ type ModelDef = {
 
 const MODELS: ModelDef[] = [
   {
-    id: "pulse-mini",
-    name: "Pulse Mini",
+    id: "memphis-turbo",
+    name: "Memphis Turbo",
     tagline: "Fast drafts · gritty phonk textures",
     tier: "Free",
     icon: Zap,
     resolutions: [512, 768, 1024],
   },
   {
-    id: "nova-prime",
-    name: "Nova Prime",
+    id: "memphis-2-pro",
+    name: "Memphis 2 Pro",
     tagline: "Studio detail · up to 4K masters",
     tier: "Premium",
     icon: Crown,
@@ -39,7 +39,7 @@ type Status = "idle" | "generating" | "done";
 
 export default function CoverartAiPage() {
   const [prompt, setPrompt] = useState("");
-  const [modelId, setModelId] = useState<ModelId>("pulse-mini");
+  const [modelId, setModelId] = useState<ModelId>("memphis-turbo");
   const [resIndex, setResIndex] = useState(2);
   const [status, setStatus] = useState<Status>("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
