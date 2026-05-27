@@ -127,6 +127,7 @@ export async function GET(req: Request) {
           tracks: {
             select: {
               popularity: true,
+              spotifyPopularity: true,
               previewUrl: true,
               releaseDate: true,
             },

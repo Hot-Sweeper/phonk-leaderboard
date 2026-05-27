@@ -29,7 +29,6 @@ const SONG_RANKINGS_CACHE_VERSION = "v13";
 type Track = {
   id: string;
   spotifyId: string | null;
-  deezerId: string | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
@@ -39,7 +38,6 @@ type Track = {
   explicit: boolean;
   releaseDate: string | null;
   spotifyUrl: string | null;
-  deezerUrl: string | null;
   previewUrl: string | null;
   bpm: number | null;
   gain: number | null;
@@ -289,7 +287,7 @@ function SongsSkeleton() {
 }
 
 function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginalVersion, mode, valueMode, onOpenSong, onOpenDock, onOpenArtist, rankingModel }: {
-  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, previewUrl?: string | null, deezerId?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenDock: (track: Track) => void; onOpenArtist: (id: string) => void; rankingModel: RankingModel;
+  track: Track; rank: number; isPlaying: boolean; onTogglePreview: (id: string, previewUrl?: string | null) => void; showOriginalVersion: boolean; mode: LeaderboardMode; valueMode: "absolute" | "relative"; onOpenSong: (track: Track) => void; onOpenDock: (track: Track) => void; onOpenArtist: (id: string) => void; rankingModel: RankingModel;
 }) {
   const isFirst = rank === 1;
   const artists = getTrackArtists(track);
@@ -630,9 +628,9 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     return () => observer.disconnect();
   }, [active, tracks.length, totalCount, loadingMore, loadingList]);
 
-  async function togglePreview(trackId: string, previewUrl?: string | null, deezerId?: string | null) {
+  async function togglePreview(trackId: string, previewUrl?: string | null) {
     if (playingTrackId === trackId) { stopCurrentAudio(); return; }
-    if (!isValidPreviewUrl(previewUrl) && !deezerId) { stopCurrentAudio(); return; }
+    if (!isValidPreviewUrl(previewUrl)) { stopCurrentAudio(); return; }
     stopCurrentAudio();
     
     // We expect the <audio> element to be rendered in the DOM
@@ -640,7 +638,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     if (!audio) return;
     
     audio.volume = 0.5;
-    audio.src = toPreviewProxyUrl(previewUrl, deezerId);
+    audio.src = toPreviewProxyUrl(previewUrl);
     
     // Setup Audio Context if not initialized
     if (!audioCtxRef.current) {
@@ -870,8 +868,8 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
                 {/* External link */}
                 <div className="hidden md:flex justify-center">
-                  {(track.deezerUrl || track.spotifyUrl) && (
-                    <a href={track.deezerUrl ?? track.spotifyUrl!} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}>
+                  {track.spotifyUrl && (
+                    <a href={track.spotifyUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title="Open in Spotify">
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   )}

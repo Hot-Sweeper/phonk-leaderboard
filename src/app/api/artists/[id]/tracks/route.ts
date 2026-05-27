@@ -84,8 +84,10 @@ export async function GET(
       .sort((a, b) => b.popularity - a.popularity)
       .slice(0, PANEL_OUTPUT_LIMIT);
 
+    const publicTracks = dedupedTracks.map(({ deezerId: _deezerId, deezerUrl: _deezerUrl, ...track }) => track);
+
     return NextResponse.json({
-      tracks: dedupedTracks,
+      tracks: publicTracks,
       genres: artist.genres,
       spotifyPopularity: 0,
     });
@@ -159,8 +161,10 @@ export async function GET(
     }))
     .sort((a, b) => b.popularity - a.popularity);
 
+  const publicTracks = dedupedTracks.map(({ deezerId: _deezerId, deezerUrl: _deezerUrl, ...track }) => track);
+
   return NextResponse.json({
-    tracks: dedupedTracks,
+    tracks: publicTracks,
     genres: artist.genres,
     spotifyPopularity: 0,
   });

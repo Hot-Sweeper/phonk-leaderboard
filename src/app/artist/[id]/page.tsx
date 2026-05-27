@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { Skeleton } from "@/components/Skeleton";
-import { toPreviewProxyUrl } from "@/lib/preview";
+import { isValidPreviewUrl, toPreviewProxyUrl } from "@/lib/preview";
 import { claimAudio } from "@/lib/global-audio";
 import {
   ArrowLeft,
@@ -215,11 +215,11 @@ type RankData = {
 };
 
 /* ─── Track Preview Player ─── */
-function TrackPreview({ url, deezerId, spotifyUrl }: { url: string | null; deezerId?: string | null; spotifyUrl: string | null }) {
+function TrackPreview({ url }: { url: string | null }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [failed, setFailed] = useState(false);
-  const hasPreview = !!url || !!deezerId;
+  const hasPreview = isValidPreviewUrl(url);
 
   async function toggle() {
     const audio = audioRef.current;
@@ -245,7 +245,7 @@ function TrackPreview({ url, deezerId, spotifyUrl }: { url: string | null; deeze
       {hasPreview && (
         <audio
           ref={audioRef}
-          src={toPreviewProxyUrl(url, deezerId)}
+          src={toPreviewProxyUrl(url)}
           onEnded={() => setPlaying(false)}
           onPause={() => setPlaying(false)}
           onError={() => {
@@ -947,8 +947,8 @@ export default function ArtistPage() {
                   <div key={track.id} className="group grid grid-cols-[2rem_3rem_1fr_4rem] md:grid-cols-[2rem_3rem_minmax(0,1fr)_8rem_8rem_4rem_4.5rem_3rem] gap-3 px-4 md:px-5 py-3 items-center border-b border-[var(--muted)]/40 hover:bg-[var(--secondary)]/60 transition-colors">
                     {/* Play */}
                     <div className="flex justify-center">
-                      {(track.previewUrl || track.spotifyUrl) ? (
-                        <TrackPreview url={track.previewUrl} deezerId={track.deezerId} spotifyUrl={track.spotifyUrl} />
+                      {(isValidPreviewUrl(track.previewUrl) || track.spotifyUrl) ? (
+                        <TrackPreview url={track.previewUrl} />
                       ) : <div className="w-7 h-7" />}
                     </div>
 
@@ -1005,8 +1005,8 @@ export default function ArtistPage() {
 
                     {/* External link */}
                     <div className="hidden md:flex justify-end">
-                      {(track.deezerUrl || track.spotifyUrl) && (
-                        <a href={track.deezerUrl ?? track.spotifyUrl!} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}>
+                      {track.spotifyUrl && (
+                        <a href={track.spotifyUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors" title="Open in Spotify">
                           <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       )}

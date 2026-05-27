@@ -15,6 +15,8 @@ type ArtistTrackInput = {
 
 const TRACK_YOUTUBE_VIEW_MAX = 100_000_000;
 export const TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS = 45;
+const ARTIST_TRACK_AGE_HALF_LIFE_DAYS = 270;
+const ARTIST_TRACK_MIN_WEIGHT = 0.2;
 
 type ArtistScoreInput = {
   watchlistCount: number;
@@ -138,6 +140,50 @@ export function getTrackAudienceScore(
     recencyScore * 0.2 +
     previewScore * 0.08
   );
+}
+
+function getArtistTrackWeight(releaseDate: string | null | undefined) {
+  const ageInDays = getAgeInDays(releaseDate);
+  if (ageInDays == null) return 0.35;
+
+  return clamp(
+    Math.pow(0.5, ageInDays / ARTIST_TRACK_AGE_HALF_LIFE_DAYS),
+    ARTIST_TRACK_MIN_WEIGHT,
+    1
+  );
+}
+
+function getArtistTrackPopularityValue(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate" | "previewUrl">
+) {
+  if ((track.spotifyPopularity ?? 0) <= 0) {
+    return track.popularity;
+  }
+
+  return getTrackAudienceScore({
+    popularity: track.spotifyPopularity ?? 0,
+    releaseDate: track.releaseDate,
+    previewUrl: track.previewUrl,
+  });
+}
+
+function getAgeWeightedArtistPopularityAverage(
+  tracks: Array<Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate" | "previewUrl">>
+) {
+  if (tracks.length === 0) return 0;
+
+  let weightedTotal = 0;
+  let weightTotal = 0;
+
+  for (const track of tracks) {
+    const weight = getArtistTrackWeight(track.releaseDate);
+    const score = getArtistTrackPopularityValue(track);
+    weightedTotal += score * weight;
+    weightTotal += weight;
+  }
+
+  if (weightTotal <= 0) return 0;
+  return weightedTotal / weightTotal;
 }
 
 export function getTrackHypeScore(
@@ -309,14 +355,7 @@ export function getArtistAudienceScoreFromSummary(input: ArtistScoreSummaryInput
   const youtubeScore = normalizeLog(input.youtubeSubscribers, input.maxYoutubeSubscribers);
   const watchlistScore = normalizeLog(input.watchlistCount, input.maxWatchlistCount);
 
-  const audienceScore = Math.round(
-    topTracksScore * 0.5 +
-    input.catalogPopularityScore * 0.3 +
-    depthScore * 0.1 +
-    releaseScore * 0.04 +
-    youtubeScore * 0.04 +
-    watchlistScore * 0.02
-  );
+  const audienceScore = Math.round(input.catalogPopularityScore);
 
   return {
     audienceScore,
@@ -331,12 +370,10 @@ export function getArtistAudienceScoreFromSummary(input: ArtistScoreSummaryInput
 }
 
 export function getArtistAudienceScore(input: ArtistScoreInput) {
-  const catalogPopularityScore = average(
-    input.tracks.map((track) => normalizePopularityForScore(track.popularity))
-  );
   const trackScores = input.tracks
-    .map((track) => getTrackAudienceScore(track))
+    .map((track) => getArtistTrackPopularityValue(track))
     .sort((left, right) => right - left);
+  const catalogPopularityScore = getAgeWeightedArtistPopularityAverage(input.tracks);
 
   const strongTracks = trackScores.filter((score) => score >= 65).length;
   const activeTracks = trackScores.filter((score) => score >= 45).length;
@@ -365,18 +402,16 @@ export type ArtistInternalSnapshotInput = {
 type ArtistInternalMetricsInput = {
   watchlistCount: number;
   maxWatchlistCount: number;
-  tracks: Pick<ArtistTrackInput, "popularity" | "releaseDate" | "previewUrl">[];
+  tracks: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate" | "previewUrl">[];
   previousSnapshot?: Partial<ArtistInternalSnapshotInput> | null;
 };
 
 export function getArtistInternalMetrics(input: ArtistInternalMetricsInput) {
   const trackScores = input.tracks
-    .map((track) => getTrackAudienceScore(track))
+    .map((track) => getArtistTrackPopularityValue(track))
     .sort((left, right) => right - left);
 
-  const catalogPopularityScore = average(
-    input.tracks.map((track) => normalizePopularityForScore(track.popularity))
-  );
+  const catalogPopularityScore = getAgeWeightedArtistPopularityAverage(input.tracks);
   const strongTrackCount = trackScores.filter((score) => score >= 65).length;
   const activeTrackCount = trackScores.filter((score) => score >= 45).length;
   const recentReleaseCount = input.tracks.filter((track) => isRecentlyReleased(track.releaseDate, 90)).length;
@@ -397,7 +432,7 @@ export function getArtistInternalMetrics(input: ArtistInternalMetricsInput) {
     trackCount: input.tracks.length,
   });
 
-  const popularityScore = audience.audienceScore;
+  const popularityScore = Math.round(catalogPopularityScore);
   const previousPopularity = input.previousSnapshot?.popularityIndex ?? null;
   const previousHype = input.previousSnapshot?.hypeIndex ?? null;
 

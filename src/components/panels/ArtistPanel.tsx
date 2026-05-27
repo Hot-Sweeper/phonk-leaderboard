@@ -481,8 +481,8 @@ export default function ArtistPanel({ id }: { id: string }) {
                       <div className="text-[10px] text-white/20 tabular-nums">{fmtDur(track.durationMs)}</div>
                     </div>
                   </button>
-                  {(track.deezerUrl ?? track.spotifyUrl) && (
-                    <a href={(track.deezerUrl ?? track.spotifyUrl)!} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-white/15 hover:text-[var(--accent)] transition-colors shrink-0"><ExternalLink className="w-3 h-3" /></a>
+                  {track.spotifyUrl && (
+                    <a href={track.spotifyUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-white/15 hover:text-[var(--accent)] transition-colors shrink-0"><ExternalLink className="w-3 h-3" /></a>
                   )}
                 </div>
               ))}

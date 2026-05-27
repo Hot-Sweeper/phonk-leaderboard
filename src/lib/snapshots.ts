@@ -15,6 +15,7 @@ export async function recordSnapshot(artistId: string) {
         tracks: {
           select: {
             popularity: true,
+            spotifyPopularity: true,
             previewUrl: true,
             releaseDate: true,
           },

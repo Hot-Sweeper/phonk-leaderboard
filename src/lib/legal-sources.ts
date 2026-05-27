@@ -38,11 +38,6 @@ function titlesLooselyMatch(normalizedLeft: string, normalizedRight: string) {
   return normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft);
 }
 
-type DeezerChartEntry = {
-  deezerId: number;
-  position: number;
-};
-
 type AudiusTrendEntry = {
   position: number;
   title: string;
@@ -75,7 +70,6 @@ type LastFmTrendEntry = {
 export type ExternalTrendSignals = {
   score: number;
   sources: string[];
-  deezerChartPosition: number | null;
   audiusTrendingPosition: number | null;
   appleChartPosition: number | null;
   lastfmChartPosition: number | null;
@@ -83,7 +77,6 @@ export type ExternalTrendSignals = {
 };
 
 export type ExternalSignalSnapshot = {
-  deezerChartById: Map<number, DeezerChartEntry>;
   audiusTrending: AudiusTrendEntry[];
   appleChart: AppleChartEntry[];
   lastfmChart: LastFmTrendEntry[];
@@ -116,7 +109,6 @@ const externalSignalCache = new Map<string, ExternalSignalCacheEntry>();
 let externalSignalPromise: Promise<ExternalSignalSnapshot> | null = null;
 
 export const EMPTY_EXTERNAL_SIGNAL_SNAPSHOT: ExternalSignalSnapshot = {
-  deezerChartById: new Map(),
   audiusTrending: [],
   appleChart: [],
   lastfmChart: [],
@@ -126,7 +118,6 @@ export const EMPTY_EXTERNAL_SIGNAL_SNAPSHOT: ExternalSignalSnapshot = {
 export const EMPTY_EXTERNAL_TREND_SIGNALS: ExternalTrendSignals = {
   score: 0,
   sources: [],
-  deezerChartPosition: null,
   audiusTrendingPosition: null,
   appleChartPosition: null,
   lastfmChartPosition: null,
@@ -202,26 +193,12 @@ export async function fetchExternalTrendSignals() {
       `https://ws.audioscrobbler.com/2.0/?method=tag.gettoptracks&tag=${encodeURIComponent(tag)}&limit=100`
     );
 
-    const [deezerChartResponse, audiusTrendingResponse, appleChartResponse, lastfmChartJson, ...lastfmTagPayloads] = await Promise.all([
-      fetchWithTimeout("https://api.deezer.com/chart/0/tracks?limit=100"),
+    const [audiusTrendingResponse, appleChartResponse, lastfmChartJson, ...lastfmTagPayloads] = await Promise.all([
       fetchWithTimeout("https://api.audius.co/v1/tracks/trending?genre=Electronic&limit=100&app_name=phonkforum"),
       fetchWithTimeout("https://rss.marketingtools.apple.com/api/v2/us/music/most-played/100/songs.json"),
       fetchLastFmJson("https://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&limit=100"),
       ...lastFmTagUrls.map((url) => fetchLastFmJson(url)),
     ]);
-
-    let deezerChartById = new Map<number, DeezerChartEntry>();
-    if (deezerChartResponse?.ok) {
-      const deezerJson = await deezerChartResponse.json().catch(() => null);
-      deezerChartById = new Map(
-        (deezerJson?.data ?? [])
-          .map((entry: { id?: number; position?: number }) => {
-            if (typeof entry.id !== "number") return null;
-            return [entry.id, { deezerId: entry.id, position: entry.position ?? 999 }] as const;
-          })
-          .filter((entry: readonly [number, DeezerChartEntry] | null): entry is readonly [number, DeezerChartEntry] => entry !== null)
-      );
-    }
 
     let audiusTrending: AudiusTrendEntry[] = [];
     if (audiusTrendingResponse?.ok) {
@@ -261,7 +238,7 @@ export async function fetchExternalTrendSignals() {
       LASTFM_PHONK_TAGS.map((tag, index) => [tag, mapLastFmEntries(lastfmTagPayloads[index]?.tracks?.track ?? lastfmTagPayloads[index]?.toptracks?.track)])
     );
 
-    const snapshot = { deezerChartById, audiusTrending, appleChart, lastfmChart, lastfmTagCharts };
+    const snapshot = { audiusTrending, appleChart, lastfmChart, lastfmTagCharts };
     externalSignalCache.set(cacheKey, { data: snapshot, timestamp: Date.now() });
     return snapshot;
   })();
@@ -315,21 +292,6 @@ function matchTrackEntry<T extends { title: string; artistName: string }>(
 
 export function resolveExternalTrendSignalForTrack(track: ExternalSignalTrack, externalSignals: ExternalSignalSnapshot): ExternalTrendSignals {
   const sources: string[] = [];
-  const deezerTrackId = typeof track.deezerId === "number"
-    ? track.deezerId
-    : typeof track.deezerId === "string"
-      ? Number(track.deezerId)
-      : null;
-
-  const deezerChartEntry = deezerTrackId != null && !Number.isNaN(deezerTrackId)
-    ? externalSignals.deezerChartById.get(deezerTrackId)
-    : undefined;
-  const deezerScore = deezerChartEntry
-    ? clamp(100 - ((deezerChartEntry.position - 1) * 1.15), 24, 100)
-    : 0;
-  if (deezerChartEntry) {
-    sources.push("deezer-chart");
-  }
 
   const audiusMatch = matchTrackEntry(track, externalSignals.audiusTrending);
   const audiusScore = audiusMatch ? scoreAudiusMatch(audiusMatch) : 0;
@@ -363,9 +325,8 @@ export function resolveExternalTrendSignalForTrack(track: ExternalSignalTrack, e
   }
 
   return {
-    score: Math.max(deezerScore, audiusScore, appleScore, lastfmChartScore, strongestLastfmTagScore),
+    score: Math.max(audiusScore, appleScore, lastfmChartScore, strongestLastfmTagScore),
     sources,
-    deezerChartPosition: deezerChartEntry?.position ?? null,
     audiusTrendingPosition: audiusMatch?.position ?? null,
     appleChartPosition: appleMatch?.position ?? null,
     lastfmChartPosition: lastfmChartMatch?.position ?? null,

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { fetchSpotifyArtist, parseSpotifyUrl } from "@/lib/platforms";
 import { runFullUpdate, runSongUpdate, cancelAllRunning } from "@/lib/update-runner";
 
+const SONG_INTERVAL_MIGRATION_KEY = "songUpdateIntervalHoursMigratedTo24";
+
 const SCHEDULED_UPDATERS = [
   {
     key: "updateIntervalHours",
@@ -17,8 +19,8 @@ const SCHEDULED_UPDATERS = [
     key: "songUpdateIntervalHours",
     lastRunKey: "lastSongUpdate",
     label: "Song Updater",
-    description: "Refreshes track popularity, credits, and song hype snapshot history.",
-    defaultHours: 6,
+    description: "Runs a full Spotify catalog refresh, updates song popularity, and persists artist rank history.",
+    defaultHours: 24,
     updateType: "songs",
   },
 ] as const;
@@ -34,6 +36,22 @@ export async function GET() {
   const map: Record<string, string> = {};
   for (const s of settings) map[s.key] = s.value;
 
+  if (!map["songUpdateIntervalHours"] || (map["songUpdateIntervalHours"] === "6" && map[SONG_INTERVAL_MIGRATION_KEY] !== "1")) {
+    await prisma.$transaction([
+      prisma.siteSetting.upsert({
+        where: { key: "songUpdateIntervalHours" },
+        update: { value: "24" },
+        create: { key: "songUpdateIntervalHours", value: "24" },
+      }),
+      prisma.siteSetting.upsert({
+        where: { key: SONG_INTERVAL_MIGRATION_KEY },
+        update: { value: "1" },
+        create: { key: SONG_INTERVAL_MIGRATION_KEY, value: "1" },
+      }),
+    ]);
+    map["songUpdateIntervalHours"] = "24";
+  }
+
   const logs = await prisma.updateLog.findMany({
     orderBy: { createdAt: "desc" },
     take: 20,
@@ -42,7 +60,7 @@ export async function GET() {
   return NextResponse.json({
     updateIntervalHours: parseInt(map["updateIntervalHours"] ?? "1", 10),
     lastFullUpdate: map["lastFullUpdate"] ?? null,
-    songUpdateIntervalHours: parseInt(map["songUpdateIntervalHours"] ?? "6", 10),
+    songUpdateIntervalHours: parseInt(map["songUpdateIntervalHours"] ?? "24", 10),
     lastSongUpdate: map["lastSongUpdate"] ?? null,
     updaters: SCHEDULED_UPDATERS.map((updater) => ({
       key: updater.key,
@@ -101,7 +119,7 @@ export async function POST(req: Request) {
 
   if (action === "updateSongs") {
     try {
-      const result = await runSongUpdate("manual");
+      const result = await runSongUpdate("manual", "full");
       return NextResponse.json(result);
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 409 });

@@ -42,7 +42,6 @@ const LEADERBOARD_MODES: Array<{ key: LeaderboardMode; label: string; shortLabel
 type Track = {
   id: string;
   spotifyId: string | null;
-  deezerId: string | null;
   name: string;
   albumName: string | null;
   albumImageUrl: string | null;
@@ -51,7 +50,6 @@ type Track = {
   explicit: boolean;
   releaseDate: string | null;
   spotifyUrl: string | null;
-  deezerUrl: string | null;
   previewUrl: string | null;
   bpm: number | null;
   gain: number | null;
@@ -333,7 +331,7 @@ function PodiumTrackCard({
   track: Track;
   rank: number;
   isPlaying: boolean;
-  onTogglePreview: (trackId: string, previewUrl: string, deezerId?: string | null) => void;
+  onTogglePreview: (trackId: string, previewUrl: string) => void;
   showOriginalVersion: boolean;
   mode: LeaderboardMode;
   onOpenSong: (id: string, data?: Track) => void;
@@ -354,7 +352,7 @@ function PodiumTrackCard({
           </div>
           {isValidPreviewUrl(track.previewUrl) ? (
             <button
-              onClick={() => onTogglePreview(track.id, track.previewUrl!, track.deezerId)}
+              onClick={() => onTogglePreview(track.id, track.previewUrl!)}
               className="w-10 h-10 rounded-full text-white flex items-center justify-center transition-colors bg-black/35 hover:bg-green-600"
               title={isPlaying ? "Pause preview" : "Play preview"}
             >
@@ -481,7 +479,7 @@ export default function SongsPage() {
     };
   }, [stopCurrentAudio]);
 
-  async function togglePreview(trackId: string, previewUrl: string, deezerId?: string | null) {
+  async function togglePreview(trackId: string, previewUrl: string) {
     if (playingTrackId === trackId) {
       stopCurrentAudio();
       return;
@@ -497,7 +495,7 @@ export default function SongsPage() {
     const audio = new Audio();
     audio.volume = 0.5;
     audio.preload = "none";
-    audio.src = toPreviewProxyUrl(previewUrl, deezerId);
+    audio.src = toPreviewProxyUrl(previewUrl);
 
     audio.onended = () => {
       if (audioRef.current === audio) {
@@ -677,7 +675,7 @@ export default function SongsPage() {
                   <div className="flex justify-center">
                     {isValidPreviewUrl(track.previewUrl) ? (
                       <button
-                        onClick={() => togglePreview(track.id, track.previewUrl!, track.deezerId)}
+                        onClick={() => togglePreview(track.id, track.previewUrl!)}
                         className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
                           isPlaying
                             ? "bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]"
@@ -794,13 +792,13 @@ export default function SongsPage() {
 
                   {/* Link to Deezer/Spotify */}
                   <div className="hidden md:flex justify-end">
-                    {(track.deezerUrl || track.spotifyUrl) && (
+                    {track.spotifyUrl && (
                       <a
-                        href={track.deezerUrl ?? track.spotifyUrl!}
+                        href={track.spotifyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[var(--muted-foreground)] hover:text-green-400 transition-colors"
-                        title={track.deezerUrl ? "Open in Deezer" : "Open in Spotify"}
+                        title="Open in Spotify"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>

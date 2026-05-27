@@ -53,6 +53,7 @@ async function buildLegalArtistList(mode: LegalArtistMode) {
         tracks: {
           select: {
             popularity: true,
+            spotifyPopularity: true,
             previewUrl: true,
             releaseDate: true,
           },

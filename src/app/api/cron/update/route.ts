@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAndRunScheduledUpdate } from "@/lib/update-runner";
 
+const SONG_INTERVAL_MIGRATION_KEY = "songUpdateIntervalHoursMigratedTo24";
+
 /**
  * GET /api/cron/update
  * 
@@ -25,7 +27,23 @@ export async function GET(req: Request) {
   for (const s of settings) map[s.key] = s.value;
 
   const statsIntervalMs = parseInt(map["updateIntervalHours"] ?? "1", 10) * 60 * 60 * 1000;
-  const songsIntervalMs = parseInt(map["songUpdateIntervalHours"] ?? "6", 10) * 60 * 60 * 1000;
+  if (!map["songUpdateIntervalHours"] || (map["songUpdateIntervalHours"] === "6" && map[SONG_INTERVAL_MIGRATION_KEY] !== "1")) {
+    await prisma.$transaction([
+      prisma.siteSetting.upsert({
+        where: { key: "songUpdateIntervalHours" },
+        update: { value: "24" },
+        create: { key: "songUpdateIntervalHours", value: "24" },
+      }),
+      prisma.siteSetting.upsert({
+        where: { key: SONG_INTERVAL_MIGRATION_KEY },
+        update: { value: "1" },
+        create: { key: SONG_INTERVAL_MIGRATION_KEY, value: "1" },
+      }),
+    ]);
+    map["songUpdateIntervalHours"] = "24";
+  }
+
+  const songsIntervalMs = parseInt(map["songUpdateIntervalHours"] ?? "24", 10) * 60 * 60 * 1000;
   const statsElapsed = map["lastFullUpdate"]
     ? Date.now() - new Date(map["lastFullUpdate"]).getTime()
     : Number.POSITIVE_INFINITY;

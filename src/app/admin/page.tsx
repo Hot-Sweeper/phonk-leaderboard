@@ -37,6 +37,7 @@ import {
   Tag,
   Pencil,
   Save,
+  Info,
 } from "lucide-react";
 
 type ModInvite = {
@@ -258,7 +259,7 @@ export default function AdminPage() {
   const [lastFullUpdate, setLastFullUpdate] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
   const [updateProgress, setUpdateProgress] = useState<{ current: number; total: number } | null>(null);
-  const [songUpdateIntervalHours, setSongUpdateIntervalHours] = useState(6);
+  const [songUpdateIntervalHours, setSongUpdateIntervalHours] = useState(24);
   const [lastSongUpdate, setLastSongUpdate] = useState<string | null>(null);
   const [scheduledUpdaters, setScheduledUpdaters] = useState<ScheduledUpdaterSetting[]>([]);
   const [updatingSongs, setUpdatingSongs] = useState(false);
@@ -290,7 +291,7 @@ export default function AdminPage() {
       const s = await settingsRes.json();
       setUpdateIntervalHours(s.updateIntervalHours ?? 1);
       setLastFullUpdate(s.lastFullUpdate ?? null);
-      setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
+      setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 24);
       setLastSongUpdate(s.lastSongUpdate ?? null);
       setScheduledUpdaters(s.updaters ?? []);
       setUpdateLogs(s.logs ?? []);
@@ -373,56 +374,6 @@ export default function AdminPage() {
     const data = await res.json();
     setDebugChecks(data.checks ?? []);
     setDebugTimestamp(data.timestamp ?? null);
-  }
-
-  async function autoBackfillDeezerIds() {
-    setDebugActionLoading("autoBackfillDeezerIds");
-    setDebugActionResult(null);
-
-    let totalProcessed = 0;
-    let totalMatched = 0;
-    let totalUnresolved = 0;
-    let remaining = 0;
-    const detailLines: string[] = [];
-
-    try {
-      for (let round = 0; round < 10; round++) {
-        const data = await runDebugAction("backfillDeezerIds", { limit: 100 });
-
-        if (!data || data.status === "error") {
-          setDebugActionResult(data ?? { status: "error", message: "Request failed" });
-          return;
-        }
-
-        totalProcessed += data.processed ?? 0;
-        totalMatched += data.matched ?? 0;
-        totalUnresolved += data.unresolved ?? 0;
-        remaining = data.remaining ?? 0;
-
-        if (data.detail) {
-          detailLines.push(`Round ${round + 1}:`);
-          detailLines.push(data.detail);
-        }
-
-        if ((data.processed ?? 0) === 0 || remaining === 0) break;
-      }
-
-      setDebugActionResult({
-        status: totalMatched > 0 ? "ok" : "warn",
-        message: `Auto-backfill processed ${totalProcessed} artists: ${totalMatched} matched, ${totalUnresolved} unresolved, ${remaining} remaining without Deezer IDs`,
-        detail: detailLines.slice(0, 80).join("\n"),
-        processed: totalProcessed,
-        matched: totalMatched,
-        unresolved: totalUnresolved,
-        remaining,
-      });
-
-      await runDiagnostics();
-    } catch {
-      setDebugActionResult({ status: "error", message: "Auto-backfill request failed" });
-    } finally {
-      setDebugActionLoading(null);
-    }
   }
 
   async function createInvite() {
@@ -513,13 +464,13 @@ export default function AdminPage() {
       body: JSON.stringify({ key: "songUpdateIntervalHours", value: String(hours) }),
     });
     if (res.ok) {
-      setSettingsResult(`Song update interval saved: every ${hours}h`);
+      setSettingsResult(`Full song catalog update interval saved: every ${hours}h`);
     } else {
       setSettingsResult(`Failed to save song interval (${res.status})`);
       const settingsRes = await fetch("/api/admin/settings");
       if (settingsRes.ok) {
         const s = await settingsRes.json();
-        setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 6);
+        setSongUpdateIntervalHours(s.songUpdateIntervalHours ?? 24);
         setScheduledUpdaters(s.updaters ?? []);
       }
     }
@@ -603,7 +554,7 @@ export default function AdminPage() {
         const data = await res.json();
         const secs = (data.durationMs / 1000).toFixed(1);
         setSettingsResult(
-          `Songs updated for ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
+          `Full song catalog updated for ${data.updated}/${data.total} artists in ${secs}s. ${data.failed} failed.`
         );
         setLastSongUpdate(new Date().toISOString());
         setScheduledUpdaters((current) => current.map((updater) => (
@@ -719,52 +670,6 @@ export default function AdminPage() {
       setCatalogError("Network error");
     } finally {
       setCatalogLoading(false);
-    }
-  }
-
-  async function importCatalogUrl(url: string, targetLabel?: string) {
-    if (!catalogSelectedArtist) return;
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl) {
-      setCatalogImportResult({ status: "error", message: "Paste a Deezer album or track URL first." });
-      return;
-    }
-
-    setCatalogImporting(true);
-    setCatalogImportTarget(targetLabel ?? trimmedUrl);
-    setCatalogImportResult(null);
-
-    try {
-      const res = await fetch("/api/admin/catalog-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "importDeezerUrl",
-          artistId: catalogSelectedArtist.id,
-          url: trimmedUrl,
-        }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setCatalogImportResult({ status: "error", message: data.error ?? "Import failed" });
-        return;
-      }
-
-      const skipped = Array.isArray(data.skipped) && data.skipped.length > 0
-        ? ` Skipped ${data.skipped.length}.`
-        : "";
-      setCatalogImportResult({
-        status: "ok",
-        message: `Imported ${data.importedCount} track${data.importedCount === 1 ? "" : "s"}.${skipped}`,
-      });
-      setCatalogImportUrl("");
-      await runCatalogReportForArtist(catalogSelectedArtist.id);
-    } catch {
-      setCatalogImportResult({ status: "error", message: "Import failed due to a network error." });
-    } finally {
-      setCatalogImporting(false);
-      setCatalogImportTarget(null);
     }
   }
 
@@ -1646,27 +1551,9 @@ export default function AdminPage() {
             {/* Debug Actions */}
             <h3 className="text-sm font-bold text-[var(--muted-foreground)] uppercase tracking-wider mb-3">Debug Actions</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-              <button
-                onClick={autoBackfillDeezerIds}
-                disabled={debugActionLoading !== null}
-                className="bg-[var(--secondary)] border border-[var(--muted)] rounded-xl p-4 text-left hover:border-[var(--accent)]/50 transition-all disabled:opacity-50"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  {debugActionLoading === "autoBackfillDeezerIds" ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-[var(--accent)]" />
-                  ) : (
-                    <Zap className="w-4 h-4 text-[var(--accent)]" />
-                  )}
-                  <span className="font-bold text-white text-sm">Auto Backfill All</span>
-                </div>
-                <p className="text-xs text-[var(--muted-foreground)]">Resolve Deezer IDs in repeated 100-artist batches until complete or capped</p>
-              </button>
-
               {[
                 { action: "testSettingWrite", label: "Test Settings Write", icon: Database, desc: "Write, read, delete a test setting" },
                 { action: "testSpotifyTopTracks", label: "Test Spotify Top Tracks", icon: Music, desc: "Fetch top tracks via Spotify API" },
-                { action: "testDeezerResolve", label: "Test Deezer Pipeline", icon: Play, desc: "Resolve Spotify -> Deezer + fetch tracks" },
-                { action: "backfillDeezerIds", label: "Backfill Deezer IDs", icon: Zap, desc: "Resolve and save up to 100 artist Deezer IDs per run" },
                 { action: "clearStaleRunning", label: "Clear Stale Running", icon: StopCircle, desc: "Mark all running logs as failed" },
               ].map((btn) => (
                 <button
@@ -1675,14 +1562,8 @@ export default function AdminPage() {
                     setDebugActionLoading(btn.action);
                     setDebugActionResult(null);
                     try {
-                      const data = await runDebugAction(
-                        btn.action,
-                        btn.action === "backfillDeezerIds" ? { limit: 100 } : undefined
-                      );
+                      const data = await runDebugAction(btn.action);
                       setDebugActionResult(data);
-                      if (btn.action === "backfillDeezerIds") {
-                        await runDiagnostics();
-                      }
                     } catch {
                       setDebugActionResult({ status: "error", message: "Request failed" });
                     } finally {
@@ -2307,7 +2188,7 @@ export default function AdminPage() {
                         <div>
                           <p className="text-sm font-bold text-white">{a.name}</p>
                           <p className="text-xs text-[var(--muted-foreground)]">
-                            {a.spotifyId ? `Spotify ✓` : "No Spotify"} · {a.deezerId ? `Deezer ✓` : "No Deezer"}
+                            {a.spotifyId ? `Spotify ✓` : "No Spotify"}
                           </p>
                         </div>
                       </button>
@@ -2325,7 +2206,6 @@ export default function AdminPage() {
                     <p className="text-sm font-bold text-white">{catalogSelectedArtist.name}</p>
                     <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
                       Spotify: <span className="text-white">{catalogSelectedArtist.spotifyId ?? "—"}</span>
-                      &nbsp;·&nbsp;Deezer: <span className="text-white">{catalogSelectedArtist.deezerId ?? "—"}</span>
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0">
@@ -2371,29 +2251,12 @@ export default function AdminPage() {
 
                 <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 p-4">
                   <div className="flex items-center gap-2 mb-2">
-                    <Plus className="w-4 h-4 text-green-400" />
-                    <h3 className="text-sm font-bold text-white">Add Missing Song</h3>
+                    <Info className="w-4 h-4 text-blue-400" />
+                    <h3 className="text-sm font-bold text-white">Catalog Source Policy</h3>
                   </div>
-                  <p className="text-xs text-[var(--muted-foreground)] mb-3">
-                    Paste a Deezer track or album URL to import it directly for the selected artist.
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    Manual Deezer imports are disabled. Catalog sync now pulls from Spotify only.
                   </p>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="text"
-                      value={catalogImportUrl}
-                      onChange={(e) => setCatalogImportUrl(e.target.value)}
-                      placeholder="https://www.deezer.com/album/822979051"
-                      className="flex-1 px-3 py-2 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-white text-sm focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]"
-                    />
-                    <button
-                      onClick={() => importCatalogUrl(catalogImportUrl)}
-                      disabled={catalogImporting || !catalogImportUrl.trim()}
-                      className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-sm font-bold transition-all flex items-center gap-2 disabled:opacity-50"
-                    >
-                      {catalogImporting && !catalogImportTarget ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-                      {catalogImporting && !catalogImportTarget ? "Importing…" : "Add Missing Song"}
-                    </button>
-                  </div>
                 </div>
               </>
             )}
@@ -2438,11 +2301,10 @@ export default function AdminPage() {
             {catalogReport && !catalogLoading && (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                   {[
                     { label: "In Database", value: catalogReport.summary.dbCount, color: "text-white" },
-                    { label: "Deezer Total", value: catalogReport.summary.deezerTotal, color: "text-blue-400" },
-                    { label: "Deezer Missing", value: catalogReport.summary.deezerMissing, color: catalogReport.summary.deezerMissing > 0 ? "text-red-400" : "text-green-400" },
+                    { label: "Spotify Total", value: catalogReport.summary.spotifyTotal, color: "text-blue-400" },
                     { label: "Spotify Missing", value: catalogReport.summary.spotifyMissing, color: catalogReport.summary.spotifyMissing > 0 ? "text-red-400" : "text-green-400" },
                   ].map((card) => (
                     <div key={card.label} className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/60 p-4 text-center">
@@ -2454,58 +2316,10 @@ export default function AdminPage() {
 
                 <p className="text-xs text-[var(--muted-foreground)] mb-4">
                   Fetched at {new Date(catalogReport.fetchedAt).toLocaleString()}.
-                  {(catalogReport.summary.deezerMissing === 0 && catalogReport.summary.spotifyMissing === 0)
+                  {catalogReport.summary.spotifyMissing === 0
                     ? " All tracks appear to be in the DB."
                     : " Use Force Sync to pull missing tracks into the DB."}
                 </p>
-
-                {/* Missing from Deezer */}
-                {catalogReport.summary.deezerMissing > 0 && (
-                  <div className="mb-4">
-                    <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider mb-2 flex items-center gap-2">
-                      <XCircle className="w-4 h-4" />
-                      Missing from DB — Deezer ({catalogReport.summary.deezerMissing})
-                    </h3>
-                    <input
-                      type="text"
-                      placeholder="Filter by name…"
-                      value={catalogMissingFilter}
-                      onChange={(e) => setCatalogMissingFilter(e.target.value)}
-                      className="mb-2 w-full px-3 py-1.5 rounded-lg bg-[var(--background)] border border-[var(--muted)] text-white text-xs focus:outline-none focus:border-[var(--accent)] placeholder:text-[var(--muted-foreground)]"
-                    />
-                    <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/30 max-h-72 overflow-y-auto">
-                      {catalogReport.deezer
-                        .filter((t) => !t.inDb)
-                        .filter((t) => !catalogMissingFilter || t.name.toLowerCase().includes(catalogMissingFilter.toLowerCase()))
-                        .map((t) => (
-                          <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
-                            <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-white truncate">{t.name}</p>
-                              <p className="text-xs text-[var(--muted-foreground)] truncate">{t.albumName}</p>
-                            </div>
-                            {t.deezerUrl && (
-                              <button
-                                onClick={() => importCatalogUrl(t.deezerUrl!, t.id)}
-                                disabled={catalogImporting}
-                                className="px-2.5 py-1 rounded-lg bg-green-600/15 border border-green-700/40 text-green-300 text-xs font-bold hover:bg-green-600/25 transition-all disabled:opacity-50 shrink-0"
-                              >
-                                {catalogImporting && catalogImportTarget === t.id ? "Adding…" : "Add"}
-                              </button>
-                            )}
-                            {t.deezerUrl && (
-                              <a href={t.deezerUrl} target="_blank" rel="noopener noreferrer" title="Open on Deezer" className="text-[var(--muted-foreground)] hover:text-white transition-colors shrink-0">
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
-                            )}
-                          </div>
-                        ))}
-                      {catalogReport.deezer.filter((t) => !t.inDb && (!catalogMissingFilter || t.name.toLowerCase().includes(catalogMissingFilter.toLowerCase()))).length === 0 && (
-                        <p className="px-4 py-3 text-sm text-[var(--muted-foreground)]">No matches.</p>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Missing from Spotify */}
                 {catalogReport.summary.spotifyMissing > 0 && (

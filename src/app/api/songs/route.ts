@@ -564,8 +564,10 @@ export async function GET(req: Request) {
 
       const versions = extractTrackVersions(row.name);
 
+      const { deezerId: _deezerId, deezerUrl: _deezerUrl, ...publicRow } = row;
+
       return {
-        ...row,
+        ...publicRow,
         name: getDisplayTrackTitle(row.name),
         rank: skip + index + 1,
         versions,
@@ -801,8 +803,10 @@ export async function GET(req: Request) {
 
       const versions = extractTrackVersions(row.name);
 
+      const { deezerId: _deezerId, deezerUrl: _deezerUrl, ...publicRow } = row;
+
       return {
-        ...row,
+        ...publicRow,
         name: getDisplayTrackTitle(row.name),
         rank: skip + index + 1,
         versions,
@@ -1133,8 +1137,10 @@ export async function GET(req: Request) {
         .map((id: string) => contributorMap.get(id))
         .filter((artist: { id: string; name: string; imageUrl: string | null } | undefined): artist is { id: string; name: string; imageUrl: string | null } => !!artist);
 
+      const { deezerId: _deezerId, deezerUrl: _deezerUrl, ...publicTrack } = track;
+
       return {
-        ...track,
+        ...publicTrack,
         audienceScore: track.audienceScore,
         rank: rankByTrackId.get(track.id) ?? 0,
         versions,
@@ -1190,8 +1196,10 @@ export async function GET(req: Request) {
       remainingFeaturedArtists.push(featuredArtist);
     }
 
+    const { deezerId: _deezerId, deezerUrl: _deezerUrl, ...publicTrack } = track;
+
     return {
-      ...track,
+      ...publicTrack,
       name: getDisplayTrackTitle(track.name),
       rank: rankByTrackId.get(track.id) ?? 0,
       versions,

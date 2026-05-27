@@ -634,144 +634,27 @@ async function fetchSpotifyArtistApi(
   return null;
 }
 
-// ─────────── Deezer API (free, no auth) ───────────
+// ─────────── Deezer integration disabled ───────────
 
-/** Resolve Spotify artist → Deezer artist ID via Odesli (song.link) */
-export async function resolveDeezerId(spotifyId: string): Promise<number | null> {
-  try {
-    const url = `https://api.song.link/v1-alpha.1/links?url=https://open.spotify.com/artist/${spotifyId}&userCountry=US`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error(`[Odesli] Failed to resolve ${spotifyId}: ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    // Odesli returns linksByPlatform.deezer.url like "https://www.deezer.com/artist/12345"
-    const deezerUrl: string | undefined = data.linksByPlatform?.deezer?.url;
-    if (!deezerUrl) {
-      console.warn(`[Odesli] No Deezer mapping for Spotify artist ${spotifyId}`);
-      return null;
-    }
-    const match = deezerUrl.match(/\/artist\/(\d+)/);
-    return match ? parseInt(match[1], 10) : null;
-  } catch (err) {
-    console.error(`[Odesli] Error resolving ${spotifyId}:`, err);
-    return null;
-  }
+function logDeezerDisabled(functionName: string) {
+  console.warn(`[Deezer] ${functionName} is disabled for commercial-safety.`);
 }
 
-function normalizeArtistName(name: string) {
-  return name
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+export async function resolveDeezerId(_spotifyId: string): Promise<number | null> {
+  logDeezerDisabled("resolveDeezerId");
+  return null;
 }
 
-type DeezerArtistCandidate = {
-  id: number;
-  name: string;
-  nbFan: number;
-  nbAlbum: number;
-  pictureMedium: string | null;
-};
-
-/**
- * Search Deezer by name and return a best-effort exact candidate.
- * We prefer exact normalized matches and avoid guessing when multiple candidates are too close.
- */
-export async function searchDeezerArtist(name: string): Promise<number | null> {
-  try {
-    const res = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=5`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const candidates: DeezerArtistCandidate[] = (data.data ?? []).map((artist: {
-      id: number;
-      name: string;
-      nb_fan?: number;
-      nb_album?: number;
-      picture_medium?: string;
-    }) => ({
-      id: artist.id,
-      name: artist.name,
-      nbFan: artist.nb_fan ?? 0,
-      nbAlbum: artist.nb_album ?? 0,
-      pictureMedium: artist.picture_medium ?? null,
-    }));
-
-    if (candidates.length === 0) return null;
-
-    const normalizedTarget = normalizeArtistName(name);
-    const exactMatches = candidates.filter(
-      (artist) => normalizeArtistName(artist.name) === normalizedTarget
-    );
-
-    if (exactMatches.length === 1) {
-      return exactMatches[0].id;
-    }
-
-    if (exactMatches.length > 1) {
-      const sorted = [...exactMatches].sort((a, b) => b.nbFan - a.nbFan || b.nbAlbum - a.nbAlbum);
-      const best = sorted[0];
-      const second = sorted[1];
-
-      // Only auto-pick when the top exact match is clearly dominant.
-      if (!second || best.nbFan >= Math.max(10_000, second.nbFan * 5)) {
-        return best.id;
-      }
-
-      console.warn(
-        `[Deezer] Ambiguous exact artist match for "${name}": ${sorted
-          .slice(0, 3)
-          .map((artist) => `${artist.name}#${artist.id} (${artist.nbFan} fans)`)
-          .join(", ")}`
-      );
-      return null;
-    }
-
-    // Only accept a fuzzy match when the top result is very strong and the names are very close.
-    const sorted = [...candidates].sort((a, b) => b.nbFan - a.nbFan || b.nbAlbum - a.nbAlbum);
-    const best = sorted[0];
-    const second = sorted[1];
-    const bestNormalized = normalizeArtistName(best.name);
-
-    if (
-      (bestNormalized.includes(normalizedTarget) || normalizedTarget.includes(bestNormalized)) &&
-      (!second || best.nbFan >= Math.max(10_000, second.nbFan * 8))
-    ) {
-      return best.id;
-    }
-
-    console.warn(
-      `[Deezer] No safe artist match for "${name}". Best candidates: ${sorted
-        .slice(0, 3)
-        .map((artist) => `${artist.name}#${artist.id} (${artist.nbFan} fans)`)
-        .join(", ")}`
-    );
-    return null;
-  } catch (err) {
-    console.error(`[Deezer] Search error for "${name}":`, err);
-    return null;
-  }
+export async function searchDeezerArtist(_name: string): Promise<number | null> {
+  logDeezerDisabled("searchDeezerArtist");
+  return null;
 }
 
-export async function resolveArtistToDeezer(name: string, spotifyId?: string | null): Promise<{
+export async function resolveArtistToDeezer(_name: string, _spotifyId?: string | null): Promise<{
   deezerId: number | null;
   source: "deezer-search" | "odesli" | "unresolved";
 }> {
-  if (spotifyId) {
-    const deezerBySpotify = await resolveDeezerId(spotifyId);
-    if (deezerBySpotify) {
-      return { deezerId: deezerBySpotify, source: "odesli" };
-    }
-  }
-
-  const deezerByName = await searchDeezerArtist(name);
-  if (deezerByName) {
-    return { deezerId: deezerByName, source: "deezer-search" };
-  }
-
+  logDeezerDisabled("resolveArtistToDeezer");
   return { deezerId: null, source: "unresolved" };
 }
 
@@ -821,48 +704,9 @@ export type DeezerTrackDetail = {
   releaseDate: string | null;
 };
 
-export async function fetchDeezerTrackDetail(deezerTrackId: number): Promise<DeezerTrackDetail | null> {
-  try {
-    const detailRes = await fetch(`https://api.deezer.com/track/${deezerTrackId}`);
-    if (!detailRes.ok) {
-      return null;
-    }
-
-    const detail = await detailRes.json();
-    const contributors = Array.isArray(detail.contributors) && detail.contributors.length > 0
-      ? detail.contributors
-      : detail.artist
-        ? [detail.artist]
-        : [];
-
-    return {
-      deezerId: detail.id,
-      name: detail.title_short ?? detail.title,
-      fullTitle: detail.title ?? detail.title_short,
-      titleVersion: detail.title_version || null,
-      popularity: detail.rank ?? 0,
-      durationMs: (detail.duration ?? 0) * 1000,
-      explicit: detail.explicit_lyrics ?? false,
-      previewUrl: detail.preview ?? null,
-      trackNumber: detail.track_position ?? 0,
-      deezerUrl: detail.link ?? `https://www.deezer.com/track/${detail.id}`,
-      album: {
-        name: detail.album?.title ?? "",
-        imageUrl: detail.album?.cover_big ?? detail.album?.cover_medium ?? null,
-        releaseDate: detail.release_date ?? detail.album?.release_date ?? null,
-      },
-      artists: contributors.map((artist: { name: string; id: number; role?: string }) => ({
-        name: artist.name,
-        deezerId: artist.id,
-        role: artist.role ?? null,
-      })),
-      bpm: detail.bpm && detail.bpm > 0 ? detail.bpm : null,
-      gain: detail.gain ?? null,
-      releaseDate: detail.release_date ?? null,
-    };
-  } catch {
-    return null;
-  }
+export async function fetchDeezerTrackDetail(_deezerTrackId: number): Promise<DeezerTrackDetail | null> {
+  logDeezerDisabled("fetchDeezerTrackDetail");
+  return null;
 }
 
 /**
@@ -870,133 +714,9 @@ export async function fetchDeezerTrackDetail(deezerTrackId: number): Promise<Dee
  * Replaces the limited top-50 endpoint with a paginated full-catalog approach.
  * Skips per-track detail calls (BPM/gain) to keep the request count manageable.
  */
-export async function fetchDeezerFullCatalog(deezerId: number): Promise<DeezerTrack[] | null> {
-  try {
-    // ── 1. Paginate through all albums ──
-    const albums: Array<{ id: number; title: string; coverBig: string | null; releaseDate: string | null; type: string }> = [];
-    let offset = 0;
-    const albumLimit = 50;
-    while (true) {
-      const res = await fetch(
-        `https://api.deezer.com/artist/${deezerId}/albums?limit=${albumLimit}&index=${offset}`
-      );
-      if (!res.ok) break;
-      const data = await res.json();
-      if (!data.data || data.data.length === 0) break;
-      for (const a of data.data) {
-        albums.push({
-          id: a.id,
-          title: a.title ?? "",
-          coverBig: a.cover_big ?? a.cover_medium ?? null,
-          releaseDate: a.release_date ?? null,
-          type: a.record_type ?? "album",
-        });
-      }
-      if (data.data.length < albumLimit) break;
-      offset += albumLimit;
-      if (albums.length >= 500) break; // hard cap — avoids runaway fetches
-    }
-
-    if (albums.length === 0) {
-      // fall back to top tracks if no albums available
-      return fetchDeezerTopTracks(deezerId);
-    }
-
-    // ── 2. Fetch tracks for each album (paginated to catch albums with >100 tracks) ──
-    const allTracks: DeezerTrack[] = [];
-    for (const album of albums) {
-      try {
-        let trackOffset = 0;
-        const trackBatchSize = 100;
-        while (true) {
-          const res = await fetch(
-            `https://api.deezer.com/album/${album.id}/tracks?limit=${trackBatchSize}&index=${trackOffset}`
-          );
-          if (!res.ok) break;
-          const data = await res.json();
-          if (!data.data || data.data.length === 0) break;
-
-          for (const t of data.data) {
-            // contributors array is available on album track listing
-            const contributors: Array<{ name: string; id: number }> =
-              Array.isArray(t.contributors) && t.contributors.length > 0
-                ? t.contributors
-                : t.artist
-                  ? [t.artist]
-                  : [];
-
-            allTracks.push({
-              deezerId: t.id,
-              name: t.title_short ?? t.title,
-              popularity: t.rank ?? 0,
-              durationMs: (t.duration ?? 0) * 1000,
-              explicit: t.explicit_lyrics ?? false,
-              previewUrl: t.preview ?? null,
-              trackNumber: t.track_position ?? 0,
-              deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
-              album: {
-                name: album.title,
-                imageUrl: album.coverBig,
-                releaseDate: album.releaseDate,
-              },
-              artists: contributors.map((c) => ({ name: c.name, deezerId: c.id })),
-              bpm: null,
-              gain: null,
-              releaseDate: album.releaseDate,
-            });
-          }
-          if (data.data.length < trackBatchSize) break;
-          trackOffset += trackBatchSize;
-        }
-      } catch {
-        // individual album failure — keep going
-      }
-    }
-
-    // ── 3. Supplement with artist's top tracks (catches featured appearances not in own albums) ──
-    try {
-      const topRes = await fetch(`https://api.deezer.com/artist/${deezerId}/top?limit=200`);
-      if (topRes.ok) {
-        const topData = await topRes.json();
-        const seenIds = new Set(allTracks.map((t) => t.deezerId));
-        for (const t of topData.data ?? []) {
-          if (seenIds.has(t.id)) continue;
-          const contributors: Array<{ name: string; id: number }> =
-            Array.isArray(t.contributors) && t.contributors.length > 0
-              ? t.contributors
-              : t.artist
-                ? [t.artist]
-                : [];
-          allTracks.push({
-            deezerId: t.id,
-            name: t.title_short ?? t.title,
-            popularity: t.rank ?? 0,
-            durationMs: (t.duration ?? 0) * 1000,
-            explicit: t.explicit_lyrics ?? false,
-            previewUrl: t.preview ?? null,
-            trackNumber: t.track_position ?? 0,
-            deezerUrl: t.link ?? `https://www.deezer.com/track/${t.id}`,
-            album: {
-              name: t.album?.title ?? "",
-              imageUrl: t.album?.cover_big ?? t.album?.cover_medium ?? null,
-              releaseDate: t.album?.release_date ?? null,
-            },
-            artists: contributors.map((c) => ({ name: c.name, deezerId: c.id })),
-            bpm: null,
-            gain: null,
-            releaseDate: null,
-          });
-        }
-      }
-    } catch {
-      // supplement failed — album catalog is still used
-    }
-
-    return allTracks.length > 0 ? allTracks : null;
-  } catch (err) {
-    console.error(`[Deezer] Full catalog error for ${deezerId}:`, err);
-    return null;
-  }
+export async function fetchDeezerFullCatalog(_deezerId: number): Promise<DeezerTrack[] | null> {
+  logDeezerDisabled("fetchDeezerFullCatalog");
+  return null;
 }
 
 /**
@@ -1121,53 +841,9 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
 }
 
 /** Fetch top tracks for an artist from Deezer */
-export async function fetchDeezerTopTracks(deezerId: number): Promise<DeezerTrack[] | null> {
-  try {
-    const res = await fetch(`https://api.deezer.com/artist/${deezerId}/top?limit=50`);
-    if (!res.ok) {
-      console.error(`[Deezer] Top tracks failed for ${deezerId}: ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    if (!data.data || data.data.length === 0) return [];
-
-    // Fetch BPM/gain/release_date for each track (detail endpoint)
-    const tracks: DeezerTrack[] = [];
-    for (const t of data.data) {
-      const detail = await fetchDeezerTrackDetail(t.id);
-
-      tracks.push({
-        deezerId: t.id,
-        name: t.title ?? detail?.fullTitle ?? detail?.name ?? t.title_short,
-        popularity: detail?.popularity ?? t.rank ?? 0,
-        durationMs: detail?.durationMs ?? (t.duration ?? 0) * 1000,
-        explicit: detail?.explicit ?? t.explicit_lyrics ?? false,
-        previewUrl: detail?.previewUrl ?? t.preview ?? null,
-        trackNumber: detail?.trackNumber ?? 0,
-        deezerUrl: detail?.deezerUrl ?? t.link ?? `https://www.deezer.com/track/${t.id}`,
-        album: {
-          name: detail?.album.name ?? t.album?.title ?? "",
-          imageUrl: detail?.album.imageUrl ?? t.album?.cover_big ?? t.album?.cover_medium ?? null,
-          releaseDate: detail?.album.releaseDate ?? null,
-        },
-        artists: detail?.artists.map((artist) => ({
-          name: artist.name,
-          deezerId: artist.deezerId,
-        })) ?? (t.contributors ?? []).map((c: { name: string; id: number }) => ({
-          name: c.name,
-          deezerId: c.id,
-        })),
-        bpm: detail?.bpm ?? null,
-        gain: detail?.gain ?? null,
-        releaseDate: detail?.releaseDate ?? null,
-      });
-    }
-
-    return tracks;
-  } catch (err) {
-    console.error(`[Deezer] Top tracks error for ${deezerId}:`, err);
-    return null;
-  }
+export async function fetchDeezerTopTracks(_deezerId: number): Promise<DeezerTrack[] | null> {
+  logDeezerDisabled("fetchDeezerTopTracks");
+  return null;
 }
 
 // ─── Combined ───

@@ -1,4 +1,4 @@
-const ALLOWED_PREVIEW_HOST_SUFFIXES = [".dzcdn.net", ".scdn.co"];
+const ALLOWED_PREVIEW_HOST_SUFFIXES = [".scdn.co"];
 const ALLOWED_PREVIEW_HOSTS = new Set(["p.scdn.co"]);
 
 export function isValidPreviewUrl(previewUrl: string | null | undefined) {
@@ -19,16 +19,12 @@ export function isValidPreviewUrl(previewUrl: string | null | undefined) {
   }
 }
 
-export function toPreviewProxyUrl(previewUrl: string | null | undefined, deezerId?: string | null) {
+export function toPreviewProxyUrl(previewUrl: string | null | undefined) {
   const params = new URLSearchParams();
   const trimmedPreviewUrl = previewUrl?.trim() ?? "";
 
   if (trimmedPreviewUrl.length > 0) {
     params.set("src", trimmedPreviewUrl);
-  }
-
-  if (deezerId) {
-    params.set("deezerId", deezerId);
   }
 
   return `/api/preview?${params.toString()}`;

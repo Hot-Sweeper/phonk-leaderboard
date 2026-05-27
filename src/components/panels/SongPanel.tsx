@@ -47,7 +47,7 @@ function SpotifyIcon({ className }: { className?: string }) {
 type ArtistInfo = { id: string; name: string; imageUrl: string | null };
 type SongData = {
   id: string; name: string; albumName: string | null; albumImageUrl: string | null;
-  previewUrl: string | null; deezerUrl: string | null; deezerId: string | null;
+  previewUrl: string | null;
   spotifyUrl: string | null; durationMs: number; popularity: number; explicit: boolean;
   releaseDate: string | null; primaryVersion?: string; featuredArtists: string[];
   artist: ArtistInfo;
@@ -163,8 +163,6 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
         ...data,
         ...fetched,
         previewUrl: fetched.previewUrl ?? data?.previewUrl ?? null,
-        deezerId: fetched.deezerId ?? data?.deezerId ?? null,
-        deezerUrl: fetched.deezerUrl ?? data?.deezerUrl ?? null,
         spotifyUrl: fetched.spotifyUrl ?? data?.spotifyUrl ?? null,
       }
     : data ?? null;

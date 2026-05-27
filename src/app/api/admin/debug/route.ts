@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSpotifyToken, fetchDeezerTopTracks, resolveArtistToDeezer } from "@/lib/platforms";
+import { getSpotifyToken } from "@/lib/platforms";
 
 type CheckResult = {
   name: string;
@@ -281,44 +281,21 @@ export async function GET() {
     });
   }
 
-  // ── 10. Deezer API ──
-  try {
-    const res = await fetch("https://api.deezer.com/artist/13/top?limit=3");
-    if (res.ok) {
-      const data = await res.json();
-      const trackCount = data.data?.length ?? 0;
-      checks.push({
-        name: "Deezer API: Top Tracks",
-        status: trackCount > 0 ? "ok" : "warn",
-        message: `${trackCount} tracks returned (test artist: Eminem)`,
-        detail: trackCount > 0
-          ? data.data.slice(0, 3).map((t: { title: string }) => t.title).join(", ")
-          : undefined,
-      });
-    } else {
-      checks.push({
-        name: "Deezer API: Top Tracks",
-        status: "error",
-        message: `HTTP ${res.status}`,
-      });
-    }
-  } catch (err) {
-    checks.push({
-      name: "Deezer API: Top Tracks",
-      status: "error",
-      message: "Request failed",
-      detail: (err as Error).message,
-    });
-  }
+  // ── 10. Commercial Source Policy ──
+  checks.push({
+    name: "Commercial Source Policy",
+    status: "ok",
+    message: "Deezer API access is disabled. Spotify is the only active catalog source.",
+  });
 
-  // ── 11. Deezer ID Resolution Stats ──
+  // ── 11. Spotify ID Coverage ──
   try {
     const totalArtists = await prisma.artist.count();
-    const withDeezerId = await prisma.artist.count({ where: { deezerId: { not: null } } });
+    const withSpotifyId = await prisma.artist.count({ where: { spotifyId: { not: null } } });
     checks.push({
-      name: "Deezer ID Mapping",
-      status: withDeezerId === 0 ? "warn" : withDeezerId < totalArtists ? "warn" : "ok",
-      message: `${withDeezerId}/${totalArtists} artists have Deezer IDs`,
+      name: "Spotify ID Coverage",
+      status: withSpotifyId === 0 ? "warn" : withSpotifyId < totalArtists ? "warn" : "ok",
+      message: `${withSpotifyId}/${totalArtists} artists have Spotify IDs`,
     });
   } catch {
     // Non-critical
@@ -406,77 +383,6 @@ export async function POST(req: Request) {
         data: { status: "failed", error: "Manually cleared via debug panel" },
       });
       return NextResponse.json({ status: "ok", message: `Cleared ${stale.count} stale running logs` });
-    } catch (err) {
-      return NextResponse.json({ status: "error", message: (err as Error).message });
-    }
-  }
-
-  if (action === "testDeezerResolve") {
-    try {
-      const testSpotifyId = "4q3ewBCX7sLwd24euuV69X";
-      const resolved = await resolveArtistToDeezer("Bas", testSpotifyId);
-      const deezerId = resolved.deezerId;
-
-      if (deezerId) {
-        const tracks = await fetchDeezerTopTracks(deezerId);
-        return NextResponse.json({
-          status: "ok",
-          message: `Resolved via ${resolved.source}: Spotify ${testSpotifyId} -> Deezer ${deezerId}, got ${tracks?.length ?? 0} tracks`,
-          detail: tracks?.slice(0, 5).map(t => `${t.name} (${t.bpm ? Math.round(t.bpm) + ' BPM' : 'no BPM'}, preview: ${t.previewUrl ? 'yes' : 'no'})`).join("\n"),
-        });
-      } else {
-        return NextResponse.json({
-          status: "warn",
-          message: "No safe Deezer match found from name search, and Odesli fallback did not resolve one",
-        });
-      }
-    } catch (err) {
-      return NextResponse.json({ status: "error", message: (err as Error).message });
-    }
-  }
-
-  if (action === "backfillDeezerIds") {
-    try {
-      const batchSize = Math.max(1, Math.min(Number(limit) || 100, 100));
-      const artists = await prisma.artist.findMany({
-        where: { deezerId: null },
-        include: { links: { where: { platform: "SPOTIFY" } } },
-        take: batchSize,
-      });
-
-      let matched = 0;
-      let unresolved = 0;
-      const details: string[] = [];
-
-      for (const artist of artists) {
-        const spotifyLink = artist.links[0];
-        const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? null;
-        const resolved = await resolveArtistToDeezer(artist.name, spotifyId);
-
-        if (resolved.deezerId) {
-          await prisma.artist.update({
-            where: { id: artist.id },
-            data: { deezerId: resolved.deezerId },
-          });
-          matched++;
-          details.push(`${artist.name} -> ${resolved.deezerId} (${resolved.source})`);
-        } else {
-          unresolved++;
-          details.push(`${artist.name} -> unresolved`);
-        }
-      }
-
-      const remaining = await prisma.artist.count({ where: { deezerId: null } });
-
-      return NextResponse.json({
-        status: matched > 0 ? "ok" : "warn",
-        message: `Processed ${artists.length} artists: ${matched} matched, ${unresolved} unresolved, ${remaining} remaining without Deezer IDs`,
-        detail: details.slice(0, 25).join("\n"),
-        processed: artists.length,
-        matched,
-        unresolved,
-        remaining,
-      });
     } catch (err) {
       return NextResponse.json({ status: "error", message: (err as Error).message });
     }
