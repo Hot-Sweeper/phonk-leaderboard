@@ -343,6 +343,19 @@ let spotifyTokenExpiry = 0;
 let spotifyTokenFailedUntil = 0;
 const SPOTIFY_REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Normalise Spotify's variable-precision release_date to YYYY-MM-DD.
+ * Spotify may return "2024" (year), "2024-03" (month), or "2024-03-15" (day).
+ * Year → Jan 1, month → 1st of month, full date → as-is.
+ */
+export function normalizeSpotifyDate(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  if (/^\d{4}-\d{2}$/.test(raw)) return `${raw}-01`;
+  if (/^\d{4}$/.test(raw)) return `${raw}-01-01`;
+  return null;
+}
+
 async function fetchWithTimeout(
   input: string,
   init: RequestInit = {},
@@ -594,7 +607,7 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
       album: {
         name: ((t.album as Record<string, unknown>)?.name as string) ?? "",
         imageUrl: ((t.album as Record<string, unknown>)?.images as { url: string }[])?.[0]?.url ?? null,
-        releaseDate: ((t.album as Record<string, unknown>)?.release_date as string) ?? null,
+        releaseDate: normalizeSpotifyDate(((t.album as Record<string, unknown>)?.release_date as string) ?? null),
       },
       artists: ((t.artists as { name: string; id: string }[]) ?? []).map((a) => ({
         name: a.name,
@@ -787,7 +800,7 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
         const albumInfo = {
           name: album.name ?? "",
           imageUrl: album.images?.[0]?.url ?? null,
-          releaseDate: album.release_date ?? null,
+          releaseDate: normalizeSpotifyDate(album.release_date ?? null),
         };
         for (const t of album.tracks?.items ?? []) {
           if (!t) continue;
@@ -844,6 +857,37 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
 export async function fetchDeezerTopTracks(_deezerId: number): Promise<DeezerTrack[] | null> {
   logDeezerDisabled("fetchDeezerTopTracks");
   return null;
+}
+
+/**
+ * Batch-fetch release dates for up to N Spotify track IDs using the
+ * /tracks endpoint (50 per request). Returns normalised YYYY-MM-DD dates.
+ */
+export async function batchFetchSpotifyTrackDates(
+  spotifyIds: string[]
+): Promise<Array<{ id: string; releaseDate: string | null }>> {
+  const token = await getSpotifyToken();
+  if (!token) return [];
+
+  const results: Array<{ id: string; releaseDate: string | null }> = [];
+  for (let i = 0; i < spotifyIds.length; i += 50) {
+    const batch = spotifyIds.slice(i, i + 50);
+    try {
+      const res = await fetchWithTimeout(
+        `https://api.spotify.com/v1/tracks?ids=${batch.join(",")}&market=US`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!res.ok) continue;
+      const data = await res.json() as { tracks?: Array<{ id: string; album?: { release_date?: string } } | null> };
+      for (const track of data.tracks ?? []) {
+        if (!track) continue;
+        results.push({ id: track.id, releaseDate: normalizeSpotifyDate(track.album?.release_date ?? null) });
+      }
+    } catch {
+      // continue with next batch
+    }
+  }
+  return results;
 }
 
 // ─── Combined ───
