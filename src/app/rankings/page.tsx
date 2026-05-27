@@ -15,7 +15,7 @@ import BubbleView from "@/components/rankings/BubbleView";
 type Entity = "artists" | "songs";
 type ViewMode = "list" | "bubbles";
 type ArtistMode = "popularity" | "hype";
-type SongMode = "popularity" | "spotify" | "youtube" | "day" | "week" | "month";
+type SongMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "hype-trend" | "day" | "week" | "month";
 type TrendDisplayMode = "current" | "relative" | "absolute";
 type RankingModel = "standard" | "legal";
 
@@ -27,8 +27,9 @@ function getInitialArtistMode(rawMode: string | null, rankingModel: RankingModel
 
 function getInitialSongMode(rawMode: string | null, rankingModel: RankingModel): SongMode {
   if (rankingModel === "legal") {
+    if (rawMode === "hype-pop" || rawMode === "hype-trend") return rawMode as SongMode;
     if (rawMode === "youtube" || rawMode === "day") return "youtube";
-    return "spotify";
+    return "hype-pop";
   }
 
   if (rawMode === "day" || rawMode === "week" || rawMode === "month") return rawMode;
@@ -41,8 +42,8 @@ const LEGAL_ARTIST_MODES: Array<{ key: ArtistMode; label: string }> = [
 ];
 
 const LEGAL_SONG_MODES: Array<{ key: SongMode; label: string }> = [
-  { key: "spotify", label: "Popularity" },
-  { key: "youtube", label: "Hype" },
+  { key: "hype-pop", label: "Spotify Chart" },
+  { key: "hype-trend", label: "Hype" },
 ];
 
 const SONG_TREND_DISPLAY_MODES: Array<{ key: Exclude<TrendDisplayMode, "current">; label: string }> = [
@@ -143,12 +144,12 @@ function RankingsInner() {
     if (rankingModel === "legal") {
       if (platform) setPlatform("");
       if (entity === "songs") {
-        if (songMode === "youtube" || songMode === "spotify") return;
+        if (songMode === "hype-pop" || songMode === "hype-trend" || songMode === "youtube" || songMode === "spotify") return;
         if (songMode === "day") {
           setSongMode("youtube");
           return;
         }
-        setSongMode("spotify");
+        setSongMode("hype-pop");
       }
     }
   }, [rankingModel, entity, platform, songMode]);
@@ -187,7 +188,7 @@ function RankingsInner() {
     if (entity === "artists" && rankingModel === "legal" && artistMode !== "popularity") params.set("mode", artistMode);
     if (entity === "songs") {
       if (rankingModel === "legal") {
-        if (songMode !== "spotify") params.set("mode", songMode);
+        if (songMode !== "hype-pop") params.set("mode", songMode);
       } else if (songMode !== "popularity") {
         params.set("mode", songMode);
       }
@@ -349,6 +350,21 @@ function RankingsInner() {
             </div>
           )}
 
+          {/* Hype period selector — only for songs + legal + hype-trend */}
+          {!isArtists && rankingModel === "legal" && songMode === "hype-trend" && (
+            <div className="flex gap-0.5 bg-[var(--secondary)] rounded-lg p-0.5 border border-[var(--muted)]">
+              {(["week", "month"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${period === p ? "bg-[var(--accent)] text-white shadow-[0_0_8px_var(--accent-glow)]" : "text-[var(--muted-foreground)] hover:text-white"}`}
+                >
+                  {p === "week" ? "7D" : "30D"}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Song bubble current/% change */}
           {!isArtists && rankingModel === "standard" && songMode !== "popularity" && (
             <>
@@ -423,9 +439,9 @@ function RankingsInner() {
                 ? artistMode === "popularity"
                   ? "Popularity uses internal catalog ordering. Numeric values stay hidden and only the rank order is shown."
                   : "Hype uses internal movement signals. Numeric values stay hidden and only the rank order is shown."
-                : songMode === "spotify"
-                  ? "Popularity uses a Spotify-led internal ordering. Numeric scores stay hidden and only the rank order is shown."
-                  : "Hype shows breakout songs only. Numeric scores stay hidden and only the rank order is shown."}
+                : songMode === "hype-pop"
+                  ? "Spotify Chart uses a Spotify popularity ordering. Numeric scores stay hidden and only the rank order is shown."
+                  : "Hype shows breakout songs by growth velocity. Numeric scores stay hidden and only the rank order is shown."}
             </div>
           )}
         </div>
@@ -477,7 +493,7 @@ function RankingsInner() {
           )}
           {songListMounted && (
             <div className={isArtists ? "hidden" : ""}>
-              <SongListView mode={songMode} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} valueMode={bubbleMode === "relative" ? "relative" : "absolute"} rankingModel={rankingModel} active={!isBubbles && !isArtists} />
+              <SongListView mode={songMode} period={songMode === "hype-trend" ? period : undefined} search={debouncedSearch} collapseVersions={collapseVersions} sortOrder={changeSortOrder} valueMode={bubbleMode === "relative" ? "relative" : "absolute"} rankingModel={rankingModel} active={!isBubbles && !isArtists} />
             </div>
           )}
         </div>

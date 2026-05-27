@@ -44,7 +44,7 @@ export default function Sidebar() {
     path === "/leaderboard" ||
     path === "/bubbles" ||
     path === "/songs";
-  const isHype = path.startsWith("/hype");
+  const isHype = false;
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
   const isCoverartAi = path.startsWith("/coverart-ai");
@@ -99,7 +99,7 @@ export default function Sidebar() {
       active: isRankings,
     },
     {
-      href: "/hype",
+      href: "/rankings?entity=songs&mode=hype-trend&model=legal",
       icon: Flame,
       label: "Hype",
       active: isHype,

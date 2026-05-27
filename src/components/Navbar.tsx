@@ -19,7 +19,7 @@ export default function Navbar() {
     }`;
 
   const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs";
-  const isHype = path.startsWith("/hype");
+  const isHype = false;
   const isModeration = path === "/moderation" || path === "/review" || path === "/import";
 
   return (
@@ -38,7 +38,7 @@ export default function Navbar() {
           <Link href="/rankings" className={linkClass("/rankings", isRankings)}>
             <Trophy className="w-4 h-4" /> Rankings
           </Link>
-          <Link href="/hype" className={linkClass("/hype", isHype)}>
+          <Link href="/rankings?entity=songs&mode=hype-trend&model=legal" className={linkClass("/rankings?entity=songs&mode=hype-trend", isHype)}>
             <Zap className="w-4 h-4" /> Hype
           </Link>
           <Link href="/samples" className={linkClass("/samples")}>

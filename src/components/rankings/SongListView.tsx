@@ -24,7 +24,7 @@ import {
 
 type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
-type LeaderboardMode = "popularity" | "spotify" | "youtube" | "day" | "week" | "month";
+type LeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "hype-trend" | "day" | "week" | "month";
 type RankingModel = "standard" | "legal";
 const SONG_RANKINGS_CACHE_VERSION = "v13";
 
@@ -477,6 +477,7 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
 
 interface SongListViewProps {
   mode: LeaderboardMode;
+  period?: string;
   search: string;
   collapseVersions: boolean;
   sortOrder?: "desc" | "asc" | "abs";
@@ -485,7 +486,7 @@ interface SongListViewProps {
   active?: boolean;
 }
 
-export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "legal", active = true }: SongListViewProps) {
+export default function SongListView({ mode, period, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "legal", active = true }: SongListViewProps) {
   const { openArtist, openSong, openDockSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -534,6 +535,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         if (rankingModel === "legal") params.set("rankingModel", "legal");
         params.set("collapseVersions", groupedVersions ? "true" : "false");
         params.set("mode", trackMode);
+        if (period) params.set("period", period);
         params.set("sort", trendSortOrder);
         params.set("valueMode", trendValueMode);
         const qs = params.toString();
@@ -563,6 +565,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
       if (rankingModel === "legal") podiumParams.set("rankingModel", "legal");
       podiumParams.set("collapseVersions", groupedVersions ? "true" : "false");
       podiumParams.set("mode", trackMode);
+      if (period) podiumParams.set("period", period);
       podiumParams.set("sort", trendSortOrder);
       podiumParams.set("valueMode", trendValueMode);
       const podiumQs = podiumParams.toString();
@@ -581,17 +584,18 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
 
       setLoadingPodium(false);
 
-      const params = new URLSearchParams({ skip: "0", take: "50" });
-      if (searchQuery) params.set("search", searchQuery);
-      if (rankingModel === "legal") params.set("rankingModel", "legal");
-      params.set("collapseVersions", groupedVersions ? "true" : "false");
-      params.set("mode", trackMode);
-      params.set("sort", trendSortOrder);
-      params.set("valueMode", trendValueMode);
-      const qs = params.toString();
+      const listParams = new URLSearchParams({ skip: "0", take: "50" });
+      if (searchQuery) listParams.set("search", searchQuery);
+      if (rankingModel === "legal") listParams.set("rankingModel", "legal");
+      listParams.set("collapseVersions", groupedVersions ? "true" : "false");
+      listParams.set("mode", trackMode);
+      if (period) listParams.set("period", period);
+      listParams.set("sort", trendSortOrder);
+      listParams.set("valueMode", trendValueMode);
+      const listQs = listParams.toString();
       const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
-        `rank:songs:list:${SONG_RANKINGS_CACHE_VERSION}:${qs}`,
-        `/api/songs?${qs}`,
+        `rank:songs:list:${SONG_RANKINGS_CACHE_VERSION}:${listQs}`,
+        `/api/songs?${listQs}`,
         300_000
       ).catch(() => null);
       if (data && requestSeqRef.current === requestId) {
@@ -610,7 +614,7 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   useEffect(() => {
     if (!active) return;
     fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder, valueMode);
-  }, [active, collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder, valueMode]);
+  }, [active, collapseVersions, debouncedSearch, fetchTracks, mode, period, sortOrder, valueMode]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 400);
