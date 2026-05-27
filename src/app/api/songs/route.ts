@@ -445,6 +445,7 @@ export async function GET(req: Request) {
           *,
           GREATEST(trend_score, breakout_score) AS hype_score,
           (breakout_score > 0 AND breakout_score >= trend_score) AS is_emerging_hype,
+          MIN(CASE WHEN release_date_value IS NOT NULL THEN "releaseDate" END) OVER (PARTITION BY canonical_title) AS canonical_earliest_release_date,
           ROW_NUMBER() OVER (
             PARTITION BY canonical_title
             ORDER BY
@@ -476,7 +477,6 @@ export async function GET(req: Request) {
         "durationMs",
         popularity,
         explicit,
-        "releaseDate",
         "spotifyUrl",
         "deezerUrl",
         "featuredArtists",
@@ -487,7 +487,8 @@ export async function GET(req: Request) {
         has_trend_data AS "hasTrendData",
         hype_score AS "hypeScore",
         is_emerging_hype AS "isEmergingHype",
-        COUNT(*) OVER()::int AS "totalCount"
+        COUNT(*) OVER()::int AS "totalCount",
+        COALESCE(canonical_earliest_release_date, "releaseDate") AS "releaseDate"
       FROM collapsed_tracks
       WHERE ${rankingModel} <> 'legal' OR is_emerging_hype = true
       ORDER BY
@@ -693,6 +694,7 @@ export async function GET(req: Request) {
       ranked_tracks AS (
         SELECT
           *,
+          MIN(CASE WHEN release_date_value IS NOT NULL THEN "releaseDate" END) OVER (PARTITION BY canonical_title) AS canonical_earliest_release_date,
           ROW_NUMBER() OVER (
             PARTITION BY canonical_title
             ORDER BY
@@ -722,7 +724,7 @@ export async function GET(req: Request) {
         "durationMs",
         popularity,
         explicit,
-        "releaseDate",
+        COALESCE(canonical_earliest_release_date, "releaseDate") AS "releaseDate",
         "spotifyUrl",
         "deezerUrl",
         "featuredArtists",
