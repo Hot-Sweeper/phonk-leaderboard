@@ -116,7 +116,7 @@ async function main() {
   console.log(`Spotify followers: ${spotifyLink?.followerCount?.toLocaleString() ?? "N/A"}`);
   console.log(`Total tracks in DB: ${artist._count.tracks}`);
   console.log(`Genres:            ${artist.genres?.join(", ") ?? "none"}`);
-  console.log(`Last snapshot:     ${snapshot?.recordedAt?.toISOString() ?? "none"}`);
+  console.log(`Last snapshot:     ${snapshot?.createdAt?.toISOString() ?? "none"}`);
 }
 
 main()
