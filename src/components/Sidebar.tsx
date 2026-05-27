@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ChevronRight,
   PlusCircle,
+  Sparkles,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -44,6 +45,7 @@ export default function Sidebar() {
     path === "/songs";
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
+  const isCoverartAi = path.startsWith("/coverart-ai");
 
   const refreshWatchlist = useCallback(async () => {
     if (!session) {
@@ -64,8 +66,10 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (!session) {
-      setWatchlistArtists([]);
-      return;
+      const resetId = window.setTimeout(() => {
+        setWatchlistArtists([]);
+      }, 0);
+      return () => window.clearTimeout(resetId);
     }
     if (!watchlistOpen) return;
 
@@ -97,6 +101,12 @@ export default function Sidebar() {
       icon: Package,
       label: "Samples",
       active: path.startsWith("/samples"),
+    },
+    {
+      href: "/coverart-ai",
+      icon: Sparkles,
+      label: "Coverart AI",
+      active: isCoverartAi,
     },
     {
       href: "/submit",
