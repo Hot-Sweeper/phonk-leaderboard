@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   collapseFeedTracks,
@@ -282,12 +283,22 @@ export async function GET(req: Request) {
     collapseVersions
     && sortOrder === "desc"
     && valueMode === "absolute"
-    && search.length === 0
     && mode === "day";
 
   if (canUseFastCollapsedTrendPath) {
     const trendCutoff = new Date(Date.now() - TREND_PERIODS.day);
     const minBaselineDistanceMs = MIN_BASELINE_DISTANCE_MS.day;
+    const searchPattern = search ? `%${search.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+    const searchFilter = searchPattern
+      ? Prisma.sql`AND (
+          LOWER(t.name) LIKE ${searchPattern}
+          OR LOWER(COALESCE(t."albumName", '')) LIKE ${searchPattern}
+          OR t."artistId" IN (SELECT id FROM "Artist" WHERE LOWER(name) LIKE ${searchPattern})
+          OR EXISTS (
+            SELECT 1 FROM UNNEST(t."featuredArtists") AS fa WHERE LOWER(fa) LIKE ${searchPattern}
+          )
+        )`
+      : Prisma.empty;
     const fastRows = await prisma.$queryRaw<FastCollapsedTrendSongRow[]>`
       WITH latest_snapshots AS (
         SELECT DISTINCT ON (ts."trackId")
@@ -381,6 +392,7 @@ export async function GET(req: Request) {
           ) AS canonical_title
         FROM "Track" t
         LEFT JOIN latest_snapshots ls ON ls."trackId" = t.id
+        WHERE TRUE ${searchFilter}
       ),
       scored_tracks AS (
         SELECT
@@ -605,10 +617,20 @@ export async function GET(req: Request) {
     legalPopularityMode
     && collapseVersions
     && sortOrder === "desc"
-    && valueMode === "absolute"
-    && search.length === 0;
+    && valueMode === "absolute";
 
   if (canUseFastCollapsedPopularityPath) {
+    const searchPattern = search ? `%${search.replace(/[\\%_]/g, (m) => `\\${m}`)}%` : null;
+    const searchFilter = searchPattern
+      ? Prisma.sql`AND (
+          LOWER(t.name) LIKE ${searchPattern}
+          OR LOWER(COALESCE(t."albumName", '')) LIKE ${searchPattern}
+          OR t."artistId" IN (SELECT id FROM "Artist" WHERE LOWER(name) LIKE ${searchPattern})
+          OR EXISTS (
+            SELECT 1 FROM UNNEST(t."featuredArtists") AS fa WHERE LOWER(fa) LIKE ${searchPattern}
+          )
+        )`
+      : Prisma.empty;
     const fastRows = await prisma.$queryRaw<FastCollapsedPopularitySongRow[]>`
       WITH typed_tracks AS (
         SELECT
@@ -667,6 +689,7 @@ export async function GET(req: Request) {
             LOWER(t.name)
           ) AS canonical_title
         FROM "Track" t
+        WHERE TRUE ${searchFilter}
       ),
       scored_tracks AS (
         SELECT
