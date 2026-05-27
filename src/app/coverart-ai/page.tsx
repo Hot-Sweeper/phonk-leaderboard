@@ -72,16 +72,7 @@ export default function CoverartAiPage() {
 
       <div className="relative z-10 flex w-full max-w-2xl flex-1 flex-col items-center">
         {/* Header */}
-        <header className="flex flex-col items-center gap-1.5">
-          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.32em] text-white/60 backdrop-blur">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)] opacity-75" />
-              <span className="relative h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
-            </span>
-            Engine · Online
-            <span className="ml-1 text-white/30">·</span>
-            <span className="text-white/40">1 : 1</span>
-          </div>
+        <header className="flex flex-col items-center">
           <h1 className="bg-gradient-to-r from-white via-white to-white/60 bg-clip-text text-center text-2xl font-black leading-none tracking-tight text-transparent sm:text-3xl">
             Coverart{" "}
             <span className="bg-gradient-to-r from-[var(--accent)] via-fuchsia-400 to-violet-300 bg-clip-text text-transparent">
