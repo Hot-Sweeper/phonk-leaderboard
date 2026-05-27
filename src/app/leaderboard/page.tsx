@@ -365,6 +365,14 @@ export default function LeaderboardPage() {
         const data = await res.json();
         setArtists(data.artists);
         setTotalCount(data.totalCount);
+        // Rank changes are now embedded in each artist — build the map here
+        const rc: Record<string, { currentRank: number; previousRank: number | null; rankChange: number }> = {};
+        for (const a of data.artists) {
+          if (a.currentRank != null) {
+            rc[a.id] = { currentRank: a.currentRank, previousRank: a.previousRank ?? null, rankChange: a.rankChange ?? 0 };
+          }
+        }
+        setRankChanges(rc);
       }
       setLoading(false);
     },
@@ -395,18 +403,10 @@ export default function LeaderboardPage() {
     }
   }, []);
 
-  const loadRankChanges = useCallback(async () => {
-    const res = await fetch("/api/artists/ranks");
-    if (res.ok) {
-      setRankChanges(await res.json());
-    }
-  }, []);
-
   useEffect(() => {
     loadArtists();
     loadWatchlist();
-    loadRankChanges();
-  }, [loadArtists, loadWatchlist, loadRankChanges]);
+  }, [loadArtists, loadWatchlist]);
 
   // Debounced YouTube channel search for link modal
   useEffect(() => {

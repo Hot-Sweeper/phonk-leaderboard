@@ -29,7 +29,7 @@ type ArtistCacheEntry = {
   timestamp: number;
 };
 const artistListCache = new Map<string, ArtistCacheEntry>();
-const ARTIST_CACHE_TTL = 120_000; // 2 minutes
+const ARTIST_CACHE_TTL = 600_000; // 10 minutes
 const legalArtistCache = new Map<string, { artists: Array<Record<string, unknown>>; timestamp: number }>();
 const legalArtistCacheInFlight = new Map<string, Promise<Array<Record<string, unknown>>>>();
 const LEGAL_ARTIST_HYPE_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
@@ -46,7 +46,8 @@ function stripLinkMetrics<T extends { followerCount: number; monthlyListeners: n
 
 async function buildLegalArtistList(mode: LegalArtistMode) {
   const hypeCutoff = new Date(Date.now() - LEGAL_ARTIST_HYPE_PERIOD_MS);
-  const [artists, oldSnapshots, watchlistAggregate] = await Promise.all([
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  const [artists, oldSnapshots, watchlistAggregate, yesterdayRanks] = await Promise.all([
     prisma.artist.findMany({
       include: {
         links: { orderBy: { platform: "asc" } },
@@ -60,25 +61,25 @@ async function buildLegalArtistList(mode: LegalArtistMode) {
         },
       },
     }),
-    prisma.artistSnapshot.findMany({
-      where: {
-        createdAt: { lte: hypeCutoff },
-      },
-      orderBy: { createdAt: "desc" },
-      distinct: ["artistId"],
-      select: {
-        artistId: true,
-        monthlyListeners: true,
-        followerCount: true,
-      },
-    }),
+    // Use DISTINCT ON for index-backed dedup instead of app-level dedup
+    prisma.$queryRaw<Array<{ artistId: string; monthlyListeners: number; followerCount: number }>>`
+      SELECT DISTINCT ON ("artistId") "artistId", "monthlyListeners", "followerCount"
+      FROM "ArtistSnapshot"
+      WHERE "createdAt" <= ${hypeCutoff}
+      ORDER BY "artistId", "createdAt" DESC
+    `,
     prisma.artist.aggregate({
       _max: { watchlistCount: true },
+    }),
+    prisma.rankSnapshot.findMany({
+      where: { date: yesterday },
+      select: { artistId: true, rank: true },
     }),
   ]);
 
   const oldSnapshotMap = new Map(oldSnapshots.map((snapshot) => [snapshot.artistId, snapshot]));
   const maxWatchlistCount = Math.max(1, watchlistAggregate._max.watchlistCount ?? 0);
+  const yesterdayRankMap = new Map(yesterdayRanks.map((r) => [r.artistId, r.rank]));
 
   const fullList = artists.map((artist) => {
     const oldSnapshot = oldSnapshotMap.get(artist.id);
@@ -108,6 +109,7 @@ async function buildLegalArtistList(mode: LegalArtistMode) {
       hypeScore: metrics.hypeScore,
       hasHypeData: metrics.hasHypeData,
       hypeChangePercent: metrics.hypeChangePercent,
+      previousRank: yesterdayRankMap.get(artist.id) ?? null,
     };
   });
 
@@ -175,7 +177,17 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       {
-        artists: filtered.slice(skip, skip + take).map((artist) => ({ ...artist, globalRank: globalRankMap.get(String(artist.id)) ?? 0 })),
+        artists: filtered.slice(skip, skip + take).map((artist) => {
+          const currentRank = globalRankMap.get(String(artist.id)) ?? 0;
+          const previousRank = (artist.previousRank as number | null) ?? null;
+          return {
+            ...artist,
+            globalRank: currentRank,
+            currentRank,
+            previousRank,
+            rankChange: previousRank != null ? previousRank - currentRank : 0,
+          };
+        }),
         totalCount: filtered.length,
       },
       {
