@@ -89,7 +89,7 @@ function CopyLinkButton({ artistName }: { artistName: string }) {
 }
 
 /* ── famous card with cover-art play/pause ── */
-function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
+function FamousCard({ track, onOpen, onPlay }: { track: Track; onOpen: () => void; onPlay: () => void }) {
   const hasPlayer = !!track.spotifyUrl;
   return (
     <div className="group text-left">
@@ -101,9 +101,24 @@ function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
         )}
         <div className="absolute inset-0 transition-all bg-black/0 group-hover:bg-black/40" />
         <div className="absolute inset-0 flex items-center justify-center transition-opacity opacity-0 group-hover:opacity-100">
-          <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all ${hasPlayer ? "bg-black/60 backdrop-blur-sm text-white/80 border border-white/20" : "bg-black/30 text-white/30 border border-white/10"}`}>
-            <Play className="w-3.5 h-3.5 ml-0.5" />
-          </div>
+          {hasPlayer ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onPlay();
+              }}
+              className="w-9 h-9 rounded-full flex items-center justify-center transition-all bg-black/60 backdrop-blur-sm text-white/80 border border-white/20 hover:bg-[var(--accent)] hover:border-[var(--accent)] hover:text-white"
+              title="Open song player"
+              aria-label="Open song player"
+            >
+              <Play className="w-3.5 h-3.5 ml-0.5" />
+            </button>
+          ) : (
+            <div className="w-9 h-9 rounded-full flex items-center justify-center transition-all bg-black/30 text-white/30 border border-white/10">
+              <Play className="w-3.5 h-3.5 ml-0.5" />
+            </div>
+          )}
         </div>
       </div>
       <button onClick={onOpen} className="mt-1.5 px-0.5 w-full text-left cursor-pointer">
@@ -115,16 +130,17 @@ function FamousCard({ track, onOpen }: { track: Track; onOpen: () => void }) {
 }
 
 /* ── mini player ── */
-function MiniPlayer({ onFallback }: { onFallback: () => void }) {
+function MiniPlayer({ onPlay }: { onPlay: () => void }) {
   return (
     <button
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        onFallback();
+        onPlay();
       }}
       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all bg-white/[0.08] text-white/40 hover:bg-[var(--accent)] hover:text-white"
       aria-label="Open song player"
+      title="Open song player"
     >
       <Play className="w-2.5 h-2.5 ml-0.5" />
     </button>
@@ -162,7 +178,7 @@ function SparkChart({ id, metric, points, height = 80 }: { id: string; metric: s
 /* ═══════════════ MAIN ═══════════════ */
 export default function ArtistPanel({ id }: { id: string }) {
   const { data: session } = useSession();
-  const { close, openSong } = useDetailPanel();
+  const { close, openSong, openDockSong } = useDetailPanel();
   const [artist, setArtist] = useState<Artist | null>(null);
   const [loading, setLoading] = useState(true);
   const [tracksLoading, setTracksLoading] = useState(true);
@@ -268,6 +284,10 @@ export default function ArtistPanel({ id }: { id: string }) {
       artist: artistInfo,
     });
   }, [artist, openSong]);
+
+  const playTrackInDock = useCallback((track: Track) => {
+    openDockSong(track);
+  }, [openDockSong]);
 
   /* ── loading skeleton ── */
   if (loading) return (
@@ -419,7 +439,7 @@ export default function ArtistPanel({ id }: { id: string }) {
               <div className={`grid gap-2 ${famousThree.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
                 {famousThree.map((track) => (
                   <div key={track.id} className="relative">
-                    <FamousCard track={track} onOpen={() => openTrackSong(track)} />
+                    <FamousCard track={track} onOpen={() => openTrackSong(track)} onPlay={() => playTrackInDock(track)} />
                   </div>
                 ))}
               </div>
@@ -468,7 +488,7 @@ export default function ArtistPanel({ id }: { id: string }) {
             <div className="rounded-xl border border-[var(--muted)]/30 bg-white/[0.02] divide-y divide-white/[0.04] overflow-hidden">
               {tracks.slice(3, 10).map((track, i) => (
                 <div key={track.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-white/[0.04] transition-colors">
-                  {track.spotifyUrl ? <MiniPlayer onFallback={() => openTrackSong(track)} /> : <div className="w-7 h-7" />}
+                  {track.spotifyUrl ? <MiniPlayer onPlay={() => playTrackInDock(track)} /> : <div className="w-7 h-7" />}
                   <span className="text-[10px] font-bold text-white/25 w-4 text-center tabular-nums shrink-0">{i + 4}</span>
                   <button type="button" onClick={() => openTrackSong(track)} className="min-w-0 flex flex-1 items-center gap-2.5 text-left group cursor-pointer">
                     {track.albumImageUrl ? (

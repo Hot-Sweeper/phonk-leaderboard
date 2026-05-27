@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { fetchJsonWithSessionCache } from "@/lib/client-cache";
 import {
-  Music, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2,
+  Music, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2, Play,
 } from "lucide-react";
 import { useDetailPanel } from "@/lib/detail-panel";
 
@@ -122,7 +122,7 @@ function SparkChart({ id, points, height = 80 }: { id: string; points: ChartPoin
 
 /* ── MAIN ── */
 export default function SongPanel({ id, data }: { id: string; data?: SongData }) {
-  const { close, openArtist } = useDetailPanel();
+  const { close, openArtist, openDockSong } = useDetailPanel();
   const [fetched, setFetched] = useState<SongData | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [snaps, setSnaps] = useState<TrackSnap[]>([]);
@@ -180,6 +180,7 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
   const periodOpts: { key: ChartPeriod; label: string }[] = [{ key: "week", label: "7d" }, { key: "month", label: "30d" }, { key: "year", label: "1y" }];
   const isNewSong = isRecentRelease(song.releaseDate);
   const artistCards = song.allArtists?.filter((artist): artist is ArtistInfo => Boolean(artist?.id)) ?? (song.artist ? [song.artist] : []);
+  const canPlayInDock = Boolean(song.spotifyUrl);
 
   return (
     <div className="relative flex flex-col h-full overflow-hidden bg-[#08080c]">
@@ -225,11 +226,25 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
           </div>
 
           {/* Spotify link */}
-          {song.spotifyUrl && (
-            <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer" className="mt-3 w-9 h-9 rounded-full bg-white/[0.07] border border-white/[0.08] flex items-center justify-center hover:bg-white/15 transition-all" title="Open in Spotify">
-              <SpotifyIcon className="w-4 h-4 text-[#1DB954]" />
-            </a>
-          )}
+          <div className="mt-3 flex items-center justify-center gap-2">
+            {canPlayInDock ? (
+              <button
+                type="button"
+                onClick={() => openDockSong(song)}
+                className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-3.5 py-2 text-[11px] font-bold text-white shadow-[0_0_18px_var(--accent-glow)] transition-all hover:brightness-110"
+                title="Open song player"
+                aria-label="Open song player"
+              >
+                <Play className="w-3.5 h-3.5 ml-0.5" />
+                Play in dock
+              </button>
+            ) : null}
+            {song.spotifyUrl && (
+              <a href={song.spotifyUrl} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-full bg-white/[0.07] border border-white/[0.08] flex items-center justify-center hover:bg-white/15 transition-all" title="Open in Spotify">
+                <SpotifyIcon className="w-4 h-4 text-[#1DB954]" />
+              </a>
+            )}
+          </div>
         </div>
 
         <div className="h-4" />
