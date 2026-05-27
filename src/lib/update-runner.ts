@@ -64,6 +64,21 @@ async function buildDeezerArtistMap() {
   return deezerIdToArtistId;
 }
 
+async function buildSpotifyArtistMap() {
+  const allArtists = await prisma.artist.findMany({
+    select: { id: true, spotifyId: true },
+  });
+
+  const spotifyIdToArtistId = new Map<string, string>();
+  for (const artist of allArtists) {
+    if (artist.spotifyId) {
+      spotifyIdToArtistId.set(artist.spotifyId, artist.id);
+    }
+  }
+
+  return spotifyIdToArtistId;
+}
+
 function getInternalTrackPopularity(
   popularity: number,
   releaseDate: string | null | undefined,
@@ -358,7 +373,8 @@ async function refreshArtistStatsInternal(artist: ArtistForUpdate) {
 
 async function refreshArtistCatalogInternal(
   artist: ArtistForUpdate,
-  deezerIdToArtistId: Map<number, string>
+  deezerIdToArtistId: Map<number, string>,
+  spotifyIdToArtistId: Map<string, string>
 ) {
   const spotifyLink = artist.links.find((link) => link.platform === "SPOTIFY");
   const spotifyId = artist.spotifyId ?? spotifyLink?.platformId ?? (spotifyLink?.url ? parseSpotifyUrl(spotifyLink.url) : null);
@@ -430,36 +446,56 @@ async function refreshArtistCatalogInternal(
         const matchedSpotifyTrack = findMatchingSpotifyTrack(track, spotifyTrackLookup);
         const spotifyPopularity = matchedSpotifyTrack?.popularity ?? existingTrack?.spotifyPopularity ?? 0;
         const spotifyUrl = matchedSpotifyTrack?.spotifyUrl ?? existingTrack?.spotifyUrl;
+        const canonicalTrack = matchedSpotifyTrack ?? track;
+        const albumName = matchedSpotifyTrack?.album.name ?? track.album.name;
         const albumImageUrl = matchedSpotifyTrack?.album.imageUrl ?? track.album.imageUrl;
-        const featured = dedupeNames(
-          track.artists.filter((artistEntry) => artistEntry.deezerId !== deezerId).map((artistEntry) => artistEntry.name)
-        );
-        const contributorIds = [
-          ...new Set(
-            track.artists
-              .filter((artistEntry) => artistEntry.deezerId !== deezerId)
-              .map((artistEntry) => deezerIdToArtistId.get(artistEntry.deezerId))
-              .filter((id): id is string => !!id)
-          ),
-        ];
+        const featured = matchedSpotifyTrack
+          ? dedupeNames(
+              matchedSpotifyTrack.artists
+                .filter((artistEntry) => artistEntry.id !== spotifyId)
+                .map((artistEntry) => artistEntry.name)
+            )
+          : dedupeNames(
+              track.artists
+                .filter((artistEntry) => artistEntry.deezerId !== deezerId)
+                .map((artistEntry) => artistEntry.name)
+            );
+        const contributorIds = matchedSpotifyTrack
+          ? [
+              ...new Set(
+                matchedSpotifyTrack.artists
+                  .filter((artistEntry) => artistEntry.id !== spotifyId)
+                  .map((artistEntry) => spotifyIdToArtistId.get(artistEntry.id))
+                  .filter((id): id is string => !!id)
+              ),
+            ]
+          : [
+              ...new Set(
+                track.artists
+                  .filter((artistEntry) => artistEntry.deezerId !== deezerId)
+                  .map((artistEntry) => deezerIdToArtistId.get(artistEntry.deezerId))
+                  .filter((id): id is string => !!id)
+              ),
+            ];
 
         const savedTrack = await prisma.track.upsert({
           where: { deezerId: deezerTrackId },
           update: {
-            name: track.name,
-            albumName: track.album.name,
+            name: canonicalTrack.name,
+            albumName,
             albumImageUrl,
-            previewUrl: track.previewUrl,
-            durationMs: track.durationMs,
+            previewUrl: matchedSpotifyTrack?.previewUrl ?? track.previewUrl,
+            durationMs: canonicalTrack.durationMs,
             popularity: getInternalTrackPopularity(
               spotifyPopularity,
-              track.releaseDate ?? track.album.releaseDate,
-              track.previewUrl
+              matchedSpotifyTrack?.album.releaseDate ?? track.releaseDate ?? track.album.releaseDate,
+              matchedSpotifyTrack?.previewUrl ?? track.previewUrl
             ),
             spotifyPopularity,
-            trackNumber: track.trackNumber,
-            explicit: track.explicit,
-            releaseDate: track.releaseDate ?? track.album.releaseDate,
+            trackNumber: canonicalTrack.trackNumber,
+            discNumber: matchedSpotifyTrack?.discNumber ?? 0,
+            explicit: canonicalTrack.explicit,
+            releaseDate: matchedSpotifyTrack?.album.releaseDate ?? track.releaseDate ?? track.album.releaseDate,
             spotifyUrl,
             deezerUrl: track.deezerUrl,
             bpm: track.bpm,
@@ -470,20 +506,21 @@ async function refreshArtistCatalogInternal(
           create: {
             deezerId: deezerTrackId,
             artistId: artist.id,
-            name: track.name,
-            albumName: track.album.name,
+            name: canonicalTrack.name,
+            albumName,
             albumImageUrl,
-            previewUrl: track.previewUrl,
-            durationMs: track.durationMs,
+            previewUrl: matchedSpotifyTrack?.previewUrl ?? track.previewUrl,
+            durationMs: canonicalTrack.durationMs,
             popularity: getInternalTrackPopularity(
               spotifyPopularity,
-              track.releaseDate ?? track.album.releaseDate,
-              track.previewUrl
+              matchedSpotifyTrack?.album.releaseDate ?? track.releaseDate ?? track.album.releaseDate,
+              matchedSpotifyTrack?.previewUrl ?? track.previewUrl
             ),
             spotifyPopularity,
-            trackNumber: track.trackNumber,
-            explicit: track.explicit,
-            releaseDate: track.releaseDate ?? track.album.releaseDate,
+            trackNumber: canonicalTrack.trackNumber,
+            discNumber: matchedSpotifyTrack?.discNumber ?? 0,
+            explicit: canonicalTrack.explicit,
+            releaseDate: matchedSpotifyTrack?.album.releaseDate ?? track.releaseDate ?? track.album.releaseDate,
             spotifyUrl,
             deezerUrl: track.deezerUrl,
             bpm: track.bpm,
@@ -517,6 +554,14 @@ async function refreshArtistCatalogInternal(
             const featured = dedupeNames(
               track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
             );
+            const contributorIds = [
+              ...new Set(
+                track.artists
+                  .filter((artistEntry) => artistEntry.id !== spotifyId)
+                  .map((artistEntry) => spotifyIdToArtistId.get(artistEntry.id))
+                  .filter((id): id is string => !!id)
+              ),
+            ];
 
             const savedTrack = await prisma.track.upsert({
               where: { spotifyId: track.id },
@@ -538,6 +583,7 @@ async function refreshArtistCatalogInternal(
                 releaseDate: track.album.releaseDate,
                 spotifyUrl: track.spotifyUrl,
                 featuredArtists: featured,
+                contributorIds,
               },
               create: {
                 spotifyId: track.id,
@@ -559,6 +605,7 @@ async function refreshArtistCatalogInternal(
                 releaseDate: track.album.releaseDate,
                 spotifyUrl: track.spotifyUrl,
                 featuredArtists: featured,
+                contributorIds,
               },
               select: { id: true },
             });
@@ -579,6 +626,14 @@ async function refreshArtistCatalogInternal(
         const featured = dedupeNames(
           track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
         );
+        const contributorIds = [
+          ...new Set(
+            track.artists
+              .filter((artistEntry) => artistEntry.id !== spotifyId)
+              .map((artistEntry) => spotifyIdToArtistId.get(artistEntry.id))
+              .filter((id): id is string => !!id)
+          ),
+        ];
 
         const savedTrack = await prisma.track.upsert({
           where: { spotifyId: track.id },
@@ -600,6 +655,7 @@ async function refreshArtistCatalogInternal(
             releaseDate: track.album.releaseDate,
             spotifyUrl: track.spotifyUrl,
             featuredArtists: featured,
+            contributorIds,
           },
           create: {
             spotifyId: track.id,
@@ -621,6 +677,7 @@ async function refreshArtistCatalogInternal(
             releaseDate: track.album.releaseDate,
             spotifyUrl: track.spotifyUrl,
             featuredArtists: featured,
+            contributorIds,
           },
           select: { id: true },
         });
@@ -648,8 +705,9 @@ export async function hydrateArtistNow(artistId: string) {
   }
 
   const deezerIdToArtistId = await buildDeezerArtistMap();
+  const spotifyIdToArtistId = await buildSpotifyArtistMap();
   const { platformStats } = await refreshArtistStatsInternal(artist);
-  const { trackCount, trackIds } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId);
+  const { trackCount, trackIds } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId, spotifyIdToArtistId);
 
   await recordSnapshot(artistId);
   if (trackIds.length > 0) {
@@ -877,6 +935,7 @@ export async function runSongUpdate(trigger: string = "manual", mode: "delta" | 
   });
 
   const deezerIdToArtistId = await buildDeezerArtistMap();
+  const spotifyIdToArtistId = await buildSpotifyArtistMap();
 
   let updated = 0;
   let failed = 0;
@@ -886,7 +945,7 @@ export async function runSongUpdate(trigger: string = "manual", mode: "delta" | 
     for (const artist of artists) {
       const artistStart = Date.now();
       try {
-        const { trackCount } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId);
+        const { trackCount } = await refreshArtistCatalogInternal(artist, deezerIdToArtistId, spotifyIdToArtistId);
 
         if (trackCount > 0) {
           updated++;

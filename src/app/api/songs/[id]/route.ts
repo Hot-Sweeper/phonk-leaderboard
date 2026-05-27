@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchDeezerTrackDetail } from "@/lib/platforms";
 import { extractTrackVersions, getDisplayTrackTitle } from "@/lib/track-dedupe";
 
 function normalizeName(value: string) {
@@ -14,7 +13,7 @@ function normalizeName(value: string) {
 /**
  * GET /api/songs/[id]
  * Returns full track data for the song detail panel.
- * Uses the same Deezer-enriched artist resolution as the leaderboard.
+ * Uses stored track metadata as the source of truth.
  */
 export async function GET(
   _req: Request,
@@ -33,12 +32,6 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Fetch Deezer detail for enriched credits (same as leaderboard)
-  const numericDeezerId = track.deezerId ? Number(track.deezerId) : null;
-  const deezerDetail = numericDeezerId
-    ? await fetchDeezerTrackDetail(numericDeezerId)
-    : null;
-
   // Resolve contributorIds to actual artist objects
   const contributors = track.contributorIds.length > 0
     ? await prisma.artist.findMany({
@@ -48,57 +41,30 @@ export async function GET(
     : [];
   const contributorMap = new Map(contributors.map(c => [c.id, c]));
 
-  // Collect all credited names from featured + Deezer
-  const allCreditedNames = [
-    ...track.featuredArtists,
-    ...(deezerDetail?.artists.map(a => a.name) ?? []),
-  ];
+  // Collect all credited names from stored featured artists only.
+  const allCreditedNames = [...track.featuredArtists];
   const uniqueNames = [...new Set(allCreditedNames.map(n => normalizeName(n)))]
     .map(norm => allCreditedNames.find(n => normalizeName(n) === norm)!)
     .filter(Boolean);
 
-  const deezerArtistIds = deezerDetail?.artists.map(a => a.deezerId) ?? [];
-
-  // Resolve credited names + Deezer IDs against the DB (same as leaderboard)
-  const matchedArtists = (uniqueNames.length > 0 || deezerArtistIds.length > 0)
+  // Resolve credited names against the DB.
+  const matchedArtists = uniqueNames.length > 0
     ? await prisma.artist.findMany({
         where: {
-          OR: [
-            ...uniqueNames.map(name => ({
-              name: { equals: name, mode: "insensitive" as const },
-            })),
-            ...(deezerArtistIds.length > 0 ? [{ deezerId: { in: deezerArtistIds } }] : []),
-          ],
+          OR: uniqueNames.map(name => ({
+            name: { equals: name, mode: "insensitive" as const },
+          })),
         },
-        select: { id: true, name: true, imageUrl: true, deezerId: true },
+        select: { id: true, name: true, imageUrl: true },
       })
     : [];
 
   const matchByName = new Map(matchedArtists.map(a => [normalizeName(a.name), a]));
-  const matchByDeezerId = new Map(
-    matchedArtists
-      .filter(a => typeof a.deezerId === "number")
-      .map(a => [a.deezerId as number, a])
-  );
 
   // Build allArtists: primary artist first, then all resolved credits
   type ArtistInfo = { id: string; name: string; imageUrl: string | null };
   const allArtists: ArtistInfo[] = [];
   const seenNames = new Set<string>();
-
-  // If Deezer has credits, use those as the authoritative order
-  if (deezerDetail && deezerDetail.artists.length > 0) {
-    for (const credit of deezerDetail.artists) {
-      const norm = normalizeName(credit.name);
-      if (seenNames.has(norm)) continue;
-      seenNames.add(norm);
-
-      const resolved = matchByDeezerId.get(credit.deezerId) ?? matchByName.get(norm);
-      if (resolved) {
-        allArtists.push({ id: resolved.id, name: resolved.name, imageUrl: resolved.imageUrl });
-      }
-    }
-  }
 
   // Ensure primary artist is always first
   const primaryNorm = normalizeName(track.artist.name);
@@ -136,25 +102,22 @@ export async function GET(
 
   // Remaining unresolved featured names
   const unresolvedFeatured: string[] = [];
-  for (const name of [...track.featuredArtists, ...(deezerDetail?.artists.map(a => a.name) ?? [])]) {
+  for (const name of track.featuredArtists) {
     const norm = normalizeName(name);
     if (seenNames.has(norm)) continue;
     unresolvedFeatured.push(name);
     seenNames.add(norm);
   }
 
-  // Enrich display title + versions from Deezer
-  const displayTitle = getDisplayTrackTitle(deezerDetail?.fullTitle ?? track.name);
-  const versions = deezerDetail?.fullTitle
-    ? extractTrackVersions(deezerDetail.fullTitle)
-    : extractTrackVersions(track.name);
+  const displayTitle = getDisplayTrackTitle(track.name);
+  const versions = extractTrackVersions(track.name);
 
   return NextResponse.json({
     id: track.id,
     name: displayTitle,
-    albumName: deezerDetail?.album.name ?? track.albumName,
-    albumImageUrl: deezerDetail?.album.imageUrl ?? track.albumImageUrl,
-    previewUrl: deezerDetail?.previewUrl ?? track.previewUrl,
+    albumName: track.albumName,
+    albumImageUrl: track.albumImageUrl,
+    previewUrl: track.previewUrl,
     deezerId: track.deezerId,
     deezerUrl: track.deezerUrl,
     spotifyUrl: track.spotifyId
@@ -163,7 +126,7 @@ export async function GET(
     durationMs: track.durationMs,
     popularity: track.popularity,
     explicit: track.explicit,
-    releaseDate: deezerDetail?.releaseDate ?? track.releaseDate,
+    releaseDate: track.releaseDate,
     featuredArtists: unresolvedFeatured,
     artist: allArtists[0] ?? track.artist,
     allArtists,
