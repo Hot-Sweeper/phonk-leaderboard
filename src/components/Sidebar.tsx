@@ -18,7 +18,7 @@ import {
   ChevronRight,
   PlusCircle,
   Sparkles,
-  Zap,
+  Flame,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -44,6 +44,7 @@ export default function Sidebar() {
     path === "/leaderboard" ||
     path === "/bubbles" ||
     path === "/songs";
+  const isHype = path.startsWith("/hype");
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
   const isCoverartAi = path.startsWith("/coverart-ai");
@@ -99,9 +100,9 @@ export default function Sidebar() {
     },
     {
       href: "/hype",
-      icon: Zap,
+      icon: Flame,
       label: "Hype",
-      active: path === "/hype",
+      active: isHype,
     },
     {
       href: "/samples",

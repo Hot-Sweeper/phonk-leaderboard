@@ -290,6 +290,40 @@ export function getTrackHypeScore(
   );
 }
 
+export function getHypeLeaderboardPopularityScore(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity">
+) {
+  const spotifyScore = normalizePopularityForScore(track.spotifyPopularity ?? 0);
+  if (spotifyScore > 0) return Math.round(spotifyScore);
+
+  return Math.round(normalizePopularityForScore(track.popularity));
+}
+
+export function getHypeLeaderboardHypeScore(
+  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate">,
+  trendPercent: number
+) {
+  const baseScore = getHypeLeaderboardPopularityScore(track);
+  const ageInDays = getAgeInDays(track.releaseDate);
+
+  const ageMultiplier = (() => {
+    if (ageInDays == null) return 0.35;
+    if (ageInDays <= 7) return 1.8;
+    if (ageInDays <= 14) return 1.5;
+    if (ageInDays <= 30) return 1.1;
+    if (ageInDays <= 60) return 0.65;
+    if (ageInDays <= 90) return 0.3;
+    if (ageInDays <= 180) return 0.1;
+    return 0.03;
+  })();
+
+  const velocityBonus = trendPercent > 0
+    ? clamp((trendPercent / 100) * 25, 0, 30)
+    : 0;
+
+  return Math.round(clamp((baseScore + velocityBonus) * ageMultiplier, 0, 100));
+}
+
 export function getEmergingTrackHypeScore(
   track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "youtubeViews" | "releaseDate" | "previewUrl"> & {
     firstSeenAt?: string | Date | null;
@@ -342,54 +376,6 @@ export function getEmergingTrackHypeScore(
     breakoutWindowScore * 0.26 +
     firstSeenBoost * 0.12
   );
-}
-
-// ─── Hype Leaderboard scoring ───────────────────────────────────────────────
-
-/**
- * Hype Leaderboard — Popularity mode.
- * Pure Spotify chart rank (spotifyPopularity), no age weighting.
- * An old song at pop 90 ranks above a new song at pop 60.
- */
-export function getHypeLeaderboardPopularityScore(
-  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity">
-): number {
-  return normalizePopularityForScore(
-    (track.spotifyPopularity ?? 0) > 0 ? track.spotifyPopularity! : track.popularity
-  );
-}
-
-/**
- * Hype Leaderboard — Hype mode.
- * Steeply age-decayed Spotify score + velocity / underdog bonus.
- *
- * Age multipliers (much steeper than regular hype scoring):
- *   ≤7d →×1.8 | ≤14d →×1.5 | ≤30d →×1.1 | ≤60d →×0.65
- *   ≤90d →×0.30 | ≤180d →×0.10 | >180d →×0.03
- *
- * Velocity bonus: trendPercent is used to add up to +30 points,
- * also scaled by ageMultiplier so fresh fast-movers benefit the most.
- */
-export function getHypeLeaderboardHypeScore(
-  track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate">,
-  trendPercent = 0
-): number {
-  const baseScore = normalizePopularityForScore(
-    (track.spotifyPopularity ?? 0) > 0 ? track.spotifyPopularity! : track.popularity
-  );
-  const ageInDays = getAgeInDays(track.releaseDate);
-  const ageMultiplier = (() => {
-    if (ageInDays == null) return 0.3;
-    if (ageInDays <= 7) return 1.8;
-    if (ageInDays <= 14) return 1.5;
-    if (ageInDays <= 30) return 1.1;
-    if (ageInDays <= 60) return 0.65;
-    if (ageInDays <= 90) return 0.30;
-    if (ageInDays <= 180) return 0.10;
-    return 0.03;
-  })();
-  const velocityBonus = clamp((Math.max(0, trendPercent) / 100) * 25, 0, 30);
-  return Math.round(clamp(baseScore * ageMultiplier + velocityBonus * ageMultiplier, 0, 100));
 }
 
 export function getArtistAudienceScoreFromSummary(input: ArtistScoreSummaryInput) {
