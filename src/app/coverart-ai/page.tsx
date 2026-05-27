@@ -385,13 +385,17 @@ function PreviewCanvas({
     };
   }, [status, phrases.length]);
 
+  const done = status === "done" && !!resultUrl;
+
   return (
     <div className="relative aspect-square h-full w-full overflow-hidden rounded-[1.5rem] border border-white/10 bg-black shadow-[inset_0_0_60px_rgba(0,0,0,0.8)]">
-      {/* Always-on subtle ambient swirl */}
-      <div className="pointer-events-none absolute inset-0 opacity-60">
-        <div className="absolute inset-0 animate-coverart-aurora bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent)_0deg,transparent_120deg,#7c3aed_240deg,transparent_360deg)] opacity-25 blur-3xl" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.6)_75%,rgba(0,0,0,0.95)_100%)]" />
-      </div>
+      {/* Always-on subtle ambient swirl (hidden when final result is shown) */}
+      {!done && (
+        <div className="pointer-events-none absolute inset-0 opacity-60">
+          <div className="absolute inset-0 animate-coverart-aurora bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent)_0deg,transparent_120deg,#7c3aed_240deg,transparent_360deg)] opacity-25 blur-3xl" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.6)_75%,rgba(0,0,0,0.95)_100%)]" />
+        </div>
+      )}
 
       {/* Idle state */}
       {status === "idle" && !resultUrl && (
@@ -430,40 +434,42 @@ function PreviewCanvas({
       {/* Reveal sweep */}
       {status === "done" && <RevealSweep />}
 
-      {/* Grid texture overlay */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.08] mix-blend-screen"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-        }}
-      />
+      {/* Grid texture + corner brackets — only when not finished */}
+      {!done && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-0 opacity-[0.08] mix-blend-screen"
+            style={{
+              backgroundImage:
+                "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+              backgroundSize: "32px 32px",
+            }}
+          />
+          <Corner pos="top-3 left-3" />
+          <Corner pos="top-3 right-3" rotate="rotate-90" />
+          <Corner pos="bottom-3 right-3" rotate="rotate-180" />
+          <Corner pos="bottom-3 left-3" rotate="-rotate-90" />
+        </>
+      )}
 
-      {/* Corner brackets */}
-      <Corner pos="top-3 left-3" />
-      <Corner pos="top-3 right-3" rotate="rotate-90" />
-      <Corner pos="bottom-3 right-3" rotate="rotate-180" />
-      <Corner pos="bottom-3 left-3" rotate="-rotate-90" />
-
-      {/* Status caption + download */}
-      <div className="absolute inset-x-3 bottom-3 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.28em]">
-        <span className="text-white/50">
-          {status === "generating" ? "Rendering" : status === "done" ? "Ready" : "Standby"}
-        </span>
-        {status === "done" && resultUrl ? (
-          <a
-            href={resultUrl}
-            download="coverart.png"
-            className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-2.5 py-1 text-white/80 backdrop-blur hover:text-white"
-          >
-            <Download className="h-3 w-3" />
-            PNG
-          </a>
-        ) : (
+      {/* Download badge only when done; otherwise status caption */}
+      {done ? (
+        <a
+          href={resultUrl!}
+          download="coverart.png"
+          className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.28em] text-white/90 backdrop-blur transition-colors hover:bg-black/70 hover:text-white"
+        >
+          <Download className="h-3 w-3" />
+          PNG
+        </a>
+      ) : (
+        <div className="absolute inset-x-3 bottom-3 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.28em]">
+          <span className="text-white/50">
+            {status === "generating" ? "Rendering" : "Standby"}
+          </span>
           <span className="text-white/40">{model}</span>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -502,8 +508,8 @@ function GeneratingOverlay({ model, phrase }: { model: string; phrase: string })
         </div>
       </div>
 
-      {/* Scan line */}
-      <div className="absolute inset-x-0 top-0 h-full">
+      {/* Scan line — slides full-canvas with fade in/out */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute inset-x-0 h-32 animate-coverart-scan bg-gradient-to-b from-transparent via-white/15 to-transparent" />
       </div>
 
@@ -599,8 +605,10 @@ function KeyframeStyles() {
         50% { transform: scale(1.7); opacity: 0; }
       }
       @keyframes coverart-scan {
-        0% { transform: translateY(-40%); }
-        100% { transform: translateY(140%); }
+        0% { top: -20%; opacity: 0; }
+        15% { opacity: 1; }
+        85% { opacity: 1; }
+        100% { top: 110%; opacity: 0; }
       }
       @keyframes coverart-aurora {
         to { transform: rotate(360deg) scale(1.3); }
@@ -632,7 +640,8 @@ function KeyframeStyles() {
         animation: coverart-spin 5s linear infinite;
       }
       .animate-coverart-scan {
-        animation: coverart-scan 2.4s ease-in-out infinite;
+        top: -20%;
+        animation: coverart-scan 2.8s ease-in-out infinite;
       }
       .animate-coverart-reveal {
         animation: coverart-reveal 1.2s ease-out forwards;
