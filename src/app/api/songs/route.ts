@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { collapseFeedTracks, collapseFeedTrackVersions, dedupeNames, extractTrackVersions, getDisplayTrackTitle } from "@/lib/track-dedupe";
+import {
+  collapseFeedTracks,
+  collapseFeedTrackVersions,
+  compareReleaseDatePriority,
+  dedupeNames,
+  extractTrackVersions,
+  getDisplayTrackTitle,
+} from "@/lib/track-dedupe";
 import {
   getEmergingTrackHypeScore,
   getTrackAudienceScore,
@@ -166,10 +173,9 @@ function chooseTrackByMetric<T extends {
     return leftDuration > rightDuration ? left : right;
   }
 
-  const leftRelease = left.releaseDate ?? "";
-  const rightRelease = right.releaseDate ?? "";
-  if (leftRelease !== rightRelease) {
-    return leftRelease > rightRelease ? left : right;
+  const releasePriority = compareReleaseDatePriority(left.releaseDate, right.releaseDate);
+  if (releasePriority !== 0) {
+    return releasePriority < 0 ? left : right;
   }
 
   return left;
@@ -246,10 +252,9 @@ function chooseTrackByAudience<T extends {
     return leftDuration > rightDuration ? left : right;
   }
 
-  const leftRelease = left.releaseDate ?? "";
-  const rightRelease = right.releaseDate ?? "";
-  if (leftRelease !== rightRelease) {
-    return leftRelease > rightRelease ? left : right;
+  const releasePriority = compareReleaseDatePriority(left.releaseDate, right.releaseDate);
+  if (releasePriority !== 0) {
+    return releasePriority < 0 ? left : right;
   }
 
   return left;

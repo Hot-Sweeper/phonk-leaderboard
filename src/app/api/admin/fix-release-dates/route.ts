@@ -6,11 +6,11 @@ import { batchFetchSpotifyTrackDates } from "@/lib/platforms";
 /**
  * POST /api/admin/fix-release-dates
  *
- * Finds tracks with missing or imprecise release dates (NULL, year-only "2024",
- * or month-only "2024-03"), fetches the correct date from Spotify, and updates
- * the DB. Returns a summary of what was fixed.
+ * Fetches the current release date for every Spotify-backed track and updates
+ * any rows that differ from Spotify's /tracks response. Returns a summary of
+ * what changed.
  *
- * Safe to run multiple times — only touches tracks that still need fixing.
+ * Safe to run multiple times — unchanged rows are skipped.
  */
 export async function POST() {
   const session = await auth();
@@ -18,17 +18,15 @@ export async function POST() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Find all tracks with a spotifyId where the release date is either NULL
-  // or doesn't match full YYYY-MM-DD precision (year-only or month-only from Spotify).
+  // Compare every Spotify-backed track against Spotify's current /tracks data.
   const tracks = await prisma.$queryRaw<Array<{ id: string; spotifyId: string; releaseDate: string | null }>>`
     SELECT id, "spotifyId", "releaseDate"
     FROM "Track"
     WHERE "spotifyId" IS NOT NULL
-      AND ("releaseDate" IS NULL OR "releaseDate" !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
   `;
 
   if (tracks.length === 0) {
-    return NextResponse.json({ fixed: 0, skipped: 0, message: "All release dates already look good." });
+    return NextResponse.json({ fixed: 0, skipped: 0, message: "No Spotify-backed tracks found." });
   }
 
   const spotifyIds = tracks.map((t) => t.spotifyId as string);

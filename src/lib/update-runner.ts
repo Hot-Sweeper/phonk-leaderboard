@@ -219,8 +219,9 @@ export async function deduplicateStoredTracksForArtist(artistId: string) {
       const transferredSpotifyPopularity = loser.spotifyPopularity > winner.spotifyPopularity
         ? loser.spotifyPopularity
         : null;
+      const shouldTransferSpotifyId = !winner.spotifyId && !!loser.spotifyId;
       const updateData = {
-        ...(!winner.spotifyId && loser.spotifyId ? { spotifyId: loser.spotifyId } : {}),
+        ...(shouldTransferSpotifyId ? { spotifyId: loser.spotifyId } : {}),
         ...(!winner.spotifyUrl && loser.spotifyUrl ? { spotifyUrl: loser.spotifyUrl } : {}),
         ...(transferredSpotifyPopularity != null ? {
           spotifyPopularity: transferredSpotifyPopularity,
@@ -237,9 +238,21 @@ export async function deduplicateStoredTracksForArtist(artistId: string) {
       if (Object.keys(updateData).length === 0) {
         continue;
       }
-      await prisma.track.update({
-        where: { id: winner.id },
-        data: updateData,
+      await prisma.$transaction(async (tx) => {
+        if (shouldTransferSpotifyId) {
+          await tx.track.update({
+            where: { id: loser.id },
+            data: {
+              spotifyId: null,
+              spotifyUrl: winner.spotifyUrl ? loser.spotifyUrl : null,
+            },
+          });
+        }
+
+        await tx.track.update({
+          where: { id: winner.id },
+          data: updateData,
+        });
       }).catch(() => {});
       break;
     }
@@ -436,6 +449,22 @@ export async function hydrateArtistNow(artistId: string) {
   }
 
   return { platformStats, trackCount };
+}
+
+export async function refreshArtistCatalogNow(artistId: string) {
+  const artist = await getArtistForUpdate(artistId);
+  if (!artist) {
+    throw new Error(`Artist not found: ${artistId}`);
+  }
+
+  const spotifyIdToArtistId = await buildSpotifyArtistMap();
+  const { trackCount, trackIds } = await refreshArtistCatalogInternal(artist, spotifyIdToArtistId);
+
+  if (trackIds.length > 0) {
+    await recordTrackSnapshots(trackIds);
+  }
+
+  return { trackCount };
 }
 
 /** Mark stale "running" logs as failed, then check if a real one is still running */

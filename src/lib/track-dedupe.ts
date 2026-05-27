@@ -169,6 +169,26 @@ function getVariantPenalty(title: string) {
   return penalty;
 }
 
+export function compareReleaseDatePriority(
+  leftReleaseDate: string | null | undefined,
+  rightReleaseDate: string | null | undefined,
+) {
+  const left = leftReleaseDate ?? "";
+  const right = rightReleaseDate ?? "";
+
+  if (left === right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  return left < right ? -1 : 1;
+}
+
+export function getEarliestReleaseDate(releaseDates: Array<string | null | undefined>) {
+  const validDates = releaseDates.filter((value): value is string => typeof value === "string" && value.length > 0);
+  if (validDates.length === 0) return null;
+  validDates.sort();
+  return validDates[0] ?? null;
+}
+
 function preferTrack<T extends TrackLike>(left: T, right: T) {
   const leftPenalty = getVariantPenalty(left.name);
   const rightPenalty = getVariantPenalty(right.name);
@@ -188,9 +208,8 @@ function preferTrack<T extends TrackLike>(left: T, right: T) {
   const rightDuration = right.durationMs ?? 0;
   if (leftDuration !== rightDuration) return leftDuration > rightDuration ? left : right;
 
-  const leftRelease = left.releaseDate ?? "";
-  const rightRelease = right.releaseDate ?? "";
-  if (leftRelease !== rightRelease) return leftRelease > rightRelease ? left : right;
+  const releasePriority = compareReleaseDatePriority(left.releaseDate, right.releaseDate);
+  if (releasePriority !== 0) return releasePriority < 0 ? left : right;
 
   return left;
 }
@@ -214,9 +233,8 @@ function preferHighestScoringTrack<T extends TrackLike>(left: T, right: T) {
   const rightDuration = right.durationMs ?? 0;
   if (leftDuration !== rightDuration) return leftDuration > rightDuration ? left : right;
 
-  const leftRelease = left.releaseDate ?? "";
-  const rightRelease = right.releaseDate ?? "";
-  if (leftRelease !== rightRelease) return leftRelease > rightRelease ? left : right;
+  const releasePriority = compareReleaseDatePriority(left.releaseDate, right.releaseDate);
+  if (releasePriority !== 0) return releasePriority < 0 ? left : right;
 
   return left;
 }
@@ -267,12 +285,16 @@ function collapseTracks<T extends TrackLike>(
   return [...grouped.values()]
     .map((group) => {
       const chosen = group.reduce((best, current) => chooseTrack(best, current));
+      const earliestReleaseDate = getEarliestReleaseDate(group.map((track) => track.releaseDate));
+      const resolvedTrack = earliestReleaseDate && chosen.releaseDate !== earliestReleaseDate
+        ? { ...chosen, releaseDate: earliestReleaseDate } as T
+        : chosen;
       const chosenVersions = extractTrackVersions(chosen.name, chosen.albumName);
       const versions = chosenVersions.length > 0 ? chosenVersions : ["Original"];
       const primaryVersion = chosenVersions[0] ?? "Original";
 
       return {
-        track: chosen,
+        track: resolvedTrack,
         versions,
         primaryVersion,
       };
