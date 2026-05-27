@@ -18,6 +18,7 @@ import {
   ChevronRight,
   PlusCircle,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -95,6 +96,12 @@ export default function Sidebar() {
       icon: Trophy,
       label: "Rankings",
       active: isRankings,
+    },
+    {
+      href: "/hype",
+      icon: Zap,
+      label: "Hype",
+      active: path === "/hype",
     },
     {
       href: "/samples",

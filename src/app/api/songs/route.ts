@@ -11,6 +11,8 @@ import {
 } from "@/lib/track-dedupe";
 import {
   getEmergingTrackHypeScore,
+  getHypeLeaderboardHypeScore,
+  getHypeLeaderboardPopularityScore,
   getTrackAudienceScore,
   getTrackHypeScore,
   getTrackSignalScore,
@@ -34,7 +36,7 @@ const MIN_BASELINE_DISTANCE_MS: Record<keyof typeof TREND_PERIODS, number> = {
 const rankedTracksCache = new Map<string, { rankedTracks: any[]; timestamp: number }>();
 const RANKED_CACHE_TTL = 600_000; // 10 minutes
 
-type SongsLeaderboardMode = "popularity" | "spotify" | "youtube" | keyof typeof TREND_PERIODS;
+type SongsLeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "hype-trend" | keyof typeof TREND_PERIODS;
 type TrendSortOrder = "desc" | "abs" | "asc";
 type TrendValueMode = "absolute" | "relative";
 type BasicArtistInfo = { id: string; name: string; imageUrl: string | null };
@@ -102,6 +104,9 @@ function getLeaderboardMode(value: string | null): SongsLeaderboardMode {
     return value;
   }
   if (value === "spotify" || value === "youtube") {
+    return value;
+  }
+  if (value === "hype-pop" || value === "hype-trend") {
     return value;
   }
   return "popularity";
@@ -277,6 +282,7 @@ export async function GET(req: Request) {
   const valueMode = getTrendValueMode(searchParams.get("valueMode"));
   const legalPopularityMode = rankingModel === "legal" && (mode === "popularity" || mode === "spotify");
   const legalHypeCandidateCutoff = new Date(Date.now() - (TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS * 24 * 60 * 60 * 1000));
+  const hypeLeaderboardPeriod = mode === "hype-trend" ? (searchParams.get("period") === "month" ? "month" : "week") : "";
   const canUseFastCollapsedTrendPath =
     rankingModel !== "legal"
     &&
@@ -864,7 +870,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v4-raw-signals:${rankingModel}:${mode}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const rankedCacheKey = `v5-raw-signals:${rankingModel}:${mode}:${collapseVersions}:${sortOrder}:${valueMode}:${hypeLeaderboardPeriod}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -919,9 +925,12 @@ export async function GET(req: Request) {
           }));
         })()
       : await prisma.track.findMany({
-          where: rankingModel === "legal" && !legalPopularityMode
-            ? { createdAt: { gte: legalHypeCandidateCutoff } }
-            : undefined,
+          where: (() => {
+            if (rankingModel !== "legal") return undefined;
+            if (legalPopularityMode || mode === "hype-pop") return undefined;
+            if (mode === "hype-trend") return { createdAt: { gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) } };
+            return { createdAt: { gte: legalHypeCandidateCutoff } };
+          })(),
           orderBy: { popularity: "desc" },
           include: {
             artist: {
@@ -949,6 +958,53 @@ export async function GET(req: Request) {
           : collapseFeedTracks(legalMetricTracks, chooseTrackByAudience);
 
         rankedTracks.sort((left, right) => right.track.metricValue - left.track.metricValue || right.track.popularity - left.track.popularity);
+      } else if (mode === "hype-pop") {
+        // Hype Leaderboard — Popularity: pure Spotify chart rank, no age weighting
+        const legalMetricTracks = allTracks.map((track) => {
+          const score = getHypeLeaderboardPopularityScore(track);
+          return { ...track, audienceScore: score, metricValue: score, trendDelta: 0, trendPercent: 0, hasTrendData: false, isEmergingHype: false };
+        });
+        rankedTracks = collapseVersions
+          ? collapseFeedTrackVersions(legalMetricTracks, chooseTrackByAudience)
+          : collapseFeedTracks(legalMetricTracks, chooseTrackByAudience);
+        rankedTracks.sort((a, b) => b.track.metricValue - a.track.metricValue || b.track.popularity - a.track.popularity);
+      } else if (mode === "hype-trend") {
+        // Hype Leaderboard — Hype: steep age decay + velocity underdog bonus
+        const trendPeriodKey = hypeLeaderboardPeriod as "week" | "month";
+        const periodMs = TREND_PERIODS[trendPeriodKey];
+        const cutoff = new Date(Date.now() - periodMs);
+        let oldSnapshots: Array<{ trackId: string; popularity: number; spotifyPopularity: number; youtubeViews: number; createdAt: Date }> = [];
+        try {
+          oldSnapshots = await prisma.$queryRaw<Array<{ trackId: string; popularity: number; spotifyPopularity: number; youtubeViews: number; createdAt: Date }>>`
+            SELECT DISTINCT ON ("trackId") "trackId", popularity, "spotifyPopularity", "youtubeViews", "createdAt"
+            FROM "TrackSnapshot"
+            WHERE "createdAt" <= ${cutoff}
+              AND (popularity > 0 AND popularity <= 100 OR "spotifyPopularity" > 0 OR "youtubeViews" > 0)
+            ORDER BY "trackId", "createdAt" DESC
+          `;
+        } catch {
+          oldSnapshots = [];
+        }
+        const oldSnapshotMap = new Map(oldSnapshots.map((s) => [s.trackId, s]));
+        const legalMetricTracks = allTracks.map((track) => {
+          const oldSnapshot = oldSnapshotMap.get(track.id);
+          const currentSignalScore = getTrackSignalScore(track);
+          const previousSignalScore = oldSnapshot
+            ? getTrackSignalScore({ popularity: oldSnapshot.popularity, spotifyPopularity: oldSnapshot.spotifyPopularity, youtubeViews: oldSnapshot.youtubeViews })
+            : 0;
+          const hasUsableTrendData = !!oldSnapshot && currentSignalScore > 0 && previousSignalScore > 0
+            && hasReliableTrendBaseline(track.createdAt, oldSnapshot.createdAt, trendPeriodKey);
+          const trendDelta = hasUsableTrendData ? Math.round((currentSignalScore - previousSignalScore) * 100) / 100 : 0;
+          const trendPercent = hasUsableTrendData
+            ? Math.round(((currentSignalScore - previousSignalScore) / previousSignalScore) * 10000) / 100
+            : 0;
+          const hypeScore = getHypeLeaderboardHypeScore(track, Math.max(0, trendPercent));
+          return { ...track, audienceScore: hypeScore, metricValue: hypeScore, trendDelta, trendPercent, hasTrendData: hasUsableTrendData, isEmergingHype: false };
+        });
+        rankedTracks = collapseVersions
+          ? collapseFeedTrackVersions(legalMetricTracks, chooseTrackByMetric)
+          : collapseFeedTracks(legalMetricTracks, chooseTrackByMetric);
+        rankedTracks.sort((a, b) => b.track.metricValue - a.track.metricValue || b.track.trendPercent - a.track.trendPercent || b.track.popularity - a.track.popularity);
       } else {
         const trendMode = (mode === "youtube" ? "day" : mode) as keyof typeof TREND_PERIODS;
         const periodMs = TREND_PERIODS[trendMode];
@@ -1182,7 +1238,7 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json(
-      { tracks: enrichedTracks, totalCount, mode: legalPopularityMode ? "popularity" : "hype" },
+      { tracks: enrichedTracks, totalCount, mode: legalPopularityMode ? "popularity" : (mode === "hype-pop" || mode === "hype-trend") ? mode : "hype" },
       {
         headers: {
           "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
