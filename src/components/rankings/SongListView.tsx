@@ -864,6 +864,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                       <div className={`h-full rounded-full ${getMetricBarClass(track, mode, valueMode, rankingModel)}`} style={{ width: `${metricBarWidth}%` }} />
                     </div>
                   )}
+                  {/* DEBUG: popularity scores */}
+                  <span className="text-[9px] font-mono text-yellow-400/70 tabular-nums leading-none mt-0.5">
+                    sp:{track.popularity} as:{track.audienceScore ?? "–"}
+                  </span>
                 </div>
 
                 {/* External link */}
