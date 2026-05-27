@@ -57,11 +57,14 @@ export async function GET() {
     take: 20,
   });
 
+  const cronSecret = process.env.CRON_SECRET ?? null;
+
   return NextResponse.json({
     updateIntervalHours: parseInt(map["updateIntervalHours"] ?? "1", 10),
     lastFullUpdate: map["lastFullUpdate"] ?? null,
     songUpdateIntervalHours: parseInt(map["songUpdateIntervalHours"] ?? "24", 10),
     lastSongUpdate: map["lastSongUpdate"] ?? null,
+    cronSecret,
     updaters: SCHEDULED_UPDATERS.map((updater) => ({
       key: updater.key,
       label: updater.label,

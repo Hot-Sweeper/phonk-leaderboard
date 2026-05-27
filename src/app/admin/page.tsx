@@ -239,6 +239,15 @@ export default function AdminPage() {
   const [catalogImportTarget, setCatalogImportTarget] = useState<string | null>(null);
   const [catalogImportResult, setCatalogImportResult] = useState<{ status: "ok" | "error"; message: string } | null>(null);
 
+  // DB entry state
+  type DbEntryTrack = { id: string; name: string; albumName: string | null; releaseDate: string | null; spotifyId: string | null; spotifyUrl: string | null; spotifyPopularity: number; popularity: number; previewUrl: string | null; durationMs: number | null; explicit: boolean; featuredArtists: string[]; youtubeVideoId: string | null; youtubeViews: number; createdAt: string; updatedAt: string };
+  type DbEntryArtist = { id: string; name: string; spotifyId: string | null; genres: string[]; imageUrl: string | null; createdAt: string; updatedAt: string; _count: { tracks: number }; links: { platform: string; url: string; handle: string | null; followerCount: number; monthlyListeners: number; updatedAt: string }[]; tracks: DbEntryTrack[] };
+  type DbEntrySnapshot = { id: string; monthlyListeners: number; followerCount: number; youtubeSubscribers: number; tiktokFollowers: number; instagramFollowers: number; createdAt: string } | null;
+  type DbEntry = { artist: DbEntryArtist; snapshot: DbEntrySnapshot; rankSnapshot: { rank: number; date: string } | null } | null;
+  const [dbEntry, setDbEntry] = useState<DbEntry>(null);
+  const [dbEntryLoading, setDbEntryLoading] = useState(false);
+  const [dbEntryOpen, setDbEntryOpen] = useState(false);
+
   // Debug state
   const [debugChecks, setDebugChecks] = useState<{ name: string; status: "ok" | "warn" | "error"; message: string; detail?: string }[]>([]);
   const [debugLoading, setDebugLoading] = useState(false);
@@ -272,6 +281,8 @@ export default function AdminPage() {
   const [cancellingAll, setCancellingAll] = useState(false);
   const [liveStatsProgress, setLiveStatsProgress] = useState<LiveUpdateProgress | null>(null);
   const [liveSongProgress, setLiveSongProgress] = useState<LiveUpdateProgress | null>(null);
+  const [cronSecret, setCronSecret] = useState<string | null>(null);
+  const [cronUrlCopied, setCronUrlCopied] = useState(false);
 
   const isAdmin = session?.user?.role === "ADMIN";
 
@@ -295,6 +306,7 @@ export default function AdminPage() {
       setLastSongUpdate(s.lastSongUpdate ?? null);
       setScheduledUpdaters(s.updaters ?? []);
       setUpdateLogs(s.logs ?? []);
+      setCronSecret(s.cronSecret ?? null);
     }
     if (packsRes.ok) setPacks(await packsRes.json());
     if (labelsRes.ok) setAdminLabels(await labelsRes.json());
@@ -1313,6 +1325,60 @@ export default function AdminPage() {
               </div>
             </div>
 
+            {/* Cron Setup */}
+            <div className="mb-10">
+              <h2 className="text-lg font-black mb-3 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-orange-400" />
+                Cron Job Setup
+              </h2>
+              <div className="bg-[var(--secondary)] border border-[var(--muted)] rounded-2xl p-5 space-y-4">
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Point an external cron service (e.g.{" "}
+                  <a href="https://cron-job.org" target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] hover:underline">cron-job.org</a>
+                  ) to call this URL daily. It checks both the stats and song update intervals and only runs if they&apos;re due.
+                </p>
+                {cronSecret ? (
+                  <>
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] block mb-1.5">Cron URL</label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 bg-[var(--background)] border border-[var(--muted)] rounded-lg px-3 py-2 text-xs font-mono text-green-300 break-all">
+                          https://phonk.forum/api/cron/update?secret={cronSecret}
+                        </code>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(`https://phonk.forum/api/cron/update?secret=${cronSecret}`);
+                            setCronUrlCopied(true);
+                            setTimeout(() => setCronUrlCopied(false), 2000);
+                          }}
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-[var(--muted)] hover:text-white transition-all"
+                        >
+                          {cronUrlCopied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          {cronUrlCopied ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2">
+                        <div className="text-[var(--muted-foreground)] font-bold uppercase tracking-wider mb-0.5">Recommended schedule</div>
+                        <code className="text-orange-300">0 3 * * *</code>
+                        <div className="text-[var(--muted-foreground)] mt-0.5">Every day at 03:00 UTC</div>
+                      </div>
+                      <div className="rounded-xl border border-[var(--muted)] bg-[var(--background)]/30 px-3 py-2">
+                        <div className="text-[var(--muted-foreground)] font-bold uppercase tracking-wider mb-0.5">Method</div>
+                        <code className="text-orange-300">GET</code>
+                        <div className="text-[var(--muted-foreground)] mt-0.5">No request body needed</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-sm text-yellow-400 bg-yellow-950/20 border border-yellow-800/40 rounded-lg px-3 py-2">
+                    CRON_SECRET is not set in environment variables. Add it to .env and Railway to enable cron authentication.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Settings result */}
             {settingsResult && (
               <div className="bg-green-950/40 border border-green-800/40 rounded-2xl p-4 text-green-300 text-sm font-bold">
@@ -2219,6 +2285,26 @@ export default function AdminPage() {
                     </button>
                     <button
                       onClick={async () => {
+                        setDbEntryLoading(true);
+                        setDbEntryOpen(true);
+                        try {
+                          const res = await fetch(`/api/admin/db-entry?artistId=${catalogSelectedArtist.id}`);
+                          if (res.ok) setDbEntry(await res.json());
+                          else setDbEntry(null);
+                        } catch {
+                          setDbEntry(null);
+                        } finally {
+                          setDbEntryLoading(false);
+                        }
+                      }}
+                      disabled={dbEntryLoading}
+                      className="px-4 py-2 rounded-lg bg-[var(--secondary)] border border-[var(--muted)] text-white text-sm font-bold hover:border-blue-500 transition-all flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {dbEntryLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4 text-blue-400" />}
+                      {dbEntryLoading ? "Loading…" : "Full DB Entry"}
+                    </button>
+                    <button
+                      onClick={async () => {
                         if (!confirm(`Force-sync catalog for ${catalogSelectedArtist.name}? This fetches fresh data from Deezer + Spotify and can take 30–60s.`)) return;
                         setCatalogSyncing(true);
                         setCatalogSyncResult(null);
@@ -2265,6 +2351,124 @@ export default function AdminPage() {
               <div className="mb-4 rounded-xl border border-green-800/40 bg-green-950/20 px-4 py-3 text-sm text-green-400 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>{catalogSyncResult}</span>
+              </div>
+            )}
+
+            {/* DB Entry viewer */}
+            {dbEntryOpen && catalogSelectedArtist && (
+              <div className="mb-6 rounded-2xl border border-blue-800/40 bg-blue-950/10 overflow-hidden">
+                <button
+                  onClick={() => setDbEntryOpen(false)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-blue-950/20 transition-colors"
+                >
+                  <span className="text-sm font-bold text-blue-300 flex items-center gap-2">
+                    <Database className="w-4 h-4" />
+                    Full DB Entry — {catalogSelectedArtist.name}
+                  </span>
+                  <X className="w-4 h-4 text-[var(--muted-foreground)]" />
+                </button>
+
+                {dbEntryLoading && (
+                  <div className="flex items-center gap-3 py-8 justify-center text-[var(--muted-foreground)] border-t border-blue-800/20">
+                    <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+                    <span className="text-sm">Loading…</span>
+                  </div>
+                )}
+
+                {!dbEntryLoading && dbEntry && (
+                  <div className="border-t border-blue-800/20 divide-y divide-[var(--muted)]/20">
+                    {/* Artist core fields */}
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Artist</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                        {[
+                          ["ID", dbEntry.artist.id],
+                          ["Spotify ID", dbEntry.artist.spotifyId ?? "—"],
+                          ["Genres", dbEntry.artist.genres.join(", ") || "—"],
+                          ["Total tracks", dbEntry.artist._count.tracks],
+                          ["Created", new Date(dbEntry.artist.createdAt).toLocaleString()],
+                          ["Updated", new Date(dbEntry.artist.updatedAt).toLocaleString()],
+                        ].map(([k, v]) => (
+                          <div key={String(k)} className="bg-[var(--background)]/30 rounded-lg px-2.5 py-1.5">
+                            <div className="text-[var(--muted-foreground)] font-bold mb-0.5">{k}</div>
+                            <div className="text-white font-mono break-all">{String(v)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Platform links */}
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Platform Links ({dbEntry.artist.links.length})</p>
+                      <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/20 overflow-hidden">
+                        {dbEntry.artist.links.length === 0 && <p className="px-4 py-3 text-xs text-[var(--muted-foreground)]">No links</p>}
+                        {dbEntry.artist.links.map((link) => (
+                          <div key={link.platform} className="flex items-center gap-3 px-3 py-2 text-xs">
+                            <span className="w-28 shrink-0 font-bold text-[var(--muted-foreground)] uppercase tracking-wider">{link.platform}</span>
+                            <span className="flex-1 text-white font-mono truncate">{link.handle ?? link.url}</span>
+                            <span className="shrink-0 text-[var(--muted-foreground)]">{link.followerCount.toLocaleString()} followers</span>
+                            {link.monthlyListeners > 0 && <span className="shrink-0 text-[var(--muted-foreground)]">{link.monthlyListeners.toLocaleString()} ml</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Latest snapshot */}
+                    {dbEntry.snapshot && (
+                      <div className="px-4 py-3">
+                        <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">
+                          Latest Snapshot — {new Date(dbEntry.snapshot.createdAt).toLocaleString()}
+                        </p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                          {[
+                            ["Monthly listeners", dbEntry.snapshot.monthlyListeners.toLocaleString()],
+                            ["Spotify followers", dbEntry.snapshot.followerCount.toLocaleString()],
+                            ["YT subscribers", dbEntry.snapshot.youtubeSubscribers.toLocaleString()],
+                            ["TikTok followers", dbEntry.snapshot.tiktokFollowers.toLocaleString()],
+                            ["IG followers", dbEntry.snapshot.instagramFollowers.toLocaleString()],
+                          ].map(([k, v]) => (
+                            <div key={String(k)} className="bg-[var(--background)]/30 rounded-lg px-2.5 py-1.5">
+                              <div className="text-[var(--muted-foreground)] font-bold mb-0.5">{k}</div>
+                              <div className="text-white font-mono">{String(v)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {dbEntry.rankSnapshot && (
+                          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+                            Last rank: <span className="text-white font-bold">#{dbEntry.rankSnapshot.rank}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Top tracks */}
+                    <div className="px-4 py-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[var(--muted-foreground)] mb-2">Top Tracks (up to 20)</p>
+                      <div className="rounded-xl border border-[var(--muted)] bg-[var(--secondary)]/40 divide-y divide-[var(--muted)]/20 overflow-hidden max-h-80 overflow-y-auto">
+                        {dbEntry.artist.tracks.map((t, i) => (
+                          <div key={t.id} className="flex items-center gap-3 px-3 py-2 text-xs">
+                            <span className="w-5 shrink-0 text-[var(--muted-foreground)] tabular-nums text-right">{i + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white font-bold truncate">{t.name}{t.explicit && <span className="ml-1 text-[10px] text-[var(--muted-foreground)] border border-[var(--muted)] px-1 rounded">E</span>}</p>
+                              <p className="text-[var(--muted-foreground)] truncate">{t.albumName ?? "—"}{t.releaseDate ? ` · ${t.releaseDate.slice(0, 4)}` : ""}</p>
+                            </div>
+                            <span className="shrink-0 text-[var(--muted-foreground)] tabular-nums">Pop {t.popularity}</span>
+                            {t.youtubeViews > 0 && <span className="shrink-0 text-[var(--muted-foreground)] tabular-nums">{(t.youtubeViews / 1e6).toFixed(1)}M yt</span>}
+                            {t.spotifyId && (
+                              <a href={`https://open.spotify.com/track/${t.spotifyId}`} target="_blank" rel="noopener noreferrer" className="shrink-0 text-[var(--muted-foreground)] hover:text-white transition-colors">
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!dbEntryLoading && !dbEntry && (
+                  <p className="px-4 py-4 text-sm text-red-400 border-t border-blue-800/20">Failed to load DB entry.</p>
+                )}
               </div>
             )}
 
