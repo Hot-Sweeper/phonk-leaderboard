@@ -2,15 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import {
-  Sparkles,
-  Wand2,
-  Crown,
-  Zap,
-  Lock,
-  RefreshCcw,
-  Download,
-} from "lucide-react";
+import { Sparkles, Crown, Zap, Lock, Wand2, Download, RefreshCcw } from "lucide-react";
 
 type ModelId = "pulse-mini" | "nova-prime";
 
@@ -27,7 +19,7 @@ const MODELS: ModelDef[] = [
   {
     id: "pulse-mini",
     name: "Pulse Mini",
-    tagline: "Fast drafts, gritty phonk textures",
+    tagline: "Fast drafts · gritty phonk textures",
     tier: "Free",
     icon: Zap,
     resolutions: [512, 768, 1024],
@@ -35,7 +27,7 @@ const MODELS: ModelDef[] = [
   {
     id: "nova-prime",
     name: "Nova Prime",
-    tagline: "Studio-grade detail, up to 4K masters",
+    tagline: "Studio detail · up to 4K masters",
     tier: "Premium",
     icon: Crown,
     resolutions: [1024, 2048, 3072, 4096],
@@ -43,25 +35,24 @@ const MODELS: ModelDef[] = [
 ];
 
 const SAMPLE_IMAGE = "/coverart-ai/sample.png";
-
 type Status = "idle" | "generating" | "done";
 
 export default function CoverartAiPage() {
   const [prompt, setPrompt] = useState("");
   const [modelId, setModelId] = useState<ModelId>("pulse-mini");
-  const [resolution, setResolution] = useState<number>(1024);
+  const [resIndex, setResIndex] = useState(2);
   const [status, setStatus] = useState<Status>("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
   const model = useMemo(() => MODELS.find((m) => m.id === modelId)!, [modelId]);
+  const resolution = model.resolutions[Math.min(resIndex, model.resolutions.length - 1)];
 
   useEffect(() => {
-    if (!model.resolutions.includes(resolution)) {
-      const fallback = model.resolutions[model.resolutions.length - 1];
-      const id = window.setTimeout(() => setResolution(fallback), 0);
+    if (resIndex > model.resolutions.length - 1) {
+      const id = window.setTimeout(() => setResIndex(model.resolutions.length - 1), 0);
       return () => window.clearTimeout(id);
     }
-  }, [model, resolution]);
+  }, [model, resIndex]);
 
   const canGenerate = prompt.trim().length > 0 && status !== "generating";
 
@@ -72,276 +63,249 @@ export default function CoverartAiPage() {
     window.setTimeout(() => {
       setResultUrl(`${SAMPLE_IMAGE}?t=${Date.now()}`);
       setStatus("done");
-    }, 3800);
+    }, 3600);
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[var(--background)] px-4 py-10 text-[var(--foreground)] sm:px-8">
-      <BackgroundAurora />
+    <main className="relative isolate flex min-h-[calc(100vh-4rem)] w-full flex-col overflow-hidden bg-[var(--background)] px-5 pb-6 pt-5 text-[var(--foreground)]">
+      <MeshBackdrop />
 
-      <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-6">
-        <header className="flex flex-col gap-3">
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-[var(--muted)] bg-[var(--secondary)]/60 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--muted-foreground)] backdrop-blur">
-            <Sparkles className="h-3.5 w-3.5 text-[var(--accent)]" />
-            Coverart Workspace
+      {/* Hero title */}
+      <header className="relative z-10 mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.32em] text-white/60 backdrop-blur">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inset-0 animate-ping rounded-full bg-[var(--accent)] opacity-75" />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+            </span>
+            Engine · Online
           </div>
-          <h1 className="text-4xl font-black tracking-tight sm:text-5xl">Coverart AI</h1>
-          <p className="max-w-2xl text-sm leading-6 text-[var(--muted-foreground)]">
-            Describe the vibe, pick a model, and let the engine render a square cover.
-            Pulse Mini is free up to 1K. Nova Prime unlocks 4K masters.
-          </p>
-        </header>
-
-        <div className="grid gap-6">
-          <section className="relative">
-            <div className="pointer-events-none absolute -inset-6 -z-10 rounded-[3rem] bg-[radial-gradient(circle_at_30%_20%,var(--accent-glow),transparent_60%)] opacity-40 blur-3xl" />
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[var(--secondary)]/55 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-              <div className="pointer-events-none absolute inset-0 rounded-[2rem] border border-white/5" />
-              <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[var(--accent)]/30 blur-3xl" />
-
-              <div className="relative space-y-6">
-                <div className="space-y-2">
-                  <Label icon={Wand2}>Model</Label>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {MODELS.map((m) => {
-                      const selected = m.id === modelId;
-                      const Icon = m.icon;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => setModelId(m.id)}
-                          className={`group relative overflow-hidden rounded-2xl border p-4 text-left transition-all ${
-                            selected
-                              ? "border-[var(--accent)] bg-[var(--accent)]/10 shadow-[0_0_24px_var(--accent-glow)]"
-                              : "border-white/10 bg-white/[0.03] hover:border-white/25 hover:bg-white/[0.06]"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <span
-                                className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                                  selected
-                                    ? "bg-[var(--accent)] text-white"
-                                    : "bg-white/10 text-white/70"
-                                }`}
-                              >
-                                <Icon className="h-5 w-5" />
-                              </span>
-                              <div>
-                                <div className="text-sm font-black leading-tight">{m.name}</div>
-                                <div className="text-[11px] text-[var(--muted-foreground)]">
-                                  {m.tagline}
-                                </div>
-                              </div>
-                            </div>
-                            <TierBadge tier={m.tier} />
-                          </div>
-                          <div className="mt-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted-foreground)]">
-                            <span>Up to {m.resolutions[m.resolutions.length - 1]}px</span>
-                            <span className="h-px flex-1 bg-white/10" />
-                            <span>1:1</span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label icon={Sparkles}>Resolution · square</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {model.resolutions.map((r) => {
-                      const selected = r === resolution;
-                      return (
-                        <button
-                          key={r}
-                          type="button"
-                          onClick={() => setResolution(r)}
-                          className={`rounded-full border px-3.5 py-1.5 text-[11px] font-bold tabular-nums transition-all ${
-                            selected
-                              ? "border-[var(--accent)] bg-[var(--accent)]/15 text-white shadow-[0_0_12px_var(--accent-glow)]"
-                              : "border-white/10 bg-white/[0.04] text-[var(--muted-foreground)] hover:border-white/25 hover:text-white"
-                          }`}
-                        >
-                          {r} × {r}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label icon={Wand2}>Prompt</Label>
-                  <div className="relative">
-                    <textarea
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      placeholder="Describe the cover. e.g. lone samurai under neon rain, brazilian phonk poster, heavy grain, glowing red sigil"
-                      rows={5}
-                      className="w-full resize-none rounded-2xl border border-white/10 bg-[var(--background)]/60 px-4 py-3 text-sm text-white placeholder:text-[var(--muted-foreground)] outline-none transition-colors focus:border-[var(--accent)] focus:bg-[var(--background)]/80"
-                    />
-                    <div className="pointer-events-none absolute bottom-2 right-3 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted-foreground)]">
-                      {prompt.trim().length} chars
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={generate}
-                  disabled={!canGenerate}
-                  className="relative w-full overflow-hidden rounded-2xl bg-[var(--accent)] px-5 py-3.5 text-sm font-black uppercase tracking-[0.18em] text-white shadow-[0_18px_50px_var(--accent-glow)] transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="relative z-10 flex items-center justify-center gap-2">
-                    {status === "generating" ? (
-                      <>
-                        <RefreshCcw className="h-4 w-4 animate-spin" />
-                        Rendering
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-4 w-4" />
-                        Generate cover
-                      </>
-                    )}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="relative">
-            <div className="pointer-events-none absolute -inset-6 -z-10 rounded-[3rem] bg-[radial-gradient(circle_at_70%_80%,var(--accent-glow),transparent_60%)] opacity-30 blur-3xl" />
-            <div className="relative overflow-hidden rounded-[2rem] border border-white/10 bg-[var(--secondary)]/40 p-5 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <Label icon={Sparkles}>Output · {resolution}px</Label>
-                {status === "done" && resultUrl ? (
-                  <a
-                    href={resultUrl}
-                    download={`coverart-${model.id}-${resolution}.png`}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-white/70 hover:text-white"
-                  >
-                    <Download className="h-3 w-3" />
-                    Save
-                  </a>
-                ) : null}
-              </div>
-
-              <CoverCanvas status={status} resultUrl={resultUrl} model={model.name} />
-            </div>
-          </section>
+          <span className="text-[10px] font-black uppercase tracking-[0.32em] text-white/30">1 : 1</span>
         </div>
-      </div>
+        <h1 className="bg-gradient-to-r from-white via-white to-white/50 bg-clip-text text-2xl font-black leading-none tracking-tight text-transparent">
+          Coverart <span className="bg-gradient-to-r from-[var(--accent)] via-fuchsia-400 to-violet-300 bg-clip-text text-transparent">AI</span>
+        </h1>
+      </header>
 
-      <style jsx global>{`
-        @keyframes coverart-spin {
-          to {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes coverart-spin-reverse {
-          to {
-            transform: rotate(-360deg);
-          }
-        }
-        @keyframes coverart-pulse {
-          0%,
-          100% {
-            transform: scale(1);
-            opacity: 0.5;
-          }
-          50% {
-            transform: scale(1.6);
-            opacity: 0;
-          }
-        }
-        @keyframes coverart-scan {
-          0% {
-            transform: translateY(-30%);
-          }
-          100% {
-            transform: translateY(130%);
-          }
-        }
-        @keyframes coverart-aurora {
-          0% {
-            transform: rotate(0deg) scale(1.2);
-          }
-          100% {
-            transform: rotate(360deg) scale(1.2);
-          }
-        }
-        @keyframes coverart-reveal {
-          0% {
-            transform: translateX(-50%);
-            opacity: 0;
-          }
-          30% {
-            opacity: 1;
-          }
-          100% {
-            transform: translateX(400%);
-            opacity: 0;
-          }
-        }
-        @keyframes coverart-dot {
-          0%,
-          100% {
-            opacity: 0.25;
-            transform: translateY(0);
-          }
-          50% {
-            opacity: 1;
-            transform: translateY(-3px);
-          }
-        }
-        .animate-coverart-pulse {
-          animation: coverart-pulse 1.6s ease-in-out infinite;
-        }
-        .animate-coverart-spin {
-          animation: coverart-spin 4s linear infinite;
-        }
-        .animate-coverart-scan {
-          animation: coverart-scan 2.2s ease-in-out infinite;
-        }
-        .animate-coverart-aurora {
-          animation: coverart-aurora 8s linear infinite;
-        }
-        .animate-coverart-reveal {
-          animation: coverart-reveal 1.1s ease-out forwards;
-        }
-      `}</style>
+      {/* Hero preview */}
+      <section className="relative z-10">
+        <div className="pointer-events-none absolute -inset-6 -z-10 rounded-[3rem] bg-[conic-gradient(from_120deg_at_50%_50%,var(--accent)_0deg,transparent_90deg,#7c3aed_180deg,transparent_270deg,var(--accent)_360deg)] opacity-30 blur-3xl" />
+        <div className="mx-auto w-full">
+          <PreviewCanvas status={status} resultUrl={resultUrl} model={model.name} />
+        </div>
+      </section>
+
+      {/* Control console */}
+      <section className="relative z-10 mt-4 flex-1">
+        <div className="relative overflow-hidden rounded-[1.5rem] border border-white/10 bg-[var(--secondary)]/40 p-4 shadow-[0_24px_80px_-20px_rgba(0,0,0,0.7),0_0_40px_-10px_var(--accent-glow)] backdrop-blur-2xl">
+          <div className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full bg-[var(--accent)]/25 blur-3xl" />
+
+          <div className="relative flex flex-col gap-4">
+            <ModelSwitch
+              value={modelId}
+              onChange={(v) => {
+                setModelId(v);
+                const next = MODELS.find((m) => m.id === v)!;
+                if (resIndex > next.resolutions.length - 1) {
+                  setResIndex(next.resolutions.length - 1);
+                }
+              }}
+            />
+
+            <ResolutionControl
+              resolutions={model.resolutions}
+              index={resIndex}
+              onChange={setResIndex}
+            />
+
+            <div className="relative">
+              <label className="mb-1.5 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
+                <span className="flex items-center gap-1.5">
+                  <Wand2 className="h-3 w-3 text-[var(--accent)]" />
+                  Prompt
+                </span>
+                <span className="tabular-nums text-white/30">{prompt.trim().length} chars</span>
+              </label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="lone samurai under neon rain, brazilian phonk poster, heavy grain, glowing red sigil…"
+                rows={3}
+                className="w-full resize-none rounded-2xl border border-white/[0.07] bg-black/30 px-4 py-3 text-[13px] leading-6 text-white placeholder:text-white/30 outline-none transition-all focus:border-[var(--accent)]/70 focus:bg-black/50 focus:shadow-[0_0_0_4px_var(--accent-glow)]"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={generate}
+              disabled={!canGenerate}
+              className="group/btn relative overflow-hidden rounded-2xl px-5 py-3.5 text-sm font-black uppercase tracking-[0.24em] text-white shadow-[0_18px_60px_-10px_var(--accent-glow)] transition-all disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <span className="absolute inset-0 bg-gradient-to-r from-[var(--accent)] via-fuchsia-500 to-violet-500" />
+              <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-1000 group-hover/btn:translate-x-full" />
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                {status === "generating" ? (
+                  <>
+                    <RefreshCcw className="h-4 w-4 animate-spin" />
+                    Rendering · {resolution}px
+                  </>
+                ) : status === "done" ? (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Regenerate · {resolution}px
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    Generate · {resolution}px
+                  </>
+                )}
+              </span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <KeyframeStyles />
     </main>
   );
 }
 
-function Label({ icon: Icon, children }: { icon: typeof Sparkles; children: React.ReactNode }) {
+/* ─────────────────────────── Model segmented control ─────────────────────────── */
+
+function ModelSwitch({
+  value,
+  onChange,
+}: {
+  value: ModelId;
+  onChange: (v: ModelId) => void;
+}) {
+  const activeIdx = MODELS.findIndex((m) => m.id === value);
   return (
-    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.24em] text-[var(--muted-foreground)]">
-      <Icon className="h-3 w-3 text-[var(--accent)]" />
-      {children}
+    <div>
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
+        <Sparkles className="h-3 w-3 text-[var(--accent)]" />
+        Model class
+      </div>
+      <div className="relative grid grid-cols-2 gap-1 rounded-2xl border border-white/[0.07] bg-black/30 p-1">
+        <div
+          className="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-xl bg-gradient-to-br from-[var(--accent)]/90 via-fuchsia-500/80 to-violet-500/80 shadow-[0_0_30px_var(--accent-glow)] transition-transform duration-500 ease-out"
+          style={{ transform: `translateX(${activeIdx * 100}%)` }}
+        />
+        {MODELS.map((m) => {
+          const Icon = m.icon;
+          const selected = m.id === value;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => onChange(m.id)}
+              className={`relative z-10 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                selected ? "text-white" : "text-white/55 hover:text-white/80"
+              }`}
+            >
+              <span
+                className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
+                  selected ? "bg-white/15" : "bg-white/[0.04]"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  <span className="truncate text-[12px] font-black leading-tight">{m.name}</span>
+                  {m.tier === "Premium" && (
+                    <Lock className="h-2.5 w-2.5 flex-shrink-0 text-amber-200/90" />
+                  )}
+                </span>
+                <span className="block truncate text-[9.5px] font-bold uppercase tracking-[0.18em] opacity-70">
+                  {m.tier} · {m.resolutions[m.resolutions.length - 1]}px
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function TierBadge({ tier }: { tier: "Free" | "Premium" }) {
-  if (tier === "Free") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/[0.04] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.22em] text-white/60">
-        Free
-      </span>
-    );
-  }
+/* ─────────────────────────── Resolution snap slider ─────────────────────────── */
+
+function ResolutionControl({
+  resolutions,
+  index,
+  onChange,
+}: {
+  resolutions: number[];
+  index: number;
+  onChange: (i: number) => void;
+}) {
+  const safeIdx = Math.min(index, resolutions.length - 1);
+  const pct = resolutions.length === 1 ? 100 : (safeIdx / (resolutions.length - 1)) * 100;
+
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/40 bg-amber-400/15 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.22em] text-amber-200">
-      <Lock className="h-2.5 w-2.5" />
-      Premium
-    </span>
+    <div>
+      <div className="mb-2 flex items-end justify-between">
+        <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.32em] text-white/40">
+          <Sparkles className="h-3 w-3 text-[var(--accent)]" />
+          Resolution
+        </div>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-2xl font-black tabular-nums leading-none text-white">
+            {resolutions[safeIdx]}
+          </span>
+          <span className="text-[10px] font-black uppercase tracking-[0.24em] text-white/40">px²</span>
+        </div>
+      </div>
+      <div className="relative h-9">
+        {/* Track */}
+        <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-white/[0.06]" />
+        {/* Filled */}
+        <div
+          className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-[var(--accent)] to-fuchsia-400 shadow-[0_0_12px_var(--accent-glow)]"
+          style={{ width: `${pct}%` }}
+        />
+        {/* Ticks */}
+        {resolutions.map((r, i) => {
+          const tickPct = resolutions.length === 1 ? 50 : (i / (resolutions.length - 1)) * 100;
+          const active = i <= safeIdx;
+          return (
+            <button
+              key={r}
+              type="button"
+              onClick={() => onChange(i)}
+              className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full p-1"
+              style={{ left: `${tickPct}%` }}
+              aria-label={`${r} pixels`}
+            >
+              <span
+                className={`block rounded-full transition-all ${
+                  i === safeIdx
+                    ? "h-4 w-4 bg-white shadow-[0_0_16px_var(--accent-glow)] ring-4 ring-[var(--accent)]/40"
+                    : active
+                      ? "h-2.5 w-2.5 bg-white/80"
+                      : "h-2 w-2 bg-white/25"
+                }`}
+              />
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1 flex justify-between text-[9px] font-black tabular-nums uppercase tracking-[0.2em] text-white/30">
+        {resolutions.map((r, i) => (
+          <span key={r} className={i === safeIdx ? "text-white/80" : ""}>
+            {r >= 1000 ? `${(r / 1000).toFixed(r % 1000 === 0 ? 0 : 1)}k` : r}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
-function CoverCanvas({
+/* ─────────────────────────── Preview canvas ─────────────────────────── */
+
+function PreviewCanvas({
   status,
   resultUrl,
   model,
@@ -350,73 +314,159 @@ function CoverCanvas({
   resultUrl: string | null;
   model: string;
 }) {
+  const phrases = useMemo(
+    () => [
+      "Sampling latent space",
+      "Compositing palette",
+      "Stabilizing detail",
+      "Painting highlights",
+      "Final mastering",
+    ],
+    [],
+  );
+  const [phraseIdx, setPhraseIdx] = useState(0);
+
+  useEffect(() => {
+    if (status !== "generating") return;
+    setPhraseIdx(0);
+    const id = window.setInterval(() => {
+      setPhraseIdx((i) => (i + 1) % phrases.length);
+    }, 700);
+    return () => window.clearInterval(id);
+  }, [status, phrases.length]);
+
   return (
-    <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+    <div className="relative aspect-square w-full max-w-[520px] overflow-hidden rounded-[1.5rem] border border-white/10 bg-black shadow-[inset_0_0_60px_rgba(0,0,0,0.8)]">
+      {/* Always-on subtle ambient swirl */}
+      <div className="pointer-events-none absolute inset-0 opacity-60">
+        <div className="absolute inset-0 animate-coverart-aurora bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent)_0deg,transparent_120deg,#7c3aed_240deg,transparent_360deg)] opacity-25 blur-3xl" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.6)_75%,rgba(0,0,0,0.95)_100%)]" />
+      </div>
+
+      {/* Idle state */}
       {status === "idle" && !resultUrl && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-[var(--accent)]">
-            <Sparkles className="h-6 w-6" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-8 text-center">
+          <div className="relative">
+            <div className="absolute inset-0 animate-coverart-pulse rounded-2xl bg-[var(--accent)]/40 blur-xl" />
+            <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] text-[var(--accent)]">
+              <Sparkles className="h-6 w-6" />
+            </div>
           </div>
-          <p className="text-sm font-bold text-white/70">Your cover will appear here</p>
-          <p className="max-w-xs text-[11px] text-[var(--muted-foreground)]">
-            Describe the mood, choose a model, then hit generate.
+          <p className="text-base font-black tracking-tight text-white">Ready to render</p>
+          <p className="max-w-[18rem] text-[11px] leading-5 text-white/40">
+            Drop a prompt, choose your model, and the canvas will come alive.
           </p>
         </div>
       )}
 
+      {/* Result image */}
       {resultUrl && (
         <Image
           src={resultUrl}
           alt="Generated cover art"
           fill
           sizes="(min-width: 1024px) 36vw, 100vw"
-          className={`object-cover transition-all duration-700 ${
-            status === "done"
-              ? "scale-100 opacity-100 blur-0"
-              : "scale-105 opacity-0 blur-md"
+          className={`object-cover transition-all duration-1000 ${
+            status === "done" ? "scale-100 opacity-100 blur-0" : "scale-110 opacity-0 blur-md"
           }`}
           priority
           unoptimized
         />
       )}
 
-      {status === "generating" && <GeneratingOverlay model={model} />}
+      {/* Generating overlay */}
+      {status === "generating" && <GeneratingOverlay model={model} phrase={phrases[phraseIdx]} />}
+
+      {/* Reveal sweep */}
       {status === "done" && <RevealSweep />}
+
+      {/* Grid texture overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.08] mix-blend-screen"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
+
+      {/* Corner brackets */}
+      <Corner pos="top-3 left-3" />
+      <Corner pos="top-3 right-3" rotate="rotate-90" />
+      <Corner pos="bottom-3 right-3" rotate="rotate-180" />
+      <Corner pos="bottom-3 left-3" rotate="-rotate-90" />
+
+      {/* Status caption + download */}
+      <div className="absolute inset-x-3 bottom-3 flex items-center justify-between text-[10px] font-black uppercase tracking-[0.28em]">
+        <span className="text-white/50">
+          {status === "generating" ? "Rendering" : status === "done" ? "Ready" : "Standby"}
+        </span>
+        {status === "done" && resultUrl ? (
+          <a
+            href={resultUrl}
+            download="coverart.png"
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/40 px-2.5 py-1 text-white/80 backdrop-blur hover:text-white"
+          >
+            <Download className="h-3 w-3" />
+            PNG
+          </a>
+        ) : (
+          <span className="text-white/40">{model}</span>
+        )}
+      </div>
     </div>
   );
 }
 
-function GeneratingOverlay({ model }: { model: string }) {
+function Corner({ pos, rotate }: { pos: string; rotate?: string }) {
+  return (
+    <div
+      className={`pointer-events-none absolute ${pos} ${rotate ?? ""} h-5 w-5`}
+      aria-hidden
+    >
+      <span className="absolute left-0 top-0 h-px w-4 bg-[var(--accent)]/70" />
+      <span className="absolute left-0 top-0 h-4 w-px bg-[var(--accent)]/70" />
+    </div>
+  );
+}
+
+function GeneratingOverlay({ model, phrase }: { model: string; phrase: string }) {
   return (
     <div className="absolute inset-0 overflow-hidden">
-      <div className="absolute inset-0 animate-coverart-aurora bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent)_0deg,transparent_120deg,var(--accent)_240deg,transparent_360deg)] opacity-40 blur-3xl" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,0,0,0)_0%,rgba(0,0,0,0.55)_70%,rgba(0,0,0,0.85)_100%)]" />
+      {/* Boosted aurora */}
+      <div className="absolute inset-0 animate-coverart-aurora-fast bg-[conic-gradient(from_0deg_at_50%_50%,var(--accent),transparent_25%,#7c3aed,transparent_50%,var(--accent),transparent_75%,#7c3aed,transparent_100%)] opacity-60 blur-2xl" />
 
+      {/* Concentric rings */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <Ring size={210} duration={6} reverse={false} thickness={1.5} opacity={0.45} />
-        <Ring size={160} duration={4} reverse thickness={2} opacity={0.65} />
-        <Ring size={110} duration={3} reverse={false} thickness={2.5} opacity={0.9} dashed />
+        <Ring size={260} duration={9} reverse thickness={1} opacity={0.35} />
+        <Ring size={200} duration={6} reverse={false} thickness={1.5} opacity={0.5} dashed />
+        <Ring size={140} duration={4} reverse thickness={2} opacity={0.75} />
+        <Ring size={88} duration={2.5} reverse={false} thickness={2.5} opacity={1} />
       </div>
 
+      {/* Core orb */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_0_60px_var(--accent-glow)]">
+        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-[var(--accent)] via-fuchsia-500 to-violet-500 text-white shadow-[0_0_80px_var(--accent-glow)]">
           <div className="absolute inset-0 animate-coverart-pulse rounded-full bg-[var(--accent)] opacity-60" />
           <Sparkles className="relative h-6 w-6 animate-coverart-spin" />
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-full">
-        <div className="absolute inset-x-0 h-24 animate-coverart-scan bg-gradient-to-b from-transparent via-white/15 to-transparent" />
+      {/* Scan line */}
+      <div className="absolute inset-x-0 top-0 h-full">
+        <div className="absolute inset-x-0 h-32 animate-coverart-scan bg-gradient-to-b from-transparent via-white/15 to-transparent" />
       </div>
 
-      <div className="absolute inset-x-0 bottom-5 flex flex-col items-center gap-1.5">
-        <div className="text-[10px] font-black uppercase tracking-[0.32em] text-white/80">
-          {model} · rendering
+      {/* Phrase ticker */}
+      <div className="absolute inset-x-0 top-[58%] flex flex-col items-center gap-1.5 px-6 text-center">
+        <div
+          key={phrase}
+          className="animate-coverart-fade text-[11px] font-black uppercase tracking-[0.32em] text-white"
+        >
+          {phrase}
         </div>
-        <div className="flex items-center gap-1">
-          <Dot delay="0s" />
-          <Dot delay="0.18s" />
-          <Dot delay="0.36s" />
+        <div className="text-[9px] font-black uppercase tracking-[0.4em] text-white/40">
+          {model}
         </div>
       </div>
     </div>
@@ -448,19 +498,7 @@ function Ring({
         borderStyle: dashed ? "dashed" : "solid",
         opacity,
         animation: `${reverse ? "coverart-spin-reverse" : "coverart-spin"} ${duration}s linear infinite`,
-        boxShadow: `0 0 40px var(--accent-glow)`,
-      }}
-    />
-  );
-}
-
-function Dot({ delay }: { delay: string }) {
-  return (
-    <span
-      className="h-1.5 w-1.5 rounded-full bg-white/80"
-      style={{
-        animation: "coverart-dot 1.2s ease-in-out infinite",
-        animationDelay: delay,
+        boxShadow: `0 0 30px var(--accent-glow)`,
       }}
     />
   );
@@ -469,17 +507,89 @@ function Dot({ delay }: { delay: string }) {
 function RevealSweep() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute inset-y-0 left-0 w-1/3 animate-coverart-reveal bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+      <div className="absolute inset-y-0 -left-1/3 w-1/2 animate-coverart-reveal bg-gradient-to-r from-transparent via-white/30 to-transparent blur-md" />
     </div>
   );
 }
 
-function BackgroundAurora() {
+/* ─────────────────────────── Background ─────────────────────────── */
+
+function MeshBackdrop() {
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 -z-0 overflow-hidden">
-      <div className="absolute -left-32 top-10 h-[36rem] w-[36rem] rounded-full bg-[var(--accent)]/15 blur-[140px]" />
-      <div className="absolute -right-32 bottom-10 h-[30rem] w-[30rem] rounded-full bg-fuchsia-500/10 blur-[140px]" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_50%)]" />
+    <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+      <div className="absolute -left-40 top-0 h-[40rem] w-[40rem] rounded-full bg-[var(--accent)]/20 blur-[160px]" />
+      <div className="absolute -right-40 top-1/3 h-[36rem] w-[36rem] rounded-full bg-violet-500/15 blur-[160px]" />
+      <div className="absolute bottom-0 left-1/3 h-[24rem] w-[24rem] rounded-full bg-fuchsia-500/10 blur-[140px]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(255,255,255,0.06),transparent_60%)]" />
+      <div
+        className="absolute inset-0 opacity-[0.025]"
+        style={{
+          backgroundImage:
+            "radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px)",
+          backgroundSize: "3px 3px",
+        }}
+      />
     </div>
+  );
+}
+
+/* ─────────────────────────── Keyframes ─────────────────────────── */
+
+function KeyframeStyles() {
+  return (
+    <style jsx global>{`
+      @keyframes coverart-spin {
+        to { transform: rotate(360deg); }
+      }
+      @keyframes coverart-spin-reverse {
+        to { transform: rotate(-360deg); }
+      }
+      @keyframes coverart-pulse {
+        0%, 100% { transform: scale(1); opacity: 0.55; }
+        50% { transform: scale(1.7); opacity: 0; }
+      }
+      @keyframes coverart-scan {
+        0% { transform: translateY(-40%); }
+        100% { transform: translateY(140%); }
+      }
+      @keyframes coverart-aurora {
+        to { transform: rotate(360deg) scale(1.3); }
+      }
+      @keyframes coverart-aurora-fast {
+        to { transform: rotate(360deg) scale(1.4); }
+      }
+      @keyframes coverart-reveal {
+        0% { transform: translateX(-30%); opacity: 0; }
+        25% { opacity: 1; }
+        100% { transform: translateX(400%); opacity: 0; }
+      }
+      @keyframes coverart-fade {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-coverart-aurora {
+        animation: coverart-aurora 14s linear infinite;
+        transform-origin: 50% 50%;
+      }
+      .animate-coverart-aurora-fast {
+        animation: coverart-aurora-fast 6s linear infinite;
+        transform-origin: 50% 50%;
+      }
+      .animate-coverart-pulse {
+        animation: coverart-pulse 1.8s ease-in-out infinite;
+      }
+      .animate-coverart-spin {
+        animation: coverart-spin 5s linear infinite;
+      }
+      .animate-coverart-scan {
+        animation: coverart-scan 2.4s ease-in-out infinite;
+      }
+      .animate-coverart-reveal {
+        animation: coverart-reveal 1.2s ease-out forwards;
+      }
+      .animate-coverart-fade {
+        animation: coverart-fade 0.35s ease-out;
+      }
+    `}</style>
   );
 }
