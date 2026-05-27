@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import { useDetailPanel } from "@/lib/detail-panel";
 import { Skeleton } from "@/components/Skeleton";
@@ -18,6 +18,8 @@ import {
   Pause,
   Trophy,
   CalendarDays,
+  SlidersHorizontal,
+  ChevronDown,
 } from "lucide-react";
 
 type Contributor = { id: string; name: string; imageUrl: string | null };
@@ -97,6 +99,16 @@ function formatTrendDelta(delta: number) {
   if (delta === 0) return "0";
   const sign = delta > 0 ? "+" : "-";
   return `${sign}${formatPopularity(Math.abs(delta))}`;
+}
+
+/** Client-side debug score: popularity × exponential decay, no preview bonus */
+function computeDebugScore(popularity: number, releaseDate: string | null, halfLifeDays: number, floorPct: number): number {
+  const floor = floorPct / 100;
+  if (!releaseDate) return Math.round(popularity * Math.max(floor, 0.5));
+  const ageInDays = (Date.now() - Date.parse(releaseDate)) / 86_400_000;
+  if (ageInDays < 0) return popularity;
+  const decay = Math.max(floor, Math.pow(0.5, ageInDays / halfLifeDays));
+  return Math.round(popularity * decay);
 }
 
 function formatTrendPercent(percent: number) {
@@ -693,6 +705,19 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
     }
   }
 
+  // ── Debug scoring panel ──────────────────────────────────────────────────
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [halfLife, setHalfLife] = useState(365);
+  const [floorPct, setFloorPct] = useState(10);
+
+  const debugTracks = useMemo(() => {
+    if (!debugOpen) return tracks;
+    return [...tracks]
+      .map((t) => ({ ...t, audienceScore: computeDebugScore(t.popularity, t.releaseDate ?? null, halfLife, floorPct) }))
+      .sort((a, b) => (b.audienceScore ?? 0) - (a.audienceScore ?? 0))
+      .map((t, i) => ({ ...t, rank: i + 1 }));
+  }, [debugOpen, tracks, halfLife, floorPct]);
+
   const loadMoreRef = useRef(() => {});
 
   function loadMore() {
@@ -700,14 +725,17 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
   }
   loadMoreRef.current = loadMore;
 
-  const showPodium = !debouncedSearch && tracks.length >= 3;
-  const podiumTracks = showPodium ? tracks.slice(0, 3) : [];
-  const tableTracks = showPodium ? tracks.slice(3) : tracks;
-  const hasTrendData = tracks.some((t) => t.hasTrendData);
-  const maxTrendMetric = tracks.reduce((max, t) => {
+  const activeTracks = debugOpen ? debugTracks : tracks;
+  const showPodium = !debouncedSearch && activeTracks.length >= 3;
+  const podiumTracks = showPodium ? activeTracks.slice(0, 3) : [];
+  const tableTracks = showPodium ? activeTracks.slice(3) : activeTracks;
+  const hasTrendData = activeTracks.some((t) => t.hasTrendData);
+  const maxTrendMetric = activeTracks.reduce((max, t) => {
     const legalMetric = mode === "popularity" ? (t.audienceScore ?? t.metricValue) : t.metricValue;
     return Math.max(max, Math.abs(rankingModel === "legal" ? legalMetric : (valueMode === "relative" ? t.trendPercent : t.metricValue)));
   }, 0);
+
+  const isPopularityLegal = rankingModel === "legal" && (mode === "popularity" || mode === "spotify");
 
   if (loadingPodium) return <SongsSkeleton />;
 
@@ -721,6 +749,63 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
           <PodiumTrackCard track={podiumTracks[1]} rank={2} isPlaying={playingTrackId === podiumTracks[1].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
           <PodiumTrackCard track={podiumTracks[0]} rank={1} isPlaying={playingTrackId === podiumTracks[0].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
           <PodiumTrackCard track={podiumTracks[2]} rank={3} isPlaying={playingTrackId === podiumTracks[2].id} onTogglePreview={togglePreview} showOriginalVersion={collapseVersions} mode={mode} valueMode={valueMode} onOpenSong={(track) => openSong(track.id, track)} onOpenDock={openDockSong} onOpenArtist={openArtist} rankingModel={rankingModel} />
+        </div>
+      )}
+
+      {/* Debug scoring panel */}
+      {isPopularityLegal && (
+        <div className="mb-4 rounded-xl border border-yellow-500/30 bg-yellow-500/5 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setDebugOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-[11px] font-mono font-bold text-yellow-400/80 hover:text-yellow-300 transition-colors"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            DEBUG · Audience Score Formula
+            <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${debugOpen ? "rotate-180" : ""}`} />
+          </button>
+          {debugOpen && (
+            <div className="px-4 pb-4 space-y-4 border-t border-yellow-500/20">
+              <p className="mt-3 text-[10px] font-mono text-yellow-300/60">
+                score = popularity × max(floor, 0.5 ^ (age / halfLife))
+              </p>
+              {/* Half-life */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[10px] font-mono text-yellow-400/70">
+                  <span>Half-life (days the score halves)</span>
+                  <span className="text-yellow-300 font-bold">{halfLife}d</span>
+                </div>
+                <input
+                  type="range" min={30} max={1095} step={5}
+                  value={halfLife}
+                  onChange={(e) => setHalfLife(Number(e.target.value))}
+                  className="w-full accent-yellow-400 h-1.5"
+                />
+                <div className="flex justify-between text-[9px] text-yellow-400/40 font-mono">
+                  <span>30d (very aggressive)</span><span>1095d (3yr, nearly flat)</span>
+                </div>
+              </div>
+              {/* Floor */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[10px] font-mono text-yellow-400/70">
+                  <span>Floor (min multiplier for old songs)</span>
+                  <span className="text-yellow-300 font-bold">{floorPct}%</span>
+                </div>
+                <input
+                  type="range" min={0} max={40} step={1}
+                  value={floorPct}
+                  onChange={(e) => setFloorPct(Number(e.target.value))}
+                  className="w-full accent-yellow-400 h-1.5"
+                />
+                <div className="flex justify-between text-[9px] text-yellow-400/40 font-mono">
+                  <span>0% (decay to zero)</span><span>40% (classics keep 40% weight)</span>
+                </div>
+              </div>
+              <p className="text-[10px] font-mono text-yellow-400/50">
+                List re-sorts live · server formula unchanged until you ship new values
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -866,7 +951,10 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                   )}
                   {/* DEBUG: popularity scores */}
                   <span className="text-[9px] font-mono text-yellow-400/70 tabular-nums leading-none mt-0.5">
-                    sp:{track.popularity} as:{track.audienceScore ?? "–"}
+                    sp:{track.popularity}{" "}
+                    {debugOpen
+                      ? <>dbg:<span className="text-yellow-300">{track.audienceScore ?? "–"}</span></>
+                      : <>as:{track.audienceScore ?? "–"}</>}
                   </span>
                 </div>
 
