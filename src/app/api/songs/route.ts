@@ -288,6 +288,7 @@ export async function GET(req: Request) {
   const legalHypePopularityMode = rankingModel === "legal" && mode === "hype-pop";
   const legalPopularityLikeMode = legalPopularityMode || legalHypePopularityMode;
   const legalHypeCandidateCutoff = new Date(Date.now() - (TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS * 24 * 60 * 60 * 1000));
+  const hypeTrendReleaseCutoff = new Date(Date.now() - (365 * 24 * 60 * 60 * 1000)).toISOString().slice(0, 10);
   const canUseFastCollapsedTrendPath =
     rankingModel !== "legal"
     &&
@@ -888,7 +889,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v5-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const rankedCacheKey = `v6-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -943,9 +944,17 @@ export async function GET(req: Request) {
           }));
         })()
       : await prisma.track.findMany({
-          where: rankingModel === "legal" && !legalPopularityLikeMode && mode !== "hype-trend"
-            ? { createdAt: { gte: legalHypeCandidateCutoff } }
-            : undefined,
+          where: mode === "hype-trend"
+            ? {
+                OR: [
+                  { releaseDate: { gte: hypeTrendReleaseCutoff } },
+                  { spotifyPopularity: { gte: 50 } },
+                  { popularity: { gte: 50 } },
+                ],
+              }
+            : rankingModel === "legal" && !legalPopularityLikeMode
+              ? { createdAt: { gte: legalHypeCandidateCutoff } }
+              : undefined,
           orderBy: { popularity: "desc" },
           include: {
             artist: {
