@@ -328,11 +328,14 @@ function PreviewCanvas({
 
   useEffect(() => {
     if (status !== "generating") return;
-    setPhraseIdx(0);
+    const reset = window.setTimeout(() => setPhraseIdx(0), 0);
     const id = window.setInterval(() => {
       setPhraseIdx((i) => (i + 1) % phrases.length);
     }, 700);
-    return () => window.clearInterval(id);
+    return () => {
+      window.clearTimeout(reset);
+      window.clearInterval(id);
+    };
   }, [status, phrases.length]);
 
   return (
