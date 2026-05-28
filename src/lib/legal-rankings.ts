@@ -299,7 +299,8 @@ export function getHypeLeaderboardPopularityScore(
 
 export function getHypeLeaderboardHypeScore(
   track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity" | "releaseDate">,
-  trendPercent: number
+  trendPercent: number,
+  period: "day" | "week" | "month" = "week"
 ) {
   const baseScore = getHypeLeaderboardPopularityScore(track);
   const ageInDays = getAgeInDays(track.releaseDate);
@@ -309,6 +310,25 @@ export function getHypeLeaderboardHypeScore(
   }
 
   const ageMultiplier = (() => {
+    if (period === "day") {
+      if (ageInDays <= 2) return 1.4;
+      if (ageInDays <= 5) return 1.05;
+      if (ageInDays <= 10) return 0.62;
+      if (ageInDays <= 21) return 0.28;
+      if (ageInDays <= 45) return 0.08;
+      return 0;
+    }
+
+    if (period === "month") {
+      if (ageInDays <= 7) return 1.1;
+      if (ageInDays <= 14) return 1.02;
+      if (ageInDays <= 30) return 0.92;
+      if (ageInDays <= 60) return 0.65;
+      if (ageInDays <= 90) return 0.35;
+      if (ageInDays <= 180) return 0.1;
+      return 0;
+    }
+
     if (ageInDays <= 7) return 1.2;
     if (ageInDays <= 14) return 1.05;
     if (ageInDays <= 30) return 0.78;
@@ -321,6 +341,21 @@ export function getHypeLeaderboardHypeScore(
   })();
 
   const freshnessBonus = (() => {
+    if (period === "day") {
+      if (ageInDays <= 2) return 32;
+      if (ageInDays <= 5) return 24;
+      if (ageInDays <= 10) return 10;
+      return 0;
+    }
+
+    if (period === "month") {
+      if (ageInDays <= 7) return 18;
+      if (ageInDays <= 14) return 16;
+      if (ageInDays <= 30) return 14;
+      if (ageInDays <= 60) return 8;
+      return 0;
+    }
+
     if (ageInDays <= 7) return 24;
     if (ageInDays <= 14) return 18;
     if (ageInDays <= 30) return 12;
@@ -330,6 +365,19 @@ export function getHypeLeaderboardHypeScore(
   })();
 
   const velocityMultiplier = (() => {
+    if (period === "day") {
+      if (ageInDays <= 10) return 1.25;
+      if (ageInDays <= 21) return 0.5;
+      return 0;
+    }
+
+    if (period === "month") {
+      if (ageInDays <= 30) return 0.85;
+      if (ageInDays <= 90) return 0.55;
+      if (ageInDays <= 180) return 0.2;
+      return 0;
+    }
+
     if (ageInDays <= 30) return 1;
     if (ageInDays <= 60) return 0.7;
     if (ageInDays <= 90) return 0.35;

@@ -18,7 +18,6 @@ import {
   ChevronRight,
   PlusCircle,
   Sparkles,
-  Flame,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -43,8 +42,8 @@ export default function Sidebar() {
     path.startsWith("/rankings") ||
     path === "/leaderboard" ||
     path === "/bubbles" ||
-    path === "/songs";
-  const isHype = false;
+    path === "/songs" ||
+    path.startsWith("/hype");
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
   const isCoverartAi = path.startsWith("/coverart-ai");
@@ -97,12 +96,6 @@ export default function Sidebar() {
       icon: Trophy,
       label: "Rankings",
       active: isRankings,
-    },
-    {
-      href: "/rankings?entity=songs&mode=hype-trend&model=legal",
-      icon: Flame,
-      label: "Hype",
-      active: isHype,
     },
     {
       href: "/samples",

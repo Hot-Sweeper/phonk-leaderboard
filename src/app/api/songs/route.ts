@@ -282,7 +282,10 @@ export async function GET(req: Request) {
   const rankingModel: "legal" | "standard" = "legal";
   const collapseVersions = searchParams.get("collapseVersions") !== "false";
   const mode = getLeaderboardMode(searchParams.get("mode"));
-  const hypeLeaderboardPeriod: keyof typeof TREND_PERIODS = searchParams.get("period") === "month" ? "month" : "week";
+  const rawHypeLeaderboardPeriod = searchParams.get("period");
+  const hypeLeaderboardPeriod: keyof typeof TREND_PERIODS = rawHypeLeaderboardPeriod === "day" || rawHypeLeaderboardPeriod === "month"
+    ? rawHypeLeaderboardPeriod
+    : "week";
   const sortOrder = getTrendSortOrder(searchParams.get("sort"));
   const valueMode = getTrendValueMode(searchParams.get("valueMode"));
   const legalPopularityMode = rankingModel === "legal" && (mode === "popularity" || mode === "spotify");
@@ -890,7 +893,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v8-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const rankedCacheKey = `v9-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -1056,7 +1059,7 @@ export async function GET(req: Request) {
             : 0;
           const audienceScore = getTrackAudienceScore(track);
           const hypeLeaderboardScore = mode === "hype-trend"
-            ? getHypeLeaderboardHypeScore({ ...track, releaseDate: scoringReleaseDate }, trendPercent)
+            ? getHypeLeaderboardHypeScore({ ...track, releaseDate: scoringReleaseDate }, trendPercent, hypeLeaderboardPeriod)
             : 0;
           const emergingHypeScore = mode === "hype-trend" ? 0 : getEmergingTrackHypeScore({
             popularity: track.popularity,

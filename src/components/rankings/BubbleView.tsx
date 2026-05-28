@@ -34,7 +34,7 @@ function formatCount(n: number): string {
 }
 
 const PAGE_SIZE = 100;
-const SONG_BUBBLE_CACHE_VERSION = "v6";
+const SONG_BUBBLE_CACHE_VERSION = "v7";
 const ARTIST_BUBBLE_CACHE_VERSION = "v3";
 
 const ARTIST_METRICS = [
@@ -104,15 +104,24 @@ export default function BubbleView({ entity, metric, mode, period, artistMode = 
 
     if (entity === "songs") {
       const sMode = songMode || "popularity";
+      const apiMode = rankingModel === "legal"
+        ? sMode === "hype-pop" || sMode === "spotify" || sMode === "popularity"
+          ? "hype-pop"
+          : "hype-trend"
+        : sMode;
+      const apiPeriod = rankingModel === "legal" && (sMode === "day" || sMode === "week" || sMode === "month")
+        ? sMode
+        : undefined;
       const params = new URLSearchParams({
         search: q,
         skip: "0",
         take: "1",
-        mode: sMode,
+        mode: apiMode,
         collapseVersions: collapseVersions ? "true" : "false",
         sort: sortOrder,
         valueMode: mode === "relative" ? "relative" : "absolute",
       });
+      if (apiPeriod) params.set("period", apiPeriod);
       if (rankingModel === "legal") params.set("rankingModel", "legal");
       fetch(`/api/songs?${params.toString()}`)
         .then(r => r.json())
@@ -269,14 +278,23 @@ export default function BubbleView({ entity, metric, mode, period, artistMode = 
     } else {
       // Songs bubble mode
       const sMode = songMode || "popularity";
+      const apiMode = rankingModel === "legal"
+        ? sMode === "hype-pop" || sMode === "spotify" || sMode === "popularity"
+          ? "hype-pop"
+          : "hype-trend"
+        : sMode;
+      const apiPeriod = rankingModel === "legal" && (sMode === "day" || sMode === "week" || sMode === "month")
+        ? sMode
+        : undefined;
       const params = new URLSearchParams({
         skip: String(skip),
         take: String(PAGE_SIZE),
-        mode: sMode,
+        mode: apiMode,
         collapseVersions: collapseVersions ? "true" : "false",
         sort: sortOrder,
         valueMode: mode === "relative" ? "relative" : "absolute",
       });
+      if (apiPeriod) params.set("period", apiPeriod);
       if (rankingModel === "legal") params.set("rankingModel", "legal");
       const url = `/api/songs?${params.toString()}`;
       fetchJsonWithSessionCache<{ tracks?: Array<{ id: string; name: string; albumImageUrl: string | null; popularity: number; metricValue: number; trendPercent: number; hasTrendData: boolean; audienceScore?: number }>; totalCount?: number }>(
@@ -290,7 +308,7 @@ export default function BubbleView({ entity, metric, mode, period, artistMode = 
             name: t.name,
             imageUrl: t.albumImageUrl,
             value: rankingModel === "legal"
-              ? (sMode === "popularity" ? (t.audienceScore ?? t.metricValue) : t.metricValue)
+              ? (sMode === "hype-pop" || sMode === "spotify" || sMode === "popularity" ? (t.audienceScore ?? t.metricValue) : t.metricValue)
               : (sMode === "popularity" ? t.popularity : Math.abs(mode === "relative" ? t.trendPercent : t.metricValue)),
             changeValue: t.metricValue,
             changePercent: t.trendPercent,
@@ -316,7 +334,7 @@ export default function BubbleView({ entity, metric, mode, period, artistMode = 
     const h = canvas.clientHeight;
     const canvasArea = w * h;
 
-    const isCurrentMode = mode === "current" || (entity === "songs" && songMode === "popularity");
+    const isCurrentMode = mode === "current" || (entity === "songs" && (songMode === "popularity" || songMode === "spotify" || songMode === "hype-pop"));
     const isRelativeMode = mode === "relative";
     const sizeValues = items.map((a) => isCurrentMode ? a.value : Math.abs(isRelativeMode ? a.changePercent : a.changeValue));
     const maxVal = Math.max(0.01, ...sizeValues);
@@ -707,10 +725,10 @@ export default function BubbleView({ entity, metric, mode, period, artistMode = 
 
   const metricLabel = entity === "artists"
     ? (rankingModel === "legal" ? (artistMode === "hype" ? "hype" : "popularity") : (ARTIST_METRICS.find((m) => m.key === metric)?.label ?? metric).toLowerCase())
-    : songMode === "popularity"
-      ? (rankingModel === "legal" ? "popularity" : "popularity")
+    : songMode === "popularity" || songMode === "spotify" || songMode === "hype-pop"
+      ? (rankingModel === "legal" ? "Spotify chart" : "popularity")
       : rankingModel === "legal"
-        ? "hype"
+        ? `${songMode ?? "hype"} hype`
       : mode === "relative"
         ? `${songMode ?? "trend"} % change`
         : mode === "absolute"

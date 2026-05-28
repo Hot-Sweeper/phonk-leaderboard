@@ -24,9 +24,9 @@ import {
 
 type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
-type LeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "hype-trend" | "day" | "week" | "month";
+type LeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "day" | "week" | "month";
 type RankingModel = "standard" | "legal";
-const SONG_RANKINGS_CACHE_VERSION = "v13";
+const SONG_RANKINGS_CACHE_VERSION = "v14";
 
 type Track = {
   id: string;
@@ -119,7 +119,7 @@ function formatTrendPercent(percent: number) {
 const NEW_RELEASE_WINDOW_MS = 21 * 24 * 60 * 60 * 1000;
 
 function isLegalPopularityMode(mode: LeaderboardMode, rankingModel: RankingModel) {
-  return rankingModel === "legal" && (mode === "spotify" || mode === "popularity");
+  return rankingModel === "legal" && (mode === "hype-pop" || mode === "spotify" || mode === "popularity");
 }
 
 function usesPopularityPresentation(mode: LeaderboardMode, rankingModel: RankingModel) {
@@ -170,7 +170,11 @@ function getLegalHypeSubtext(track: Track) {
 
 function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    return isLegalPopularityMode(mode, rankingModel) ? "Popularity" : "Hype";
+    if (isLegalPopularityMode(mode, rankingModel)) return "Spotify";
+    if (mode === "day") return "24H Hype";
+    if (mode === "week") return "7D Hype";
+    if (mode === "month") return "30D Hype";
+    return "Hype";
   }
   switch (mode) {
     case "day": return valueMode === "relative" ? "24H %" : "24H Hype";
@@ -182,7 +186,7 @@ function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "re
 
 function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (isLegalPopularityMode(mode, rankingModel)) return "Ranked";
+    if (isLegalPopularityMode(mode, rankingModel)) return "Chart";
     if (track.isEmergingHype) return "Breakout";
     if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building";
     return "Trending";
@@ -195,7 +199,7 @@ function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute
 
 function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
-    if (isLegalPopularityMode(mode, rankingModel)) return "Internal blended order";
+    if (isLegalPopularityMode(mode, rankingModel)) return "Spotify only";
     if (track.isEmergingHype) return "Early breakout";
     if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building history";
     return "Internal momentum order";
@@ -477,7 +481,6 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
 
 interface SongListViewProps {
   mode: LeaderboardMode;
-  period?: string;
   search: string;
   collapseVersions: boolean;
   sortOrder?: "desc" | "asc" | "abs";
@@ -486,7 +489,7 @@ interface SongListViewProps {
   active?: boolean;
 }
 
-export default function SongListView({ mode, period, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "legal", active = true }: SongListViewProps) {
+export default function SongListView({ mode, search, collapseVersions, sortOrder = "desc", valueMode = "absolute", rankingModel = "legal", active = true }: SongListViewProps) {
   const { openArtist, openSong, openDockSong } = useDetailPanel();
   const [tracks, setTracks] = useState<Track[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -526,6 +529,14 @@ export default function SongListView({ mode, period, search, collapseVersions, s
 
   const fetchTracks = useCallback(async (skip: number, searchQuery: string, append: boolean, groupedVersions: boolean, trackMode: LeaderboardMode, trendSortOrder: "desc" | "asc" | "abs", trendValueMode: "absolute" | "relative") => {
     const requestId = ++requestSeqRef.current;
+    const apiMode = rankingModel === "legal"
+      ? trackMode === "hype-pop" || trackMode === "spotify" || trackMode === "popularity"
+        ? "hype-pop"
+        : "hype-trend"
+      : trackMode;
+    const apiPeriod = rankingModel === "legal" && (trackMode === "day" || trackMode === "week" || trackMode === "month")
+      ? trackMode
+      : undefined;
 
     if (append) {
       setLoadingMore(true);
@@ -534,8 +545,8 @@ export default function SongListView({ mode, period, search, collapseVersions, s
         if (searchQuery) params.set("search", searchQuery);
         if (rankingModel === "legal") params.set("rankingModel", "legal");
         params.set("collapseVersions", groupedVersions ? "true" : "false");
-        params.set("mode", trackMode);
-        if (period) params.set("period", period);
+        params.set("mode", apiMode);
+        if (apiPeriod) params.set("period", apiPeriod);
         params.set("sort", trendSortOrder);
         params.set("valueMode", trendValueMode);
         const qs = params.toString();
@@ -564,8 +575,8 @@ export default function SongListView({ mode, period, search, collapseVersions, s
       if (searchQuery) podiumParams.set("search", searchQuery);
       if (rankingModel === "legal") podiumParams.set("rankingModel", "legal");
       podiumParams.set("collapseVersions", groupedVersions ? "true" : "false");
-      podiumParams.set("mode", trackMode);
-      if (period) podiumParams.set("period", period);
+      podiumParams.set("mode", apiMode);
+      if (apiPeriod) podiumParams.set("period", apiPeriod);
       podiumParams.set("sort", trendSortOrder);
       podiumParams.set("valueMode", trendValueMode);
       const podiumQs = podiumParams.toString();
@@ -584,18 +595,18 @@ export default function SongListView({ mode, period, search, collapseVersions, s
 
       setLoadingPodium(false);
 
-      const listParams = new URLSearchParams({ skip: "0", take: "50" });
-      if (searchQuery) listParams.set("search", searchQuery);
-      if (rankingModel === "legal") listParams.set("rankingModel", "legal");
-      listParams.set("collapseVersions", groupedVersions ? "true" : "false");
-      listParams.set("mode", trackMode);
-      if (period) listParams.set("period", period);
-      listParams.set("sort", trendSortOrder);
-      listParams.set("valueMode", trendValueMode);
-      const listQs = listParams.toString();
+      const params = new URLSearchParams({ skip: "0", take: "50" });
+      if (searchQuery) params.set("search", searchQuery);
+      if (rankingModel === "legal") params.set("rankingModel", "legal");
+      params.set("collapseVersions", groupedVersions ? "true" : "false");
+      params.set("mode", apiMode);
+      if (apiPeriod) params.set("period", apiPeriod);
+      params.set("sort", trendSortOrder);
+      params.set("valueMode", trendValueMode);
+      const qs = params.toString();
       const data = await fetchJsonWithSessionCache<{ tracks: Track[]; totalCount: number }>(
-        `rank:songs:list:${SONG_RANKINGS_CACHE_VERSION}:${listQs}`,
-        `/api/songs?${listQs}`,
+        `rank:songs:list:${SONG_RANKINGS_CACHE_VERSION}:${qs}`,
+        `/api/songs?${qs}`,
         300_000
       ).catch(() => null);
       if (data && requestSeqRef.current === requestId) {
@@ -614,7 +625,7 @@ export default function SongListView({ mode, period, search, collapseVersions, s
   useEffect(() => {
     if (!active) return;
     fetchTracks(0, debouncedSearch, false, collapseVersions, mode, sortOrder, valueMode);
-  }, [active, collapseVersions, debouncedSearch, fetchTracks, mode, period, sortOrder, valueMode]);
+  }, [active, collapseVersions, debouncedSearch, fetchTracks, mode, sortOrder, valueMode]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 400);
@@ -739,7 +750,7 @@ export default function SongListView({ mode, period, search, collapseVersions, s
     return Math.max(max, Math.abs(rankingModel === "legal" ? legalMetric : (valueMode === "relative" ? t.trendPercent : t.metricValue)));
   }, 0);
 
-  const isPopularityLegal = rankingModel === "legal" && (mode === "popularity" || mode === "spotify");
+  const isPopularityLegal = isLegalPopularityMode(mode, rankingModel);
 
   if (loadingPodium) return <SongsSkeleton />;
 
@@ -817,7 +828,7 @@ export default function SongListView({ mode, period, search, collapseVersions, s
       {!usesPopularityPresentation(mode, rankingModel) && !hasTrendData && tracks.length > 0 && (
         <div className="mb-6 rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/50 px-4 py-3 text-sm text-[var(--muted-foreground)]">
           {rankingModel === "legal"
-            ? "Legal hype score needs at least two stored song snapshots across the selected period. It will fill in as updates keep running."
+            ? "Hype is currently using freshness and Spotify strength. Velocity bonuses will appear once song snapshots exist across this period."
             : "Hype rankings need at least two song snapshots across the selected period. The data will start filling in after song updates keep running."}
         </div>
       )}

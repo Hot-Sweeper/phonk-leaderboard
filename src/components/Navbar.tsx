@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send, Zap } from "lucide-react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -18,8 +18,7 @@ export default function Navbar() {
         : "text-[var(--muted-foreground)] hover:text-white"
     }`;
 
-  const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs";
-  const isHype = false;
+  const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs" || path.startsWith("/hype");
   const isModeration = path === "/moderation" || path === "/review" || path === "/import";
 
   return (
@@ -37,9 +36,6 @@ export default function Navbar() {
         <div className="hidden sm:flex lg:hidden items-center gap-1">
           <Link href="/rankings" className={linkClass("/rankings", isRankings)}>
             <Trophy className="w-4 h-4" /> Rankings
-          </Link>
-          <Link href="/rankings?entity=songs&mode=hype-trend&model=legal" className={linkClass("/rankings?entity=songs&mode=hype-trend", isHype)}>
-            <Zap className="w-4 h-4" /> Hype
           </Link>
           <Link href="/samples" className={linkClass("/samples")}>
             <Package className="w-4 h-4" /> Samples
