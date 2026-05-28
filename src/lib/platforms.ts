@@ -18,6 +18,25 @@ type SpotifyArtistData = {
   platformId: string | null;
 };
 
+const YOUTUBE_QUOTA_BLOCK_MS = 12 * 60 * 60 * 1000;
+let youtubeQuotaBlockedUntil = 0;
+let youtubeQuotaWarningLogged = false;
+
+function isYouTubeQuotaBlocked() {
+  return Date.now() < youtubeQuotaBlockedUntil;
+}
+
+function markYouTubeQuotaBlocked(status: number, text: string) {
+  if (status !== 403 && status !== 429) return;
+  if (!/quota|rateLimitExceeded|dailyLimitExceeded|too many/i.test(text)) return;
+
+  youtubeQuotaBlockedUntil = Date.now() + YOUTUBE_QUOTA_BLOCK_MS;
+  if (!youtubeQuotaWarningLogged) {
+    console.warn("[YouTube] Quota/rate limit reached; skipping further track-level YouTube lookups for this run.");
+    youtubeQuotaWarningLogged = true;
+  }
+}
+
 // ─── YouTube ───
 
 /** Extract a YouTube handle or channel ID from a URL */
@@ -158,9 +177,10 @@ export async function searchSpotifyArtists(
     type: "artist",
     limit: String(limit),
   });
-  const res = await fetchWithTimeout(
+  const res = await fetchSpotifyApi(
     `https://api.spotify.com/v1/search?${params}`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` } },
+    "artist search"
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -261,7 +281,7 @@ export async function searchYouTubeMusicVideoId(
   artistName: string
 ): Promise<string | null> {
   const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey || isYouTubeQuotaBlocked()) return null;
 
   try {
     const q = `${artistName} ${trackName} official music video`;
@@ -278,6 +298,7 @@ export async function searchYouTubeMusicVideoId(
     );
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      markYouTubeQuotaBlocked(res.status, text);
       console.error(`[YouTube] Music video search failed: ${res.status} ${text.substring(0, 200)}`);
       return null;
     }
@@ -308,7 +329,7 @@ export async function fetchYouTubeVideoViews(
 ): Promise<Map<string, number>> {
   const result = new Map<string, number>();
   const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey || videoIds.length === 0) return result;
+  if (!apiKey || videoIds.length === 0 || isYouTubeQuotaBlocked()) return result;
 
   try {
     const params = new URLSearchParams({
@@ -321,6 +342,7 @@ export async function fetchYouTubeVideoViews(
     );
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      markYouTubeQuotaBlocked(res.status, text);
       console.error(`[YouTube] Video stats fetch failed: ${res.status} ${text.substring(0, 200)}`);
       return result;
     }
@@ -342,6 +364,9 @@ let spotifyToken: string | null = null;
 let spotifyTokenExpiry = 0;
 let spotifyTokenFailedUntil = 0;
 const SPOTIFY_REQUEST_TIMEOUT_MS = 15_000;
+const SPOTIFY_MIN_REQUEST_GAP_MS = Number(process.env.SPOTIFY_MIN_REQUEST_GAP_MS ?? "1200");
+const SPOTIFY_MAX_RETRIES = Number(process.env.SPOTIFY_MAX_RETRIES ?? "1");
+let nextSpotifyRequestAt = 0;
 
 /**
  * Normalise Spotify's variable-precision release_date to YYYY-MM-DD.
@@ -369,6 +394,50 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForSpotifySlot() {
+  const now = Date.now();
+  const waitMs = Math.max(0, nextSpotifyRequestAt - now);
+  if (waitMs > 0) {
+    await wait(waitMs);
+  }
+  nextSpotifyRequestAt = Date.now() + SPOTIFY_MIN_REQUEST_GAP_MS;
+}
+
+function getSpotifyRetryAfterMs(res: Response, attempt: number) {
+  const retryAfter = res.headers.get("retry-after");
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : NaN;
+  const headerDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+    ? retryAfterSeconds * 1000
+    : 0;
+  const fallbackDelayMs = Math.min(60_000, 1500 * 2 ** attempt);
+
+  return Math.min(120_000, Math.max(headerDelayMs, fallbackDelayMs));
+}
+
+async function fetchSpotifyApi(
+  input: string,
+  init: RequestInit = {},
+  scope = "request"
+): Promise<Response> {
+  for (let attempt = 0; attempt <= SPOTIFY_MAX_RETRIES; attempt++) {
+    await waitForSpotifySlot();
+    const res = await fetchWithTimeout(input, init);
+    if (res.status !== 429 || attempt === SPOTIFY_MAX_RETRIES) {
+      return res;
+    }
+
+    const waitMs = getSpotifyRetryAfterMs(res, attempt);
+    console.warn(`[Spotify] Rate limited during ${scope}; retrying in ${Math.ceil(waitMs / 1000)}s.`);
+    await wait(waitMs);
+  }
+
+  return fetchWithTimeout(input, init);
 }
 
 function logSpotifyApiFailure(scope: string, status: number, text: string) {
@@ -495,9 +564,10 @@ export async function fetchSpotifyArtistDetails(spotifyId: string): Promise<{
   if (!token) return null;
 
   try {
-    const res = await fetchWithTimeout(
+    const res = await fetchSpotifyApi(
       `https://api.spotify.com/v1/artists/${spotifyId}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token}` } },
+      `artist details for ${spotifyId}`
     );
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -534,9 +604,10 @@ export async function fetchSpotifyTrackPopularityBatch(
     const chunk = spotifyIds.slice(i, i + 50);
     try {
       const params = new URLSearchParams({ ids: chunk.join(",") });
-      const res = await fetchWithTimeout(
+      const res = await fetchSpotifyApi(
         `https://api.spotify.com/v1/tracks?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
+        "track batch fetch"
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -584,9 +655,10 @@ export async function fetchSpotifyTopTracks(spotifyId: string): Promise<{
   }
 
   try {
-    const res = await fetchWithTimeout(
+    const res = await fetchSpotifyApi(
       `https://api.spotify.com/v1/artists/${spotifyId}/top-tracks?market=US`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token}` } },
+      `top-tracks for ${spotifyId}`
     );
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -627,9 +699,10 @@ async function fetchSpotifyArtistApi(
   if (!token) return null;
 
   try {
-    const res = await fetchWithTimeout(
+    const res = await fetchSpotifyApi(
       `https://api.spotify.com/v1/artists/${artistId}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      { headers: { Authorization: `Bearer ${token}` } },
+      `artist lookup for ${artistId}`
     );
     if (res.ok) {
       const data = await res.json();
@@ -760,7 +833,7 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
       `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single,compilation,appears_on&limit=50&market=US`;
 
     while (nextUrl && albumIds.length < 500) {
-      const albumRes = await fetchWithTimeout(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const albumRes = await fetchSpotifyApi(nextUrl, { headers: { Authorization: `Bearer ${token}` } }, `artist albums for ${spotifyId}`);
       if (!albumRes.ok) {
         const text = await albumRes.text().catch(() => "");
         logSpotifyApiFailure(`artist albums for ${spotifyId}`, albumRes.status, text);
@@ -784,9 +857,10 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
     // Fetch album details in batches of 20 (Spotify limit)
     for (let i = 0; i < albumIds.length; i += 20) {
       const batch = albumIds.slice(i, i + 20);
-      const res = await fetchWithTimeout(
+      const res = await fetchSpotifyApi(
         `https://api.spotify.com/v1/albums?ids=${batch.join(",")}&market=US`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
+        `album batch fetch for ${spotifyId}`
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -873,9 +947,10 @@ export async function batchFetchSpotifyTrackDates(
   for (let i = 0; i < spotifyIds.length; i += 50) {
     const batch = spotifyIds.slice(i, i + 50);
     try {
-      const res = await fetchWithTimeout(
+      const res = await fetchSpotifyApi(
         `https://api.spotify.com/v1/tracks?ids=${batch.join(",")}&market=US`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` } },
+        "track release-date batch fetch"
       );
       if (!res.ok) continue;
       const data = await res.json() as { tracks?: Array<{ id: string; album?: { release_date?: string } } | null> };
