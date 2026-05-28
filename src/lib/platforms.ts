@@ -366,7 +366,9 @@ let spotifyTokenFailedUntil = 0;
 const SPOTIFY_REQUEST_TIMEOUT_MS = 15_000;
 const SPOTIFY_MIN_REQUEST_GAP_MS = Number(process.env.SPOTIFY_MIN_REQUEST_GAP_MS ?? "1200");
 const SPOTIFY_MAX_RETRIES = Number(process.env.SPOTIFY_MAX_RETRIES ?? "1");
+const SPOTIFY_INLINE_RETRY_MAX_WAIT_MS = Number(process.env.SPOTIFY_INLINE_RETRY_MAX_WAIT_MS ?? "10000");
 let nextSpotifyRequestAt = 0;
+let spotifyRateLimitedUntil = 0;
 
 /**
  * Normalise Spotify's variable-precision release_date to YYYY-MM-DD.
@@ -425,6 +427,17 @@ async function fetchSpotifyApi(
   init: RequestInit = {},
   scope = "request"
 ): Promise<Response> {
+  const blockedMs = spotifyRateLimitedUntil - Date.now();
+  if (blockedMs > 0) {
+    return new Response(
+      `Spotify rate limited; retry after ${Math.ceil(blockedMs / 1000)}s`,
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.ceil(blockedMs / 1000)) },
+      }
+    );
+  }
+
   for (let attempt = 0; attempt <= SPOTIFY_MAX_RETRIES; attempt++) {
     await waitForSpotifySlot();
     const res = await fetchWithTimeout(input, init);
@@ -433,8 +446,15 @@ async function fetchSpotifyApi(
     }
 
     const waitMs = getSpotifyRetryAfterMs(res, attempt);
+    spotifyRateLimitedUntil = Math.max(spotifyRateLimitedUntil, Date.now() + waitMs);
+    if (waitMs > SPOTIFY_INLINE_RETRY_MAX_WAIT_MS) {
+      console.warn(`[Spotify] Rate limited during ${scope}; pausing Spotify requests for ${Math.ceil(waitMs / 1000)}s.`);
+      return res;
+    }
+
     console.warn(`[Spotify] Rate limited during ${scope}; retrying in ${Math.ceil(waitMs / 1000)}s.`);
     await wait(waitMs);
+    spotifyRateLimitedUntil = 0;
   }
 
   return fetchWithTimeout(input, init);
