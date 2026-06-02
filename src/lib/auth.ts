@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
+import { isSubscriptionEntitled } from "@/lib/entitlements";
 import { NextResponse } from "next/server";
 
 const IS_DEV = process.env.NODE_ENV === "development";
@@ -14,7 +15,16 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAILS ?? "")
 
 // Dev-only: fake admin session so local testing works without Google OAuth credentials
 const DEV_SESSION = {
-  user: { id: "dev-admin", name: "Dev Admin", email: "dev@local", role: "ADMIN" as const, image: null },
+  user: {
+    id: "dev-admin",
+    name: "Dev Admin",
+    email: "dev@local",
+    role: "ADMIN" as const,
+    image: null,
+    planSlug: "premium",
+    planName: "Premium",
+    subscriptionStatus: "active",
+  },
   expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
 };
 
@@ -59,6 +69,24 @@ const prod = IS_DEV ? null : NextAuth({
       }
 
       session.user.role = role;
+
+      const subscription = await prisma.userSubscription.findUnique({
+        where: { userId: user.id },
+        select: {
+          status: true,
+          currentPeriodEnd: true,
+          graceEndsAt: true,
+          plan: { select: { slug: true, name: true } },
+        },
+      });
+      const hasPaidAccess = isSubscriptionEntitled(
+        subscription?.status,
+        subscription?.currentPeriodEnd,
+        subscription?.graceEndsAt
+      );
+      session.user.planSlug = hasPaidAccess ? subscription?.plan?.slug ?? "free" : "free";
+      session.user.planName = hasPaidAccess ? subscription?.plan?.name ?? "Free" : "Free";
+      session.user.subscriptionStatus = subscription?.status ?? "free";
       return session;
     },
   },

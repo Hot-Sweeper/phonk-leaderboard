@@ -6,6 +6,14 @@ import { Sparkles, Crown, Zap, Lock, Download, RefreshCcw, ArrowUp, ChevronDown,
 
 type ModelId = "memphis-fast" | "memphis-2-pro";
 
+type EntitlementsPayload = {
+  features?: Record<string, { value?: unknown }>;
+};
+
+type GeneratePayload = {
+  resultUrl?: string;
+};
+
 type ModelDef = {
   id: ModelId;
   name: string;
@@ -34,7 +42,6 @@ const MODELS: ModelDef[] = [
   },
 ];
 
-const SAMPLE_IMAGE = "/coverart-ai/sample.png";
 type Status = "idle" | "generating" | "done";
 
 export default function CoverartAiPage() {
@@ -43,27 +50,80 @@ export default function CoverartAiPage() {
   const [resIndex, setResIndex] = useState(2);
   const [status, setStatus] = useState<Status>("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [maxResolution, setMaxResolution] = useState(1024);
 
   const model = useMemo(() => MODELS.find((m) => m.id === modelId)!, [modelId]);
-  const resolution = model.resolutions[Math.min(resIndex, model.resolutions.length - 1)];
+  const availableResolutions = useMemo(() => {
+    const filtered = model.resolutions.filter((value) => value <= maxResolution);
+    return filtered.length > 0 ? filtered : [model.resolutions[0]];
+  }, [maxResolution, model]);
+  const resolution = availableResolutions[Math.min(resIndex, availableResolutions.length - 1)];
 
   useEffect(() => {
-    if (resIndex > model.resolutions.length - 1) {
-      const id = window.setTimeout(() => setResIndex(model.resolutions.length - 1), 0);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/me/entitlements", { cache: "no-store" });
+        const payload = (await response.json().catch(() => ({}))) as EntitlementsPayload;
+        if (!response.ok || cancelled) return;
+
+        const limit = Number(payload.features?.coverart_max_resolution?.value);
+        if (Number.isFinite(limit) && limit > 0) {
+          setMaxResolution(limit);
+        }
+      } catch {
+        // Leave the default free-tier resolution in place if entitlements are unavailable.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (resIndex > availableResolutions.length - 1) {
+      const id = window.setTimeout(() => setResIndex(availableResolutions.length - 1), 0);
       return () => window.clearTimeout(id);
     }
-  }, [model, resIndex]);
+  }, [availableResolutions.length, resIndex]);
 
   const canGenerate = prompt.trim().length > 0 && status !== "generating";
 
-  function generate() {
+  async function generate() {
     if (!canGenerate) return;
     setStatus("generating");
     setResultUrl(null);
-    window.setTimeout(() => {
-      setResultUrl(`${SAMPLE_IMAGE}?t=${Date.now()}`);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/coverart-ai/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          modelId,
+          resolution,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as GeneratePayload & { error?: unknown };
+      if (!response.ok) {
+        throw new Error(apiErrorMessage(payload, "Failed to generate cover art."));
+      }
+      if (!payload.resultUrl) {
+        throw new Error("Cover art service returned no image URL.");
+      }
+
+      setResultUrl(payload.resultUrl);
       setStatus("done");
-    }, 3600);
+    } catch (error) {
+      setStatus("idle");
+      setErrorMessage(error instanceof Error ? error.message : "Failed to generate cover art.");
+    }
   }
 
   return (
@@ -128,7 +188,7 @@ export default function CoverartAiPage() {
                   }}
                 />
                 <ResolutionDropdown
-                  resolutions={model.resolutions}
+                  resolutions={availableResolutions}
                   index={resIndex}
                   onChange={setResIndex}
                 />
@@ -157,9 +217,15 @@ export default function CoverartAiPage() {
           <div className="mt-2 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/30">
             <span>Press Enter to generate</span>
             <span className="tabular-nums">
-              {model.name} · {resolution}px
+              {model.name} · {resolution}px · max {maxResolution}px
             </span>
           </div>
+
+          {errorMessage && (
+            <div className="mt-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-[11px] font-bold text-red-100/90">
+              {errorMessage}
+            </div>
+          )}
         </section>
       </div>
 
@@ -642,4 +708,12 @@ function KeyframeStyles() {
       }
     `}</style>
   );
+}
+
+function apiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback;
+  if ("error" in payload && typeof payload.error === "string" && payload.error.trim()) {
+    return payload.error;
+  }
+  return fallback;
 }

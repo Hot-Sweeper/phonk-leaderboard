@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { bypassesProductLimits, FEATURE_KEYS, getNumericFeatureLimit, isUnlimitedLimit } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
+import { getUtcMonthPeriod, incrementFeatureUsage } from "@/lib/usage";
 
 // Submit an artist request (any user) or removal request (mods/admins)
 export async function POST(req: Request) {
@@ -84,14 +86,44 @@ export async function POST(req: Request) {
     );
   }
 
-  const request = await prisma.artistRequest.create({
-    data: {
-      type: "ADD",
-      name: name.trim(),
-      links: links.trim(),
-      reason: reason?.trim() || null,
-      userId: session.user.id,
-    },
+  if (!bypassesProductLimits(session.user.role)) {
+    const limit = await getNumericFeatureLimit(session.user.id, FEATURE_KEYS.artistSubmissionsPerMonth, 5);
+    if (!isUnlimitedLimit(limit)) {
+      const { periodStart, periodEnd } = getUtcMonthPeriod();
+      const used = await prisma.artistRequest.count({
+        where: {
+          userId: session.user.id,
+          type: "ADD",
+          createdAt: { gte: periodStart, lt: periodEnd },
+        },
+      });
+      if (used >= limit) {
+        return NextResponse.json(
+          {
+            error: `Your current tier allows ${limit} artist submissions per month.`,
+            upgradeRequired: true,
+            featureKey: FEATURE_KEYS.artistSubmissionsPerMonth,
+            limit,
+            used,
+          },
+          { status: 403 }
+        );
+      }
+    }
+  }
+
+  const request = await prisma.$transaction(async (tx) => {
+    const createdRequest = await tx.artistRequest.create({
+      data: {
+        type: "ADD",
+        name: name.trim(),
+        links: links.trim(),
+        reason: reason?.trim() || null,
+        userId: session.user.id,
+      },
+    });
+    await incrementFeatureUsage(session.user.id, FEATURE_KEYS.artistSubmissionsPerMonth, 1, tx);
+    return createdRequest;
   });
 
   return NextResponse.json(request, { status: 201 });

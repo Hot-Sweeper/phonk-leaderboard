@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { FEATURE_KEYS, hasFeature } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 import { scrapePackUrls, validatePackUrl } from "@/lib/pack-scraper";
 
@@ -37,7 +38,12 @@ export async function GET() {
  */
 export async function POST(req: Request) {
   const session = await auth();
-  if (!session || session.user.role !== "ADMIN") {
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const isAdmin = session.user.role === "ADMIN";
+  if (!isAdmin && !(await hasFeature(session.user.id, FEATURE_KEYS.samplePackUploads))) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -45,7 +51,7 @@ export async function POST(req: Request) {
   const payhipUrl: string | undefined = body.payhipUrl?.trim() || undefined;
   const gumroadUrl: string | undefined = body.gumroadUrl?.trim() || undefined;
   const tags: string[] = Array.isArray(body.tags) ? body.tags : [];
-  const published: boolean = body.published !== false;
+  const published: boolean = isAdmin ? body.published !== false : false;
 
   if (!payhipUrl && !gumroadUrl) {
     return NextResponse.json({ error: "At least one URL (Payhip or Gumroad) is required" }, { status: 400 });

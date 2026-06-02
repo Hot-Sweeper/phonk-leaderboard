@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send } from "lucide-react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send, CreditCard, SlidersHorizontal } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
@@ -20,6 +20,7 @@ export default function Navbar() {
 
   const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs" || path.startsWith("/hype");
   const isModeration = path === "/moderation" || path === "/review" || path === "/import";
+  const isBilling = path.startsWith("/billing");
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--muted)] bg-[var(--background)]/80 backdrop-blur-md">
@@ -48,9 +49,19 @@ export default function Navbar() {
               <Shield className="w-4 h-4" /> {isPrivileged ? "Moderation" : "Requests"}
             </Link>
           )}
+          {session && (
+            <Link href="/billing" className={linkClass("/billing", isBilling)}>
+              <CreditCard className="w-4 h-4" /> Billing
+            </Link>
+          )}
           {session?.user?.role === "ADMIN" && (
             <Link href="/admin" className={linkClass("/admin")}>
               <Settings className="w-4 h-4" /> Admin
+            </Link>
+          )}
+          {session?.user?.role === "ADMIN" && (
+            <Link href="/admin/tiers" className={linkClass("/admin/tiers")}>
+              <SlidersHorizontal className="w-4 h-4" /> Tiers
             </Link>
           )}
         </div>
@@ -74,6 +85,11 @@ export default function Navbar() {
                 <span className="hidden md:block text-sm font-semibold">
                   {session.user.name}
                 </span>
+                {session.user.planName && (
+                  <span className="hidden lg:inline-flex rounded-full border border-[var(--muted)] px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-[var(--muted-foreground)]">
+                    {session.user.planName}
+                  </span>
+                )}
               </Link>
               <button
                 onClick={() => signOut()}

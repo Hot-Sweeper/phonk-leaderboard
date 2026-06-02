@@ -57,6 +57,9 @@ model User {
   samplePacks     SamplePack[]
   packClicks      PackClick[]
   packWatchlists  PackWatchlist[]
+  subscription    UserSubscription?
+  featureUsage    FeatureUsage[]
+  entitlementOverrides UserEntitlementOverride[]
   createdAt       DateTime         @default(now())
 }
 
@@ -64,6 +67,140 @@ enum Role {
   USER
   MODERATOR
   ADMIN
+}
+
+enum FeatureValueType {
+  BOOLEAN
+  NUMBER
+  STRING
+  JSON
+}
+
+model Plan {
+  id              String             @id @default(cuid())
+  slug            String             @unique
+  name            String
+  description     String?            @db.Text
+  rank            Int                @default(0)
+  active          Boolean            @default(true)
+  public          Boolean            @default(true)
+  paddleProductId String?
+  paddlePriceId   String?
+  features        PlanFeature[]
+  subscriptions   UserSubscription[]
+  overrides       UserEntitlementOverride[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([active, public, rank])
+}
+
+model Feature {
+  id           String           @id @default(cuid())
+  key          String           @unique
+  name         String
+  description  String?          @db.Text
+  category     String           @default("General")
+  valueType    FeatureValueType @default(BOOLEAN)
+  unit         String?
+  defaultValue Json?
+  active       Boolean          @default(true)
+  sortOrder    Int              @default(0)
+  planFeatures PlanFeature[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([active, category, sortOrder])
+}
+
+model PlanFeature {
+  id        String   @id @default(cuid())
+  planId    String
+  featureId String
+  value     Json
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature   Feature  @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([planId, featureId])
+  @@index([featureId])
+}
+
+model UserSubscription {
+  id                     String   @id @default(cuid())
+  userId                 String   @unique
+  planId                 String?
+  provider               String   @default("PADDLE")
+  providerCustomerId     String?  @unique
+  providerSubscriptionId String?  @unique
+  status                 String   @default("free")
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean  @default(false)
+  trialEndsAt            DateTime?
+  graceEndsAt            DateTime?
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   Plan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([provider, status])
+  @@index([planId])
+}
+
+model FeatureUsage {
+  id          String   @id @default(cuid())
+  userId      String
+  featureKey  String
+  periodStart DateTime
+  periodEnd   DateTime
+  used        Int      @default(0)
+  resetAt     DateTime
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, featureKey, periodStart])
+  @@index([featureKey, periodStart])
+  @@index([resetAt])
+}
+
+model UserEntitlementOverride {
+  id          String   @id @default(cuid())
+  userId      String
+  planId      String?
+  featureKey  String?
+  value       Json?
+  active      Boolean  @default(true)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  note        String?  @db.Text
+  createdById String?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan        Plan?    @relation(fields: [planId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, active])
+  @@index([featureKey])
+}
+
+model BillingWebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String    @default("PADDLE")
+  eventId     String
+  eventType   String
+  status      String    @default("PENDING")
+  payload     Json?
+  error       String?   @db.Text
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([provider, eventId])
+  @@index([provider, eventType])
+  @@index([status, createdAt])
 }
 
 enum Platform {

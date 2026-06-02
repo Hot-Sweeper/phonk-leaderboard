@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { bypassesProductLimits, FEATURE_KEYS, getNumericFeatureLimit, isUnlimitedLimit } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
 const WATCHLIST_CACHE_TTL = 30_000;
@@ -58,6 +59,35 @@ export async function POST(req: Request) {
   const { artistId } = await req.json();
   if (!artistId) {
     return NextResponse.json({ error: "artistId required" }, { status: 400 });
+  }
+
+  const existing = await prisma.watchlist.findUnique({
+    where: { userId_artistId: { userId: session.user.id, artistId } },
+  });
+  if (existing) {
+    return NextResponse.json(
+      { error: "Already on your watchlist." },
+      { status: 409 }
+    );
+  }
+
+  if (!bypassesProductLimits(session.user.role)) {
+    const limit = await getNumericFeatureLimit(session.user.id, FEATURE_KEYS.watchlistLimit, 50);
+    if (!isUnlimitedLimit(limit)) {
+      const used = await prisma.watchlist.count({ where: { userId: session.user.id } });
+      if (used >= limit) {
+        return NextResponse.json(
+          {
+            error: `Your current tier allows ${limit} watchlisted artists.`,
+            upgradeRequired: true,
+            featureKey: FEATURE_KEYS.watchlistLimit,
+            limit,
+            used,
+          },
+          { status: 403 }
+        );
+      }
+    }
   }
 
   try {

@@ -18,6 +18,8 @@ import {
   ChevronRight,
   PlusCircle,
   Sparkles,
+  CreditCard,
+  SlidersHorizontal,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -47,6 +49,7 @@ export default function Sidebar() {
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
   const isCoverartAi = path.startsWith("/coverart-ai");
+  const isBilling = path.startsWith("/billing");
 
   const refreshWatchlist = useCallback(async () => {
     if (!session) {
@@ -128,6 +131,17 @@ export default function Sidebar() {
       ]
     : [];
 
+  const accountItems = session
+    ? [
+        {
+          href: "/billing",
+          icon: CreditCard,
+          label: "Billing",
+          active: isBilling,
+        },
+      ]
+    : [];
+
   const adminItems =
     session?.user?.role === "ADMIN"
       ? [
@@ -137,10 +151,16 @@ export default function Sidebar() {
             label: "Admin",
             active: path === "/admin",
           },
+          {
+            href: "/admin/tiers",
+            icon: SlidersHorizontal,
+            label: "Tiers",
+            active: path.startsWith("/admin/tiers"),
+          },
         ]
       : [];
 
-  const allNav = [...navItems, ...modItems, ...adminItems];
+  const allNav = [...navItems, ...modItems, ...accountItems, ...adminItems];
 
   return (
     <aside className="hidden lg:flex flex-col w-full h-[calc(100vh-3.5rem)] sticky top-14 bg-[var(--secondary)]/50 border-r border-[var(--muted)]/50">
