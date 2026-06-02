@@ -10,9 +10,13 @@ type JobRouteContext = {
 type RemoteJobDetail = {
   status?: string;
   output_url?: string | null;
+  preview_url?: string | null;
+  download_url?: string | null;
   result?: {
     output_url?: string | null;
     output_path?: string | null;
+    preview_url?: string | null;
+    download_url?: string | null;
   } | null;
   error?: string | null;
   progress?: number | null;
@@ -41,8 +45,14 @@ export async function GET(_request: Request, context: JobRouteContext) {
   }
 
   const remoteOutputUrl = payload?.result?.output_url ?? payload?.output_url ?? null;
-  const resultUrl = remoteOutputUrl
-    ? `/api/coverart-ai/output?url=${encodeURIComponent(normalizeCoverartApiUrl(remoteOutputUrl))}`
+  const remotePreviewUrl = payload?.result?.preview_url ?? payload?.preview_url ?? remoteOutputUrl;
+  const remoteDownloadUrl = payload?.result?.download_url ?? payload?.download_url ?? remoteOutputUrl;
+
+  const previewUrl = remotePreviewUrl
+    ? `/api/coverart-ai/output?url=${encodeURIComponent(normalizeCoverartApiUrl(remotePreviewUrl))}`
+    : null;
+  const downloadUrl = remoteDownloadUrl
+    ? `/api/coverart-ai/output?download=1&url=${encodeURIComponent(normalizeCoverartApiUrl(remoteDownloadUrl))}`
     : null;
 
   return NextResponse.json({
@@ -52,7 +62,9 @@ export async function GET(_request: Request, context: JobRouteContext) {
     queuePosition: payload?.queue_position ?? null,
     elapsedSeconds: payload?.elapsed_seconds ?? null,
     error: payload?.error ?? null,
-    resultUrl,
+    resultUrl: previewUrl,
+    previewUrl,
+    downloadUrl,
     outputPath: payload?.result?.output_path ?? null,
   });
 }

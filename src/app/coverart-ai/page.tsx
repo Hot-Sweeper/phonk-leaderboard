@@ -25,6 +25,8 @@ type JobStatusPayload = {
   elapsedSeconds?: number | null;
   error?: string | null;
   resultUrl?: string | null;
+  previewUrl?: string | null;
+  downloadUrl?: string | null;
 };
 
 type ModelDef = {
@@ -63,6 +65,7 @@ export default function CoverartAiPage() {
   const [resIndex, setResIndex] = useState(2);
   const [status, setStatus] = useState<Status>("idle");
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [maxResolution, setMaxResolution] = useState(1024);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -126,8 +129,11 @@ export default function CoverartAiPage() {
 
         setJobCaption(buildJobCaption(payload));
 
-        if (payload.status === "completed" && payload.resultUrl) {
-          setResultUrl(payload.resultUrl);
+        if (payload.status === "completed" && (payload.previewUrl || payload.resultUrl)) {
+          const preview = payload.previewUrl ?? payload.resultUrl ?? null;
+          const download = payload.downloadUrl ?? payload.previewUrl ?? payload.resultUrl ?? null;
+          setResultUrl(preview);
+          setDownloadUrl(download);
           setStatus("done");
           setJobId(null);
           setJobCaption(null);
@@ -165,6 +171,7 @@ export default function CoverartAiPage() {
     if (!canGenerate) return;
     setStatus("generating");
     setResultUrl(null);
+    setDownloadUrl(null);
     setErrorMessage(null);
     setJobId(null);
     setJobCaption("Submitting job");
@@ -221,7 +228,7 @@ export default function CoverartAiPage() {
             className="aspect-square w-full"
             style={{ maxWidth: "min(100%, calc(100vh - 22rem))" }}
           >
-            <PreviewCanvas status={status} resultUrl={resultUrl} model={model.name} />
+            <PreviewCanvas status={status} resultUrl={resultUrl} downloadUrl={downloadUrl} model={model.name} />
           </div>
         </section>
 
@@ -485,10 +492,12 @@ function ResolutionDropdown({
 function PreviewCanvas({
   status,
   resultUrl,
+  downloadUrl,
   model,
 }: {
   status: Status;
   resultUrl: string | null;
+  downloadUrl: string | null;
   model: string;
 }) {
   const phrases = useMemo(
@@ -585,7 +594,7 @@ function PreviewCanvas({
       {/* Download badge only when done; otherwise status caption */}
       {done ? (
         <a
-          href={resultUrl!}
+          href={downloadUrl ?? resultUrl!}
           download="coverart.png"
           className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.28em] text-white/90 backdrop-blur transition-colors hover:bg-black/70 hover:text-white"
         >

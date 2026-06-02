@@ -4,6 +4,7 @@ import { getCoverartApiBaseUrl } from "@/lib/coverart-api";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const remoteUrl = url.searchParams.get("url");
+  const forceDownload = url.searchParams.get("download") === "1";
 
   if (!remoteUrl) {
     return NextResponse.json({ error: "url is required." }, { status: 400 });
@@ -36,7 +37,7 @@ export async function GET(request: Request) {
   if (contentType) headers.set("Content-Type", contentType);
   if (contentLength) headers.set("Content-Length", contentLength);
   headers.set("Cache-Control", "private, max-age=60, stale-while-revalidate=300");
-  headers.set("Content-Disposition", `inline; filename="${filename}"`);
+  headers.set("Content-Disposition", `${forceDownload ? "attachment" : "inline"}; filename="${filename}"`);
 
   return new NextResponse(response.body, {
     status: response.status,
