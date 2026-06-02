@@ -6,15 +6,8 @@ import {
   getPublicPlanEntitlements,
   valueToNumber,
 } from "@/lib/entitlements";
-import {
-  buildMemphisCoverartParams,
-  isMemphisModelId,
-  normalizeCoverartApiUrl,
-} from "@/lib/coverart-api";
+import { buildMemphisCoverartParams, isMemphisModelId, normalizeCoverartApiUrl } from "@/lib/coverart-api";
 import { entitlementSchemaNotAppliedResponse, isPrismaSchemaNotAppliedError } from "@/lib/prisma-errors";
-
-const JOB_POLL_INTERVAL_MS = 1500;
-const JOB_TIMEOUT_MS = 90000;
 
 type GenerateRequestBody = {
   prompt?: unknown;
@@ -25,16 +18,7 @@ type GenerateRequestBody = {
 type JobSubmissionResponse = {
   job_id?: string;
   status?: string;
-};
-
-type JobDetailResponse = {
-  status?: string;
-  output_url?: string | null;
-  result?: {
-    output_url?: string | null;
-  } | null;
-  error?: string | null;
-  detail?: Array<{ msg?: string }>;
+  queue_position?: number | null;
 };
 
 export async function POST(request: Request) {
@@ -88,22 +72,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const job = await waitForCompletedJob(submitPayload.job_id);
-    const outputUrl = job.result?.output_url ?? job.output_url;
-
-    if (!outputUrl) {
-      return NextResponse.json(
-        { error: "The cover art job completed without an output URL." },
-        { status: 502 }
-      );
-    }
-
-    const normalizedOutputUrl = normalizeCoverartApiUrl(outputUrl);
-
     return NextResponse.json({
       jobId: submitPayload.job_id,
-      resultUrl: `/api/coverart-ai/output?url=${encodeURIComponent(normalizedOutputUrl)}`,
-      remoteUrl: normalizedOutputUrl,
+      status: submitPayload.status ?? "queued",
+      queuePosition: submitPayload.queue_position ?? null,
     });
   } catch (error) {
     if (isPrismaSchemaNotAppliedError(error)) return entitlementSchemaNotAppliedResponse();
@@ -120,40 +92,6 @@ async function getAllowedResolution() {
 
   const entitlements = await getPublicPlanEntitlements("free");
   return valueToNumber(entitlements.features[FEATURE_KEYS.coverartMaxResolution]?.value, 1024);
-}
-
-async function waitForCompletedJob(jobId: string) {
-  const deadline = Date.now() + JOB_TIMEOUT_MS;
-  let lastStatus = "queued";
-
-  while (Date.now() < deadline) {
-    const response = await fetch(normalizeCoverartApiUrl(`/v1/jobs/${jobId}`), {
-      cache: "no-store",
-    });
-    const payload = (await response.json().catch(() => null)) as JobDetailResponse | null;
-
-    if (!response.ok) {
-      throw new Error(apiErrorMessage(payload, "Failed to poll cover art job."));
-    }
-
-    lastStatus = payload?.status ?? lastStatus;
-
-    if (payload?.status === "completed") {
-      return payload;
-    }
-
-    if (payload?.status === "failed" || payload?.status === "cancelled" || payload?.status === "timeout") {
-      throw new Error(apiErrorMessage(payload, "Cover art generation failed."));
-    }
-
-    await delay(JOB_POLL_INTERVAL_MS);
-  }
-
-  throw new Error(`Cover art generation timed out while job was ${lastStatus}.`);
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function apiErrorMessage(payload: unknown, fallback: string) {

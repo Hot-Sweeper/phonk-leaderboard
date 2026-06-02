@@ -11,7 +11,20 @@ type EntitlementsPayload = {
 };
 
 type GeneratePayload = {
+  jobId?: string;
+  status?: string;
+  queuePosition?: number | null;
   resultUrl?: string;
+};
+
+type JobStatusPayload = {
+  status?: string;
+  progress?: number | null;
+  currentStep?: string | null;
+  queuePosition?: number | null;
+  elapsedSeconds?: number | null;
+  error?: string | null;
+  resultUrl?: string | null;
 };
 
 type ModelDef = {
@@ -52,6 +65,8 @@ export default function CoverartAiPage() {
   const [resultUrl, setResultUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [maxResolution, setMaxResolution] = useState(1024);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobCaption, setJobCaption] = useState<string | null>(null);
 
   const model = useMemo(() => MODELS.find((m) => m.id === modelId)!, [modelId]);
   const availableResolutions = useMemo(() => {
@@ -90,6 +105,60 @@ export default function CoverartAiPage() {
     }
   }, [availableResolutions.length, resIndex]);
 
+  useEffect(() => {
+    if (!jobId || status !== "generating") return;
+
+    const currentJobId = jobId;
+    let cancelled = false;
+
+    async function pollJob() {
+      try {
+        const response = await fetch(`/api/coverart-ai/jobs/${encodeURIComponent(currentJobId)}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json().catch(() => ({}))) as JobStatusPayload;
+
+        if (!response.ok) {
+          throw new Error(apiErrorMessage(payload, "Failed to poll cover art job."));
+        }
+
+        if (cancelled) return;
+
+        setJobCaption(buildJobCaption(payload));
+
+        if (payload.status === "completed" && payload.resultUrl) {
+          setResultUrl(payload.resultUrl);
+          setStatus("done");
+          setJobId(null);
+          setJobCaption(null);
+          return;
+        }
+
+        if (payload.status === "failed" || payload.status === "cancelled" || payload.status === "timeout") {
+          throw new Error(payload.error?.trim() || "Cover art generation failed.");
+        }
+
+        window.setTimeout(() => {
+          if (!cancelled) {
+            void pollJob();
+          }
+        }, 1500);
+      } catch (error) {
+        if (cancelled) return;
+        setStatus("idle");
+        setJobId(null);
+        setJobCaption(null);
+        setErrorMessage(error instanceof Error ? error.message : "Failed to poll cover art job.");
+      }
+    }
+
+    void pollJob();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, status]);
+
   const canGenerate = prompt.trim().length > 0 && status !== "generating";
 
   async function generate() {
@@ -97,6 +166,8 @@ export default function CoverartAiPage() {
     setStatus("generating");
     setResultUrl(null);
     setErrorMessage(null);
+    setJobId(null);
+    setJobCaption("Submitting job");
 
     try {
       const response = await fetch("/api/coverart-ai/generate", {
@@ -114,14 +185,16 @@ export default function CoverartAiPage() {
       if (!response.ok) {
         throw new Error(apiErrorMessage(payload, "Failed to generate cover art."));
       }
-      if (!payload.resultUrl) {
-        throw new Error("Cover art service returned no image URL.");
+      if (!payload.jobId) {
+        throw new Error("Cover art service returned no job ID.");
       }
 
-      setResultUrl(payload.resultUrl);
-      setStatus("done");
+      setJobId(payload.jobId);
+      setJobCaption(payload.queuePosition != null ? `Queued · #${payload.queuePosition + 1}` : "Queued");
     } catch (error) {
       setStatus("idle");
+      setJobId(null);
+      setJobCaption(null);
       setErrorMessage(error instanceof Error ? error.message : "Failed to generate cover art.");
     }
   }
@@ -215,7 +288,7 @@ export default function CoverartAiPage() {
 
           {/* Hint row */}
           <div className="mt-2 flex items-center justify-between px-2 text-[10px] font-bold uppercase tracking-[0.22em] text-white/30">
-            <span>Press Enter to generate</span>
+            <span>{status === "generating" ? (jobCaption ?? "Rendering") : "Press Enter to generate"}</span>
             <span className="tabular-nums">
               {model.name} · {resolution}px · max {maxResolution}px
             </span>
@@ -716,4 +789,13 @@ function apiErrorMessage(payload: unknown, fallback: string) {
     return payload.error;
   }
   return fallback;
+}
+
+function buildJobCaption(payload: JobStatusPayload) {
+  if (payload.currentStep?.trim()) return payload.currentStep;
+  if (payload.queuePosition != null) return `Queued · #${payload.queuePosition + 1}`;
+  if (payload.progress != null && Number.isFinite(payload.progress)) {
+    return `Rendering · ${Math.round(payload.progress * 100)}%`;
+  }
+  return "Rendering";
 }
