@@ -6,6 +6,8 @@ import {
   Music, User, X, TrendingUp, ArrowUpRight, ArrowDownRight, Loader2, Play,
 } from "lucide-react";
 import { useDetailPanel } from "@/lib/detail-panel";
+import SongRatingWidget from "@/components/songs/SongRatingWidget";
+import HyvorTalkEmbed from "@/components/comments/HyvorTalkEmbed";
 
 /* ── helpers ── */
 function fmtDur(ms: number): string {
@@ -297,6 +299,15 @@ export default function SongPanel({ id, data }: { id: string; data?: SongData })
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="mt-3">
+          <SongRatingWidget trackId={id} />
+        </div>
+
+        <div className="mx-4 mt-3">
+          <h3 className="mb-2 text-[10px] font-bold uppercase tracking-[0.2em] text-white/30">Discussion</h3>
+          <HyvorTalkEmbed pageId={`track-${id}`} pageTitle={song.name} />
         </div>
 
         <div className="h-6" />

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { activatePromotion } from "@/lib/community";
 import { ensureDefaultEntitlements } from "@/lib/entitlements";
 import { prisma } from "@/lib/prisma";
 
@@ -24,6 +25,8 @@ export async function processPaddleWebhook(payload: PaddleWebhookPayload) {
   if (eventType === "transaction.completed") {
     const handledMarketplace = await processMarketplaceOrderPayment(data);
     if (handledMarketplace) return;
+    const handledPromotion = await processPromotedPostPayment(data);
+    if (handledPromotion) return;
   }
 
   if (!isSubscriptionRelevantEvent(eventType)) return;
@@ -94,6 +97,26 @@ async function processMarketplaceOrderPayment(data: Record<string, unknown>) {
     },
   });
 
+  return true;
+}
+
+async function processPromotedPostPayment(data: Record<string, unknown>) {
+  const customData = getObject(data.custom_data);
+  const orderType = getString(customData.orderType) ?? getString(customData.order_type);
+  if (orderType !== "promoted_post") return false;
+
+  const promotionId = getString(customData.promotionId) ?? getString(customData.promotion_id);
+  if (!promotionId) return false;
+
+  const transactionId = getString(data.id);
+  const promotion = await prisma.promotedPost.findUnique({ where: { id: promotionId } });
+  if (!promotion) return true;
+
+  if (promotion.status === "ACTIVE" && promotion.endsAt && promotion.endsAt.getTime() > Date.now()) {
+    return true;
+  }
+
+  await activatePromotion(promotionId, transactionId);
   return true;
 }
 

@@ -14,6 +14,7 @@ const PUBLIC_PREFIXES = [
   "/samples",
   "/artist/",
   "/community",
+  "/community/post/",
   "/legal",
   "/marketplace/cover-art",
 ];

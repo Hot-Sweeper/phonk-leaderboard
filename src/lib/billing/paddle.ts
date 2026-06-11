@@ -133,8 +133,61 @@ export function marketplacePriceId() {
   return process.env.PADDLE_MARKETPLACE_PRICE_ID?.trim() || null;
 }
 
+export function promotedPostPriceId() {
+  return process.env.PADDLE_PROMOTED_POST_PRICE_ID?.trim() || null;
+}
+
 export function isMarketplaceCheckoutConfigured() {
   return Boolean(process.env.PADDLE_API_KEY && marketplacePriceId());
+}
+
+export function isPromotedPostCheckoutConfigured() {
+  return Boolean(process.env.PADDLE_API_KEY && promotedPostPriceId());
+}
+
+export async function createPaddlePromotedPostCheckout({
+  user,
+  promotionId,
+  priceId,
+  origin,
+  successPath = "/community",
+}: {
+  user: { id: string; email?: string | null; name?: string | null };
+  promotionId: string;
+  priceId: string;
+  origin: string;
+  successPath?: string;
+}) {
+  const response = await paddleRequest<{
+    data?: { checkout?: { url?: string }; checkout_url?: string; id?: string };
+  }>("/transactions", {
+    method: "POST",
+    body: JSON.stringify({
+      items: [{ price_id: priceId, quantity: 1 }],
+      collection_mode: "automatic",
+      customer: user.email
+        ? {
+            email: user.email,
+            name: user.name ?? undefined,
+          }
+        : undefined,
+      custom_data: {
+        userId: user.id,
+        promotionId,
+        orderType: "promoted_post",
+      },
+      checkout: {
+        url: `${origin}${successPath}?checkout=success&promotionId=${encodeURIComponent(promotionId)}`,
+      },
+    }),
+  });
+
+  const checkoutUrl = response.data?.checkout?.url ?? response.data?.checkout_url;
+  if (!checkoutUrl) throw new Error("Paddle did not return a checkout URL.");
+  return {
+    checkoutUrl,
+    transactionId: response.data?.id ?? null,
+  };
 }
 
 export async function createPaddlePortalSession({
