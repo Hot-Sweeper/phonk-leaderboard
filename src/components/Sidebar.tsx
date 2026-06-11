@@ -17,7 +17,6 @@ import {
   ChevronDown,
   ChevronRight,
   PlusCircle,
-  Sparkles,
   CreditCard,
   SlidersHorizontal,
 } from "lucide-react";
@@ -48,7 +47,6 @@ export default function Sidebar() {
     path.startsWith("/hype");
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
-  const isCoverartAi = path.startsWith("/coverart-ai");
   const isBilling = path.startsWith("/billing");
 
   const refreshWatchlist = useCallback(async () => {
@@ -105,12 +103,6 @@ export default function Sidebar() {
       icon: Package,
       label: "Samples",
       active: path.startsWith("/samples"),
-    },
-    {
-      href: "/coverart-ai",
-      icon: Sparkles,
-      label: "Coverart AI",
-      active: isCoverartAi,
     },
     {
       href: "/submit",

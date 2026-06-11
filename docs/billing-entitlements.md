@@ -46,7 +46,6 @@ Server-side enforcement currently uses these feature keys:
 - `artist_submissions_per_month`
 - `watchlist_limit`
 - `sample_pack_uploads`
-- `coverart_max_resolution`
 - `priority_review`
 - `advanced_analytics`
 
