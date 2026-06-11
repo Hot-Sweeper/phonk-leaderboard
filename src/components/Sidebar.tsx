@@ -19,6 +19,9 @@ import {
   PlusCircle,
   CreditCard,
   SlidersHorizontal,
+  MessageCircle,
+  Palette,
+  Inbox,
 } from "lucide-react";
 import { signIn } from "next-auth/react";
 
@@ -48,6 +51,9 @@ export default function Sidebar() {
   const isModeration =
     path === "/moderation" || path === "/review" || path === "/import";
   const isBilling = path.startsWith("/billing");
+  const isCommunity = path.startsWith("/community") || path.startsWith("/u/");
+  const isMarketplace = path.startsWith("/marketplace");
+  const isDemos = path.startsWith("/demos");
 
   const refreshWatchlist = useCallback(async () => {
     if (!session) {
@@ -93,16 +99,34 @@ export default function Sidebar() {
 
   const navItems = [
     {
+      href: "/community",
+      icon: MessageCircle,
+      label: "Community",
+      active: isCommunity,
+    },
+    {
       href: "/rankings",
       icon: Trophy,
       label: "Rankings",
       active: isRankings,
     },
     {
+      href: "/marketplace/cover-art",
+      icon: Palette,
+      label: "Cover Art",
+      active: isMarketplace,
+    },
+    {
       href: "/samples",
       icon: Package,
       label: "Samples",
       active: path.startsWith("/samples"),
+    },
+    {
+      href: "/demos",
+      icon: Inbox,
+      label: "Demos",
+      active: isDemos || path === "/submit",
     },
     {
       href: "/submit",

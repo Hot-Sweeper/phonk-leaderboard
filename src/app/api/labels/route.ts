@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { uniqueLabelSlug } from "@/lib/personas";
 
 /**
  * GET /api/labels — list active labels (public), or all labels (admin)
@@ -9,7 +10,7 @@ export async function GET() {
   const session = await auth();
   const isAdmin = session?.user?.role === "ADMIN";
 
-  const labels = await prisma.submitLabel.findMany({
+  const labels = await prisma.labelProfile.findMany({
     where: isAdmin ? {} : { active: true },
     orderBy: { name: "asc" },
   });
@@ -31,11 +32,13 @@ export async function POST(req: Request) {
   const name = body.name?.trim();
   const email = body.email?.trim();
   if (!name || !email) {
-    return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
+    return NextResponse.json({ error: "Name and email are required." }, { status: 400 });
   }
 
-  const label = await prisma.submitLabel.create({
+  const slug = await uniqueLabelSlug(name);
+  const label = await prisma.labelProfile.create({
     data: {
+      slug,
       name,
       email,
       iconUrl: body.iconUrl?.trim() || null,

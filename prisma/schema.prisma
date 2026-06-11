@@ -60,7 +60,41 @@ model User {
   subscription    UserSubscription?
   featureUsage    FeatureUsage[]
   entitlementOverrides UserEntitlementOverride[]
+  personas        UserPersona[]
+  labelProfile    LabelProfile?    @relation("LabelOwner")
+  labelsAdded     LabelProfile[]   @relation("LabelAddedBy")
+  onboardingCompletedAt DateTime?
   createdAt       DateTime         @default(now())
+}
+
+enum PersonaType {
+  ARTIST
+  LABEL
+  COVER_ARTIST
+  CONSUMER
+}
+
+model UserPersona {
+  id          String       @id @default(cuid())
+  userId      String
+  type        PersonaType
+  slug        String       @unique
+  displayName String
+  bio         String?      @db.Text
+  avatarUrl   String?
+  bannerUrl   String?
+  genres      String[]     @default([])
+  links       Json?
+  verified    Boolean      @default(false)
+  artistId    String?
+  artist      Artist?      @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([userId, type])
+  @@index([type, verified])
+  @@index([displayName])
 }
 
 enum Role {
@@ -229,6 +263,7 @@ model Artist {
   snapshots      ArtistSnapshot[]
   rankSnapshots  RankSnapshot[]
   tracks         Track[]
+  personaLinks   UserPersona[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -486,14 +521,23 @@ model PackWatchlist {
   @@index([packId])
 }
 
-model SubmitLabel {
-  id        String   @id @default(cuid())
-  name      String
-  email     String
-  iconUrl   String?
-  color     String   @default("#c026d3")
-  active    Boolean  @default(true)
-  addedById String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+model LabelProfile {
+  id                  String   @id @default(cuid())
+  slug                String   @unique @default(cuid())
+  name                String
+  email               String
+  iconUrl             String?
+  color               String   @default("#c026d3")
+  active              Boolean  @default(true)
+  verified            Boolean  @default(false)
+  guidelines          String?  @db.Text
+  discordWebhookUrl   String?
+  userId              String?  @unique
+  user                User?    @relation("LabelOwner", fields: [userId], references: [id], onDelete: SetNull)
+  addedById           String
+  addedBy             User     @relation("LabelAddedBy", fields: [addedById], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("SubmitLabel")
 }

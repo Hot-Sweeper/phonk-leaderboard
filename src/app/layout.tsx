@@ -5,6 +5,7 @@ import "./globals.css";
 import Providers from "@/components/Providers";
 import Navbar from "@/components/Navbar";
 import AppShell from "@/components/AppShell";
+import OnboardingGate from "@/components/OnboardingGate";
 import { auth } from "@/lib/auth";
 
 const geistSans = Geist({
@@ -58,7 +59,9 @@ export default async function RootLayout({
         />
         <Providers session={initialSession}>
           <Navbar />
-          <AppShell>{children}</AppShell>
+          <AppShell>
+            <OnboardingGate>{children}</OnboardingGate>
+          </AppShell>
         </Providers>
       </body>
     </html>

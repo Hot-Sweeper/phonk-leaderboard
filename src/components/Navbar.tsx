@@ -2,11 +2,13 @@
 import Link from "next/link";
 import { useSession, signIn, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
-import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send, CreditCard, SlidersHorizontal } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Flame, Trophy, Shield, User, LogOut, LogIn, Settings, Package, Send, CreditCard, SlidersHorizontal, MessageCircle, Palette } from "lucide-react";
 
 export default function Navbar() {
   const { data: session } = useSession();
   const path = usePathname();
+  const [profileHref, setProfileHref] = useState("/onboarding");
 
   const isPrivileged =
     session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
@@ -21,6 +23,18 @@ export default function Navbar() {
   const isRankings = path.startsWith("/rankings") || path === "/leaderboard" || path === "/bubbles" || path === "/songs" || path.startsWith("/hype");
   const isModeration = path === "/moderation" || path === "/review" || path === "/import";
   const isBilling = path.startsWith("/billing");
+  const isCommunity = path.startsWith("/community") || path.startsWith("/u/");
+
+  useEffect(() => {
+    if (!session) return;
+    void fetch("/api/me/personas")
+      .then((res) => res.json())
+      .then((payload: { primarySlug?: string | null; needsOnboarding?: boolean }) => {
+        if (payload.primarySlug) setProfileHref(`/u/${payload.primarySlug}`);
+        else if (payload.needsOnboarding) setProfileHref("/onboarding");
+      })
+      .catch(() => null);
+  }, [session]);
 
   return (
     <nav className="sticky top-0 z-50 border-b border-[var(--muted)] bg-[var(--background)]/80 backdrop-blur-md">
@@ -35,8 +49,14 @@ export default function Navbar() {
 
         {/* Nav links — only shown when sidebar is hidden (below lg) */}
         <div className="hidden sm:flex lg:hidden items-center gap-1">
+          <Link href="/community" className={linkClass("/community", isCommunity)}>
+            <MessageCircle className="w-4 h-4" /> Community
+          </Link>
           <Link href="/rankings" className={linkClass("/rankings", isRankings)}>
             <Trophy className="w-4 h-4" /> Rankings
+          </Link>
+          <Link href="/marketplace/cover-art" className={linkClass("/marketplace/cover-art")}>
+            <Palette className="w-4 h-4" /> Cover Art
           </Link>
           <Link href="/samples" className={linkClass("/samples")}>
             <Package className="w-4 h-4" /> Samples
@@ -70,7 +90,7 @@ export default function Navbar() {
         <div className="flex items-center gap-3">
           {session ? (
             <>
-              <Link href="/review" className="flex items-center gap-2">
+              <Link href={profileHref} className="flex items-center gap-2">
                 {session.user.image ? (
                   <img
                     src={session.user.image}

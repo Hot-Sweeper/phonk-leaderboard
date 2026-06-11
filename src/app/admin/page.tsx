@@ -202,7 +202,16 @@ export default function AdminPage() {
   const [editPackSaving, setEditPackSaving] = useState(false);
 
   // Labels state
-  type LabelItem = { id: string; name: string; email: string; iconUrl: string | null; color: string; active: boolean };
+  type LabelItem = {
+    id: string;
+    name: string;
+    email: string;
+    iconUrl: string | null;
+    color: string;
+    active: boolean;
+    verified: boolean;
+    slug?: string;
+  };
   const [adminLabels, setAdminLabels] = useState<LabelItem[]>([]);
   const [newLabelName, setNewLabelName] = useState("");
   const [newLabelEmail, setNewLabelEmail] = useState("");
@@ -2138,10 +2147,39 @@ export default function AdminPage() {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold truncate">{label.name}</p>
+                    <p className="text-sm font-bold truncate flex items-center gap-2">
+                      {label.name}
+                      {label.verified ? (
+                        <span className="rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[var(--accent)]">
+                          Verified
+                        </span>
+                      ) : null}
+                    </p>
                     <p className="text-xs text-[var(--muted-foreground)] truncate">{label.email}</p>
                   </div>
                   <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={async () => {
+                        const res = await fetch(`/api/labels/${label.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ verified: !label.verified }),
+                        });
+                        if (res.ok) {
+                          setAdminLabels((prev) =>
+                            prev.map((l) => (l.id === label.id ? { ...l, verified: !l.verified } : l))
+                          );
+                        }
+                      }}
+                      className={`px-2 py-1 rounded-lg border text-[10px] font-bold uppercase tracking-wider transition-all ${
+                        label.verified
+                          ? "bg-[var(--accent)]/15 border-[var(--accent)]/30 text-[var(--accent)]"
+                          : "bg-[var(--background)] border-[var(--muted)] text-[var(--muted-foreground)] hover:text-white"
+                      }`}
+                      title={label.verified ? "Revoke verification" : "Verify label"}
+                    >
+                      {label.verified ? "Verified" : "Verify"}
+                    </button>
                     <button
                       onClick={async () => {
                         const res = await fetch(`/api/labels/${label.id}`, {
