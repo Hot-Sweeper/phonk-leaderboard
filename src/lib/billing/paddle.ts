@@ -84,6 +84,59 @@ export async function createPaddleCheckout({
   return checkoutUrl;
 }
 
+export async function createPaddleMarketplaceCheckout({
+  user,
+  orderId,
+  priceId,
+  origin,
+  successPath = "/marketplace/orders",
+}: {
+  user: { id: string; email?: string | null; name?: string | null };
+  orderId: string;
+  priceId: string;
+  origin: string;
+  successPath?: string;
+}) {
+  const response = await paddleRequest<{
+    data?: { checkout?: { url?: string }; checkout_url?: string; id?: string };
+  }>("/transactions", {
+    method: "POST",
+    body: JSON.stringify({
+      items: [{ price_id: priceId, quantity: 1 }],
+      collection_mode: "automatic",
+      customer: user.email
+        ? {
+            email: user.email,
+            name: user.name ?? undefined,
+          }
+        : undefined,
+      custom_data: {
+        userId: user.id,
+        orderId,
+        orderType: "cover_art_order",
+      },
+      checkout: {
+        url: `${origin}${successPath}?checkout=success&orderId=${encodeURIComponent(orderId)}`,
+      },
+    }),
+  });
+
+  const checkoutUrl = response.data?.checkout?.url ?? response.data?.checkout_url;
+  if (!checkoutUrl) throw new Error("Paddle did not return a checkout URL.");
+  return {
+    checkoutUrl,
+    transactionId: response.data?.id ?? null,
+  };
+}
+
+export function marketplacePriceId() {
+  return process.env.PADDLE_MARKETPLACE_PRICE_ID?.trim() || null;
+}
+
+export function isMarketplaceCheckoutConfigured() {
+  return Boolean(process.env.PADDLE_API_KEY && marketplacePriceId());
+}
+
 export async function createPaddlePortalSession({
   customerId,
   subscriptionId,

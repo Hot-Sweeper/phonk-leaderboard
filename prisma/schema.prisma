@@ -63,6 +63,12 @@ model User {
   personas        UserPersona[]
   labelProfile    LabelProfile?    @relation("LabelOwner")
   labelsAdded     LabelProfile[]   @relation("LabelAddedBy")
+  coverArtGigs    CoverArtGig[]    @relation("CoverArtSeller")
+  ordersPurchased CoverArtOrder[]  @relation("CoverArtBuyer")
+  ordersSold      CoverArtOrder[]  @relation("CoverArtSeller")
+  orderMessages   OrderMessage[]
+  reviewsGiven    MarketplaceReview[] @relation("ReviewsGiven")
+  reviewsReceived MarketplaceReview[] @relation("ReviewsReceived")
   onboardingCompletedAt DateTime?
   createdAt       DateTime         @default(now())
 }
@@ -540,4 +546,111 @@ model LabelProfile {
   updatedAt           DateTime @updatedAt
 
   @@map("SubmitLabel")
+}
+
+enum CoverArtOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  IN_PROGRESS
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+model CoverArtGig {
+  id            String            @id @default(cuid())
+  sellerId      String
+  seller        User              @relation("CoverArtSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  title         String
+  description   String            @db.Text
+  tags          String[]          @default([])
+  imageUrls     String[]          @default([])
+  deliveryDays  Int               @default(3)
+  revisions     Int               @default(2)
+  published     Boolean           @default(true)
+  ratingAverage Float?
+  ratingCount   Int               @default(0)
+  orderCount    Int               @default(0)
+  tiers         CoverArtGigTier[]
+  orders        CoverArtOrder[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([published, createdAt])
+  @@index([sellerId])
+}
+
+model CoverArtGigTier {
+  id            String          @id @default(cuid())
+  gigId         String
+  name          String
+  description   String?         @db.Text
+  priceCents    Int
+  currency      String          @default("USD")
+  deliveryDays  Int?
+  revisions     Int?
+  sortOrder     Int             @default(0)
+  paddlePriceId String?
+  gig           CoverArtGig     @relation(fields: [gigId], references: [id], onDelete: Cascade)
+  orders        CoverArtOrder[]
+
+  @@index([gigId, sortOrder])
+}
+
+model CoverArtOrder {
+  id                  String              @id @default(cuid())
+  gigId               String
+  tierId              String
+  buyerId             String
+  sellerId            String
+  status              CoverArtOrderStatus @default(PENDING_PAYMENT)
+  brief               String              @db.Text
+  priceCents          Int
+  currency            String              @default("USD")
+  paddleTransactionId String?             @unique
+  deliveryUrls        String[]            @default([])
+  deliveryNote        String?             @db.Text
+  paidAt              DateTime?
+  deliveredAt         DateTime?
+  completedAt         DateTime?
+  gig                 CoverArtGig         @relation(fields: [gigId], references: [id], onDelete: Cascade)
+  tier                CoverArtGigTier     @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  buyer               User                @relation("CoverArtBuyer", fields: [buyerId], references: [id], onDelete: Cascade)
+  seller              User                @relation("CoverArtSeller", fields: [sellerId], references: [id], onDelete: Cascade)
+  messages            OrderMessage[]
+  review              MarketplaceReview?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([buyerId, status])
+  @@index([sellerId, status])
+  @@index([gigId])
+}
+
+model OrderMessage {
+  id        String        @id @default(cuid())
+  orderId   String
+  senderId  String
+  body      String        @db.Text
+  order     CoverArtOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sender    User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  createdAt DateTime      @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+model MarketplaceReview {
+  id         String        @id @default(cuid())
+  orderId    String        @unique
+  reviewerId String
+  revieweeId String
+  rating     Int
+  comment    String?       @db.Text
+  order      CoverArtOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reviewer   User          @relation("ReviewsGiven", fields: [reviewerId], references: [id], onDelete: Cascade)
+  reviewee   User          @relation("ReviewsReceived", fields: [revieweeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime      @default(now())
+
+  @@index([revieweeId, createdAt])
 }

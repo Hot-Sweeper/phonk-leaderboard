@@ -15,10 +15,14 @@ const PUBLIC_PREFIXES = [
   "/artist/",
   "/community",
   "/legal",
+  "/marketplace/cover-art",
 ];
 
 function isPublicPath(path: string) {
   if (path === "/") return true;
+  if (path.startsWith("/marketplace/cover-art/") && path !== "/marketplace/cover-art/new") {
+    return !path.includes("/new");
+  }
   return PUBLIC_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix));
 }
 

@@ -52,7 +52,9 @@ export default function Sidebar() {
     path === "/moderation" || path === "/review" || path === "/import";
   const isBilling = path.startsWith("/billing");
   const isCommunity = path.startsWith("/community") || path.startsWith("/u/");
-  const isMarketplace = path.startsWith("/marketplace");
+  const isCoverArtMarketplace =
+    path.startsWith("/marketplace/cover-art") || path === "/marketplace";
+  const isMarketplaceOrders = path.startsWith("/marketplace/orders");
   const isDemos = path.startsWith("/demos");
 
   const refreshWatchlist = useCallback(async () => {
@@ -114,8 +116,18 @@ export default function Sidebar() {
       href: "/marketplace/cover-art",
       icon: Palette,
       label: "Cover Art",
-      active: isMarketplace,
+      active: isCoverArtMarketplace,
     },
+    ...(session
+      ? [
+          {
+            href: "/marketplace/orders",
+            icon: Inbox,
+            label: "My Orders",
+            active: isMarketplaceOrders,
+          },
+        ]
+      : []),
     {
       href: "/samples",
       icon: Package,

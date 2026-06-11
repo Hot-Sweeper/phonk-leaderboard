@@ -20,6 +20,12 @@ export async function processPaddleWebhook(payload: PaddleWebhookPayload) {
 
   const eventType = payload.event_type ?? "unknown";
   const data = payload.data ?? {};
+
+  if (eventType === "transaction.completed") {
+    const handledMarketplace = await processMarketplaceOrderPayment(data);
+    if (handledMarketplace) return;
+  }
+
   if (!isSubscriptionRelevantEvent(eventType)) return;
 
   const customData = getObject(data.custom_data);
@@ -63,6 +69,32 @@ export async function processPaddleWebhook(payload: PaddleWebhookPayload) {
       cancelAtPeriodEnd,
     },
   });
+}
+
+async function processMarketplaceOrderPayment(data: Record<string, unknown>) {
+  const customData = getObject(data.custom_data);
+  const orderType = getString(customData.orderType) ?? getString(customData.order_type);
+  if (orderType !== "cover_art_order") return false;
+
+  const orderId = getString(customData.orderId) ?? getString(customData.order_id);
+  if (!orderId) return false;
+
+  const transactionId = getString(data.id);
+  const order = await prisma.coverArtOrder.findUnique({ where: { id: orderId } });
+  if (!order) return true;
+
+  if (order.status !== "PENDING_PAYMENT" && order.status !== "CANCELLED") return true;
+
+  await prisma.coverArtOrder.update({
+    where: { id: orderId },
+    data: {
+      status: "PAID",
+      paddleTransactionId: transactionId,
+      paidAt: new Date(),
+    },
+  });
+
+  return true;
 }
 
 function isSubscriptionRelevantEvent(eventType: string) {
