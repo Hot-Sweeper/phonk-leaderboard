@@ -250,6 +250,10 @@ export default function SubmitPage() {
 
   const [customMessage, setCustomMessage] = useState("");
   const [samplePackUrl, setSamplePackUrl] = useState("");
+  const [previewStartSec, setPreviewStartSec] = useState(0);
+  const [previewDurationSec, setPreviewDurationSec] = useState(45);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
   // Inline-editable overrides
   const [editedTitle, setEditedTitle] = useState<string | null>(null);
@@ -320,6 +324,8 @@ export default function SubmitPage() {
         return;
       }
       setTrack(data);
+      setPreviewStartSec(0);
+      setPreviewDurationSec(Math.min(45, Math.max(15, Math.floor((data.duration || 45000) / 1000))));
     } catch {
       setError("Failed to fetch track");
     } finally {
@@ -336,32 +342,48 @@ export default function SubmitPage() {
     });
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!track || selectedLabels.size === 0) return;
+    if (!session) {
+      setError("Sign in to submit your demo pitch.");
+      return;
+    }
 
-    const selected = labels.filter((l) => selectedLabels.has(l.id));
-    const emails = selected.map((l) => l.email).join(",");
-    const labelNames = selected.map((l) => l.name).join(", ");
+    setSubmitting(true);
+    setError("");
+    setSubmitSuccess(null);
 
-    const artistLine = allArtists.join(", ");
-
-    const subject = encodeURIComponent(
-      `Demo Submission: ${artistLine} - ${displayTitle}`
-    );
-    const body = encodeURIComponent(
-      `Hi ${labelNames},\n\n` +
-        `I'd like to submit my track for your consideration.\n\n` +
-        `Track: ${displayTitle}\n` +
-        `Artist${allArtists.length > 1 ? "s" : ""}: ${artistLine}\n` +
-        `SoundCloud: ${track.permalinkUrl}\n` +
-        (displayGenre ? `Genre: ${displayGenre}\n` : "") +
-        (samplePackUrl ? `Sample Pack: ${samplePackUrl}\n` : "") +
-        (customMessage ? `\n${customMessage}\n` : "") +
-        `\nSent via Phonk Forum (phonk.forum)\n` +
-        `Best regards`
-    );
-
-    window.open(`mailto:${emails}?subject=${subject}&body=${body}`, "_self");
+    try {
+      const response = await fetch("/api/demos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: displayTitle,
+          artists: allArtists,
+          genre: displayGenre || null,
+          releaseType,
+          soundcloudUrl: track.permalinkUrl,
+          artworkUrl: track.artworkUrl,
+          durationMs: track.duration,
+          previewStartMs: previewStartSec * 1000,
+          previewDurationMs: previewDurationSec * 1000,
+          message: customMessage,
+          samplePackUrl: samplePackUrl || null,
+          labelIds: Array.from(selectedLabels),
+          visibility: selectedLabels.size > 0 ? "DIRECT" : "PUBLIC",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setError(payload.error || "Failed to submit demo");
+        return;
+      }
+      setSubmitSuccess(payload.id);
+    } catch {
+      setError("Failed to submit demo");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -571,6 +593,42 @@ export default function SubmitPage() {
           <div className="px-6 py-4 flex items-center gap-4">
             <PlayerBar track={track} />
           </div>
+
+          {/* Preview clip window */}
+          {track.duration > 0 && (
+            <div className="px-6 pb-2 space-y-3">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-[var(--muted-foreground)]">
+                Label preview clip
+              </h2>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Labels only hear this portion in low-friction preview mode (max 60 seconds).
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                  Start ({formatDuration(previewStartSec * 1000)})
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, Math.floor(track.duration / 1000) - 5)}
+                    value={previewStartSec}
+                    onChange={(e) => setPreviewStartSec(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-[var(--muted-foreground)]">
+                  Duration ({previewDurationSec}s)
+                  <input
+                    type="range"
+                    min={15}
+                    max={60}
+                    value={previewDurationSec}
+                    onChange={(e) => setPreviewDurationSec(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
 
           {/* Track row like Spotify tracklist */}
           <div className="px-6">
@@ -800,45 +858,54 @@ export default function SubmitPage() {
               />
             </div>
 
-            {/* Email Preview */}
+            {/* Submission summary */}
             {selectedLabels.size > 0 && (
               <div className="rounded-lg border border-[var(--muted)] bg-[var(--secondary)]/50 p-4 space-y-2">
                 <p className="text-[10px] font-bold text-[var(--muted-foreground)] uppercase tracking-wider">
-                  Email Preview
+                  Pitch summary
                 </p>
                 <div className="text-xs text-[var(--muted-foreground)] space-y-1">
                   <p>
-                    <span className="text-[var(--foreground)] font-bold">
-                      To:{" "}
-                    </span>
+                    <span className="text-[var(--foreground)] font-bold">Labels: </span>
                     {labels
                       .filter((l) => selectedLabels.has(l.id))
-                      .map((l) => l.email)
+                      .map((l) => l.name)
                       .join(", ")}
                   </p>
                   <p>
-                    <span className="text-[var(--foreground)] font-bold">
-                      Subject:{" "}
-                    </span>
-                    Demo Submission: {allArtists.join(", ")} - {displayTitle}
+                    <span className="text-[var(--foreground)] font-bold">Preview clip: </span>
+                    {formatDuration(previewStartSec * 1000)} –{" "}
+                    {formatDuration((previewStartSec + previewDurationSec) * 1000)}
                   </p>
-                </div>
-                <div className="border-t border-[var(--muted)] pt-2 text-xs text-[var(--muted-foreground)] whitespace-pre-line leading-relaxed">
-                  {`Hi ${labels.filter((l) => selectedLabels.has(l.id)).map((l) => l.name).join(", ")},\n\nI'd like to submit my track for your consideration.\n\nTrack: ${displayTitle}\nArtist${allArtists.length > 1 ? "s" : ""}: ${allArtists.join(", ")}\nSoundCloud: ${track.permalinkUrl}${displayGenre ? `\nGenre: ${displayGenre}` : ""}${samplePackUrl ? `\nSample Pack: ${samplePackUrl}` : ""}${customMessage ? `\n\n${customMessage}` : ""}\n\nSent via Phonk Forum (phonk.forum)\nBest regards`}
                 </div>
               </div>
             )}
 
-            {/* Send button */}
-            <button
-              onClick={handleSend}
-              disabled={selectedLabels.size === 0}
-              className="w-full py-3.5 rounded-full bg-[#1DB954] text-black text-sm font-bold hover:bg-[#1ed760] hover:scale-[1.01] disabled:opacity-30 disabled:hover:scale-100 transition-all flex items-center justify-center gap-2 shadow-lg"
-            >
-              <Send className="w-4 h-4" />
-              Send to {selectedLabels.size} label
-              {selectedLabels.size !== 1 ? "s" : ""}
-            </button>
+            {submitSuccess ? (
+              <div className="rounded-xl border border-[#1DB954]/30 bg-[#1DB954]/10 p-4 text-center">
+                <p className="text-sm font-bold text-[#1DB954]">Demo pitch submitted!</p>
+                <a href={`/demos/${submitSuccess}`} className="mt-2 inline-block text-xs text-white underline">
+                  View submission
+                </a>
+              </div>
+            ) : (
+              <button
+                onClick={() => void handleSend()}
+                disabled={selectedLabels.size === 0 || submitting || !session}
+                className="w-full py-3.5 rounded-full bg-[#1DB954] text-black text-sm font-bold hover:bg-[#1ed760] hover:scale-[1.01] disabled:opacity-30 disabled:hover:scale-100 transition-all flex items-center justify-center gap-2 shadow-lg"
+              >
+                {submitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Send className="w-4 h-4" />
+                )}
+                Submit pitch to {selectedLabels.size} label
+                {selectedLabels.size !== 1 ? "s" : ""}
+              </button>
+            )}
+            {!session && selectedLabels.size > 0 && (
+              <p className="text-xs text-center text-[var(--muted-foreground)]">Sign in to submit your demo pitch.</p>
+            )}
           </div>
         </div>
       )}

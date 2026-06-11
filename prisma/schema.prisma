@@ -69,6 +69,8 @@ model User {
   orderMessages   OrderMessage[]
   reviewsGiven    MarketplaceReview[] @relation("ReviewsGiven")
   reviewsReceived MarketplaceReview[] @relation("ReviewsReceived")
+  demoSubmissions DemoSubmission[]
+  demoInterests   DemoInterest[]      @relation("DemoInterestActor")
   onboardingCompletedAt DateTime?
   createdAt       DateTime         @default(now())
 }
@@ -542,6 +544,8 @@ model LabelProfile {
   user                User?    @relation("LabelOwner", fields: [userId], references: [id], onDelete: SetNull)
   addedById           String
   addedBy             User     @relation("LabelAddedBy", fields: [addedById], references: [id])
+  demoTargets         DemoSubmissionTarget[]
+  demoInterests       DemoInterest[]
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -653,4 +657,71 @@ model MarketplaceReview {
   createdAt  DateTime      @default(now())
 
   @@index([revieweeId, createdAt])
+}
+
+enum DemoVisibility {
+  PUBLIC
+  DIRECT
+}
+
+enum DemoInterestStatus {
+  INTERESTED
+  PASSED
+  SHORTLISTED
+}
+
+model DemoSubmission {
+  id                String         @id @default(cuid())
+  artistId          String
+  artist            User           @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  title             String
+  artists           String[]       @default([])
+  genre             String?
+  releaseType       String?        @default("Single")
+  soundcloudUrl     String
+  artworkUrl        String?
+  durationMs        Int            @default(0)
+  previewStartMs    Int            @default(0)
+  previewDurationMs Int            @default(45000)
+  message           String?        @db.Text
+  samplePackUrl     String?
+  tags              String[]       @default([])
+  visibility        DemoVisibility @default(PUBLIC)
+  active            Boolean        @default(true)
+  targets           DemoSubmissionTarget[]
+  interests         DemoInterest[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  @@index([artistId, createdAt])
+  @@index([active, visibility, createdAt])
+}
+
+model DemoSubmissionTarget {
+  id      String         @id @default(cuid())
+  demoId  String
+  labelId String
+  demo    DemoSubmission @relation(fields: [demoId], references: [id], onDelete: Cascade)
+  label   LabelProfile   @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@unique([demoId, labelId])
+  @@index([labelId])
+}
+
+model DemoInterest {
+  id          String             @id @default(cuid())
+  demoId      String
+  labelId     String
+  actorUserId String
+  actor       User               @relation("DemoInterestActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  status      DemoInterestStatus @default(INTERESTED)
+  note        String?            @db.Text
+  demo        DemoSubmission     @relation(fields: [demoId], references: [id], onDelete: Cascade)
+  label       LabelProfile       @relation(fields: [labelId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@unique([demoId, labelId])
+  @@index([labelId, status])
+  @@index([demoId, status])
 }

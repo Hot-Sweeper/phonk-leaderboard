@@ -168,12 +168,12 @@ export default async function UserProfilePage({ params }: PageProps) {
         ) : null}
         {persona.type === "ARTIST" ? (
           <Link
-            href="/submit"
+            href="/demos/my"
             className="rounded-2xl border border-[var(--muted)] bg-[var(--secondary)]/30 p-5 transition hover:border-[var(--accent)]"
           >
-            <h2 className="font-bold text-white">Submit demos</h2>
+            <h2 className="font-bold text-white">My demo pitches</h2>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Pitch tracks to labels from the demo submission flow.
+              See which labels are interested in your tracks.
             </p>
           </Link>
         ) : null}
@@ -184,7 +184,7 @@ export default async function UserProfilePage({ params }: PageProps) {
           >
             <h2 className="font-bold text-white">Demo inbox</h2>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Protected demo previews arrive here in Phase 3.
+              Review protected previews and signal interest.
             </p>
           </Link>
         ) : null}
