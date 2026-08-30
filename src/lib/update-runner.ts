@@ -10,7 +10,7 @@ import {
 import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 import { getTrackAudienceScore, isRecentlyReleased } from "@/lib/legal-rankings";
-import { isViralResearchConfigured, runViralResearchUpdate } from "@/lib/viral-research-agent";
+import { isServerViralResearchConfigured, runViralResearchUpdate } from "@/lib/viral-research-agent";
 
 type ArtistLinkForUpdate = {
   id: string;
@@ -833,7 +833,7 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
   const viralResearchElapsed = lastViralResearch ? Date.now() - new Date(lastViralResearch).getTime() : Infinity;
   const viralResearchIntervalMs = viralResearchInterval * 60 * 60 * 1000;
 
-  if (isViralResearchConfigured() && viralResearchElapsed >= viralResearchIntervalMs * 0.9) {
+  if (isServerViralResearchConfigured() && viralResearchElapsed >= viralResearchIntervalMs * 0.9) {
     console.log("[Scheduler] Viral research is due, starting...");
     try {
       const snapshot = await runViralResearchUpdate("cron");

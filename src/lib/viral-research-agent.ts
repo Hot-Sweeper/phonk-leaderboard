@@ -37,7 +37,7 @@ export type ViralResearchSnapshot = {
   sourceCount: number;
 };
 
-type AgentCandidate = {
+export type AgentCandidate = {
   trackName: string;
   artistName: string;
   artistAliases: string[];
@@ -46,8 +46,10 @@ type AgentCandidate = {
   evidence: ViralEvidence[];
 };
 
-type AgentPayload = {
+export type AgentPayload = {
   candidates: AgentCandidate[];
+  runner?: string;
+  model?: string;
 };
 
 type OpenAIResponse = {
@@ -194,6 +196,63 @@ function validateCandidate(candidate: AgentCandidate, citedUrls: Set<string>, no
   };
 }
 
+function buildValidatedSnapshot(payload: AgentPayload, citedUrls: Set<string>, model: string, now: number) {
+  const rawCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const candidates = rawCandidates
+    .map((candidate) => validateCandidate(candidate, citedUrls, now))
+    .filter((candidate): candidate is ViralCandidate => candidate !== null)
+    .filter((candidate, index, entries) => {
+      const key = `${normalizeName(getCanonicalTrackTitle(candidate.trackName))}|${normalizeName(candidate.artistName)}`;
+      return entries.findIndex((other) => `${normalizeName(getCanonicalTrackTitle(other.trackName))}|${normalizeName(other.artistName)}` === key) === index;
+    })
+    .sort((left, right) => right.score - left.score || Date.parse(right.newestEvidenceAt) - Date.parse(left.newestEvidenceAt));
+
+  const generatedAt = new Date(now).toISOString();
+  return {
+    version: 1,
+    generatedAt,
+    expiresAt: new Date(now + SNAPSHOT_MAX_AGE_MS).toISOString(),
+    model,
+    candidates,
+    rejectedCount: Math.max(0, rawCandidates.length - candidates.length),
+    sourceCount: citedUrls.size,
+  } satisfies ViralResearchSnapshot;
+}
+
+async function persistSnapshot(snapshot: ViralResearchSnapshot, trigger: string, startedAt: number, logId: string, details: Record<string, unknown> = {}) {
+  await prisma.$transaction([
+    prisma.siteSetting.upsert({
+      where: { key: SNAPSHOT_SETTING_KEY },
+      update: { value: JSON.stringify(snapshot) },
+      create: { key: SNAPSHOT_SETTING_KEY, value: JSON.stringify(snapshot) },
+    }),
+    prisma.siteSetting.upsert({
+      where: { key: LAST_UPDATE_SETTING_KEY },
+      update: { value: snapshot.generatedAt },
+      create: { key: LAST_UPDATE_SETTING_KEY, value: snapshot.generatedAt },
+    }),
+    prisma.updateLog.update({
+      where: { id: logId },
+      data: {
+        status: "completed",
+        updatedCount: snapshot.candidates.length,
+        failedCount: snapshot.rejectedCount,
+        durationMs: Date.now() - startedAt,
+        details: JSON.stringify({
+          trigger,
+          model: snapshot.model,
+          accepted: snapshot.candidates.length,
+          rejected: snapshot.rejectedCount,
+          sources: snapshot.sourceCount,
+          ...details,
+        }),
+        completedAt: new Date(),
+      },
+    }),
+  ]);
+  snapshotCache = { snapshot, timestamp: Date.now() };
+}
+
 function buildResearchRequest(model: string) {
   const today = new Date().toISOString().slice(0, 10);
   return {
@@ -285,11 +344,24 @@ async function requestResearch(apiKey: string, model: string) {
   }
 }
 
+export function getViralResearchProvider() {
+  return process.env.VIRAL_RESEARCH_PROVIDER?.trim().toLowerCase() === "ares" ? "ares" : "server";
+}
+
+export function isServerViralResearchConfigured() {
+  return getViralResearchProvider() === "server"
+    && process.env.VIRAL_RESEARCH_ENABLED !== "false"
+    && Boolean(process.env.OPENAI_API_KEY);
+}
+
 export function isViralResearchConfigured() {
-  return process.env.VIRAL_RESEARCH_ENABLED !== "false" && Boolean(process.env.OPENAI_API_KEY);
+  return getViralResearchProvider() === "ares"
+    ? Boolean(process.env.VIRAL_RESEARCH_INGEST_SECRET)
+    : isServerViralResearchConfigured();
 }
 
 export async function runViralResearchUpdate(trigger = "manual") {
+  if (getViralResearchProvider() === "ares") throw new Error("Viral research is assigned to the ARES Codex runner.");
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not configured.");
   if (process.env.VIRAL_RESEARCH_ENABLED === "false") throw new Error("Viral research is disabled.");
@@ -306,52 +378,40 @@ export async function runViralResearchUpdate(trigger = "manual") {
     if (!text) throw new Error("The research agent returned no structured output.");
     const payload = JSON.parse(text) as AgentPayload;
     const citedUrls = collectSearchSourceUrls(response);
-    const now = Date.now();
-    const rawCandidates = Array.isArray(payload.candidates) ? payload.candidates : [];
-    const candidates = rawCandidates
-      .map((candidate) => validateCandidate(candidate, citedUrls, now))
-      .filter((candidate): candidate is ViralCandidate => candidate !== null)
-      .filter((candidate, index, entries) => {
-        const key = `${normalizeName(getCanonicalTrackTitle(candidate.trackName))}|${normalizeName(candidate.artistName)}`;
-        return entries.findIndex((other) => `${normalizeName(getCanonicalTrackTitle(other.trackName))}|${normalizeName(other.artistName)}` === key) === index;
-      })
-      .sort((left, right) => right.score - left.score || Date.parse(right.newestEvidenceAt) - Date.parse(left.newestEvidenceAt));
+    const snapshot = buildValidatedSnapshot(payload, citedUrls, model, Date.now());
+    await persistSnapshot(snapshot, trigger, startedAt, log.id);
+    return snapshot;
+  } catch (error) {
+    await prisma.updateLog.update({
+      where: { id: log.id },
+      data: {
+        status: "failed",
+        failedCount: 1,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+        completedAt: new Date(),
+      },
+    }).catch(() => {});
+    throw error;
+  }
+}
 
-    const generatedAt = new Date(now).toISOString();
-    const snapshot: ViralResearchSnapshot = {
-      version: 1,
-      generatedAt,
-      expiresAt: new Date(now + SNAPSHOT_MAX_AGE_MS).toISOString(),
-      model,
-      candidates,
-      rejectedCount: Math.max(0, rawCandidates.length - candidates.length),
-      sourceCount: citedUrls.size,
-    };
+export async function ingestAresViralResearch(payload: AgentPayload, model: string) {
+  const startedAt = Date.now();
+  const log = await prisma.updateLog.create({
+    data: { trigger: "ares", updateType: "viral-research", status: "running", totalArtists: 0 },
+  });
 
-    await prisma.$transaction([
-      prisma.siteSetting.upsert({
-        where: { key: SNAPSHOT_SETTING_KEY },
-        update: { value: JSON.stringify(snapshot) },
-        create: { key: SNAPSHOT_SETTING_KEY, value: JSON.stringify(snapshot) },
-      }),
-      prisma.siteSetting.upsert({
-        where: { key: LAST_UPDATE_SETTING_KEY },
-        update: { value: generatedAt },
-        create: { key: LAST_UPDATE_SETTING_KEY, value: generatedAt },
-      }),
-      prisma.updateLog.update({
-        where: { id: log.id },
-        data: {
-          status: "completed",
-          updatedCount: candidates.length,
-          failedCount: snapshot.rejectedCount,
-          durationMs: Date.now() - startedAt,
-          details: JSON.stringify({ model, accepted: candidates.length, rejected: snapshot.rejectedCount, sources: citedUrls.size }),
-          completedAt: new Date(),
-        },
-      }),
-    ]);
-    snapshotCache = { snapshot, timestamp: Date.now() };
+  try {
+    const citedUrls = new Set<string>();
+    for (const candidate of Array.isArray(payload.candidates) ? payload.candidates : []) {
+      for (const evidence of Array.isArray(candidate.evidence) ? candidate.evidence : []) {
+        const normalized = normalizeUrl(evidence.url);
+        if (normalized) citedUrls.add(normalized);
+      }
+    }
+    const snapshot = buildValidatedSnapshot(payload, citedUrls, model.slice(0, 100) || "codex-cli", Date.now());
+    await persistSnapshot(snapshot, "ares", startedAt, log.id, { runner: "ARES" });
     return snapshot;
   } catch (error) {
     await prisma.updateLog.update({
@@ -417,4 +477,3 @@ export function resolveViralCandidateForTrack(
       && artistMatches(artists, candidate);
   }) ?? null;
 }
-

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getViralResearchSnapshot, isViralResearchConfigured, runViralResearchUpdate } from "@/lib/viral-research-agent";
+import { getViralResearchProvider, getViralResearchSnapshot, isViralResearchConfigured, runViralResearchUpdate } from "@/lib/viral-research-agent";
 
 async function requireAdmin() {
   const session = await auth();
@@ -12,6 +12,7 @@ export async function GET() {
   const snapshot = await getViralResearchSnapshot();
   return NextResponse.json({
     configured: isViralResearchConfigured(),
+    provider: getViralResearchProvider(),
     snapshot,
   });
 }
@@ -19,7 +20,10 @@ export async function GET() {
 export async function POST() {
   if (!await requireAdmin()) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (!isViralResearchConfigured()) {
-    return NextResponse.json({ error: "OPENAI_API_KEY is not configured or viral research is disabled." }, { status: 409 });
+    return NextResponse.json({ error: "The configured viral research provider is not ready." }, { status: 409 });
+  }
+  if (getViralResearchProvider() === "ares") {
+    return NextResponse.json({ error: "Viral research runs on ARES and cannot be started from Railway." }, { status: 409 });
   }
 
   try {
@@ -29,4 +33,3 @@ export async function POST() {
     return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 502 });
   }
 }
-

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAndRunScheduledUpdate } from "@/lib/update-runner";
-import { isViralResearchConfigured } from "@/lib/viral-research-agent";
+import { isServerViralResearchConfigured } from "@/lib/viral-research-agent";
 
 const SONG_INTERVAL_MIGRATION_KEY = "songUpdateIntervalHoursMigratedTo24";
 
@@ -55,7 +55,7 @@ export async function GET(req: Request) {
   const viralResearchElapsed = map["lastViralResearchUpdate"]
     ? Date.now() - new Date(map["lastViralResearchUpdate"]).getTime()
     : Number.POSITIVE_INFINITY;
-  const viralResearchDue = isViralResearchConfigured() && viralResearchElapsed >= viralResearchIntervalMs * 0.9;
+  const viralResearchDue = isServerViralResearchConfigured() && viralResearchElapsed >= viralResearchIntervalMs * 0.9;
 
   if (statsElapsed < statsIntervalMs * 0.9 && songsElapsed < songsIntervalMs * 0.9 && !viralResearchDue) {
     return NextResponse.json({
@@ -63,7 +63,7 @@ export async function GET(req: Request) {
       reason: "No scheduled updater is due yet.",
       statsNextUpdateIn: `${Math.max(0, Math.round((statsIntervalMs - statsElapsed) / 60000))}min`,
       songsNextUpdateIn: `${Math.max(0, Math.round((songsIntervalMs - songsElapsed) / 60000))}min`,
-      viralResearchNextUpdateIn: isViralResearchConfigured()
+      viralResearchNextUpdateIn: isServerViralResearchConfigured()
         ? `${Math.max(0, Math.round((viralResearchIntervalMs - viralResearchElapsed) / 60000))}min`
         : null,
     });
