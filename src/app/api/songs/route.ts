@@ -893,7 +893,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v9-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const rankedCacheKey = `v10-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 

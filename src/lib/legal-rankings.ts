@@ -294,7 +294,12 @@ export function getHypeLeaderboardPopularityScore(
   track: Pick<ArtistTrackInput, "popularity" | "spotifyPopularity">
 ) {
   const spotifyScore = normalizePopularityForScore(track.spotifyPopularity ?? 0);
-  return Math.round(spotifyScore);
+  const internalScore = normalizePopularityForScore(track.popularity);
+
+  // Spotify removed track popularity from Development Mode responses in 2026.
+  // Keep existing Spotify values authoritative, but allow newly discovered tracks
+  // to participate in hype rankings using the app's internal catalog score.
+  return Math.round(spotifyScore > 0 ? spotifyScore : internalScore);
 }
 
 export function getHypeLeaderboardHypeScore(
@@ -316,6 +321,8 @@ export function getHypeLeaderboardHypeScore(
       if (ageInDays <= 10) return 0.62;
       if (ageInDays <= 21) return 0.28;
       if (ageInDays <= 45) return 0.08;
+      if (ageInDays <= 90) return 0.04;
+      if (ageInDays <= 180) return 0.02;
       return 0;
     }
 
@@ -368,6 +375,9 @@ export function getHypeLeaderboardHypeScore(
     if (period === "day") {
       if (ageInDays <= 10) return 1.25;
       if (ageInDays <= 21) return 0.5;
+      if (ageInDays <= 45) return 0.25;
+      if (ageInDays <= 90) return 0.12;
+      if (ageInDays <= 180) return 0.05;
       return 0;
     }
 

@@ -846,77 +846,73 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
   if (!token) return null;
 
   try {
-    // ── 1. Paginate albums (album + single + compilation + appears_on for full coverage) ──
-    const albumIds: string[] = [];
-    const appearsOnAlbumIds = new Set<string>(); // albums from other artists where this artist features
-    let nextUrl: string | null =
-      `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single,compilation,appears_on&limit=50&market=US`;
-
-    while (nextUrl && albumIds.length < 500) {
-      const albumRes = await fetchSpotifyApi(nextUrl, { headers: { Authorization: `Bearer ${token}` } }, `artist albums for ${spotifyId}`);
-      if (!albumRes.ok) {
-        const text = await albumRes.text().catch(() => "");
-        logSpotifyApiFailure(`artist albums for ${spotifyId}`, albumRes.status, text);
-        return null;
-      }
-      const albumData = await albumRes.json() as { items?: { id: string; album_group?: string }[]; next?: string | null };
-      for (const a of albumData.items ?? []) {
-        albumIds.push(a.id);
-        if (a.album_group === "appears_on") appearsOnAlbumIds.add(a.id);
-      }
-      nextUrl = albumData.next ?? null;
+    // Development Mode removed the batch album endpoint and reduced this
+    // endpoint's maximum page size to 10 in March 2026. The updater runs daily,
+    // so the newest 10 releases are enough to discover additions without
+    // exhausting the app's quota by re-fetching an artist's entire history.
+    const albumRes = await fetchSpotifyApi(
+      `https://api.spotify.com/v1/artists/${spotifyId}/albums?include_groups=album,single,compilation,appears_on&limit=10&market=US`,
+      { headers: { Authorization: `Bearer ${token}` } },
+      `recent artist albums for ${spotifyId}`
+    );
+    if (!albumRes.ok) {
+      const text = await albumRes.text().catch(() => "");
+      logSpotifyApiFailure(`recent artist albums for ${spotifyId}`, albumRes.status, text);
+      return null;
     }
+
+    const albumData = await albumRes.json() as { items?: Array<{ id?: string }> };
+    const albumIds = [
+      ...new Set((albumData.items ?? []).map((album) => album.id).filter((id): id is string => !!id)),
+    ];
 
     if (albumIds.length === 0) {
-      // fall back to top tracks
-      return fetchSpotifyTopTracks(spotifyId);
+      return [];
     }
 
-    // ── 2. Fetch tracks per album (batch albums in groups of 20) ──
+    // Batch album lookup (GET /albums?ids=...) was removed for Development
+    // Mode. Fetch each recent album through the supported single-album route.
     const allTracks: Awaited<ReturnType<typeof fetchSpotifyTopTracks>> = [];
-    // Fetch album details in batches of 20 (Spotify limit)
-    for (let i = 0; i < albumIds.length; i += 20) {
-      const batch = albumIds.slice(i, i + 20);
+    for (const albumId of albumIds) {
       const res = await fetchSpotifyApi(
-        `https://api.spotify.com/v1/albums?ids=${batch.join(",")}&market=US`,
+        `https://api.spotify.com/v1/albums/${albumId}?market=US`,
         { headers: { Authorization: `Bearer ${token}` } },
-        `album batch fetch for ${spotifyId}`
+        `album fetch for ${spotifyId}`
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        logSpotifyApiFailure(`album batch fetch for ${spotifyId}`, res.status, text);
+        logSpotifyApiFailure(`album fetch for ${spotifyId}`, res.status, text);
         continue;
       }
-      const data = await res.json();
-      for (const album of data.albums ?? []) {
-        if (!album) continue;
-        const isAppearsOn = appearsOnAlbumIds.has(album.id);
-        const albumInfo = {
-          name: album.name ?? "",
-          imageUrl: album.images?.[0]?.url ?? null,
-          releaseDate: normalizeSpotifyDate(album.release_date ?? null),
-        };
-        for (const t of album.tracks?.items ?? []) {
-          if (!t) continue;
-          // For appears_on albums, only include tracks where the target artist is actually credited
-          if (isAppearsOn) {
-            const trackArtistIds = (t.artists ?? []).map((a: { id: string }) => a.id);
-            if (!trackArtistIds.includes(spotifyId)) continue;
-          }
-          allTracks!.push({
-            id: t.id,
-            name: t.name,
-            popularity: 0, // tracks endpoint doesn't include popularity; acceptably 0
-            durationMs: t.duration_ms ?? 0,
-            explicit: t.explicit ?? false,
-            previewUrl: t.preview_url ?? null,
-            trackNumber: t.track_number ?? 0,
-            discNumber: t.disc_number ?? 0,
-            spotifyUrl: t.external_urls?.spotify ?? "",
-            album: albumInfo,
-            artists: (t.artists ?? []).map((a: { name: string; id: string }) => ({ name: a.name, id: a.id })),
-          });
-        }
+      const album = await res.json();
+      const albumInfo = {
+        name: album.name ?? "",
+        imageUrl: album.images?.[0]?.url ?? null,
+        releaseDate: normalizeSpotifyDate(album.release_date ?? null),
+      };
+      for (const t of album.tracks?.items ?? []) {
+        if (!t) continue;
+        const trackArtists = (t.artists ?? []).map((artist: { name: string; id: string }) => ({
+          name: artist.name,
+          id: artist.id,
+        }));
+        if (!trackArtists.some((artist: { id: string }) => artist.id === spotifyId)) continue;
+
+        allTracks!.push({
+          id: t.id,
+          name: t.name,
+          // Spotify no longer returns track popularity in Development Mode.
+          // The update runner preserves a stored value when this is zero.
+          popularity: typeof t.popularity === "number" ? t.popularity : 0,
+          durationMs: t.duration_ms ?? 0,
+          explicit: t.explicit ?? false,
+          previewUrl: t.preview_url ?? null,
+          trackNumber: t.track_number ?? 0,
+          discNumber: t.disc_number ?? 0,
+          spotifyUrl: t.external_urls?.spotify ?? "",
+          album: albumInfo,
+          artists: trackArtists,
+        });
       }
     }
 
@@ -924,23 +920,7 @@ export async function fetchSpotifyFullCatalog(spotifyId: string): Promise<{
       return null;
     }
 
-    const popularityByTrackId = await fetchSpotifyTrackPopularityBatch([
-      ...new Set(allTracks.map((track) => track.id).filter(Boolean)),
-    ]);
-
-    if (allTracks.length > 0 && popularityByTrackId.size === 0) {
-      console.error(`[Spotify] Full catalog popularity enrichment failed for ${spotifyId}; preserving stored track signals instead.`);
-      return null;
-    }
-
-    return allTracks.map((track) => {
-      const enriched = popularityByTrackId.get(track.id);
-      return {
-        ...track,
-        popularity: enriched?.popularity ?? 0,
-        previewUrl: track.previewUrl ?? enriched?.previewUrl ?? null,
-      };
-    });
+    return allTracks;
   } catch (err) {
     console.error(`[Spotify] Full catalog error for ${spotifyId}:`, err);
     return null;

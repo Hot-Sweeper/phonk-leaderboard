@@ -26,7 +26,7 @@ type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
 type LeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "day" | "week" | "month";
 type RankingModel = "standard" | "legal";
-const SONG_RANKINGS_CACHE_VERSION = "v14";
+const SONG_RANKINGS_CACHE_VERSION = "v15";
 
 type Track = {
   id: string;

@@ -352,13 +352,15 @@ async function refreshArtistCatalogInternal(
   const touchedTrackIds: string[] = [];
   let trackCount = 0;
   const spotifyTracks = spotifyId ? await fetchSpotifyFullCatalog(spotifyId).catch(() => null) : null;
+  const spotifyCatalogUnavailable = Boolean(spotifyId && spotifyTracks === null);
 
-  if (spotifyId && !spotifyTracks) {
+  if (spotifyCatalogUnavailable) {
     console.warn(`[Catalog] Spotify track catalog unavailable for ${artist.name}; keeping any stored Spotify track signals.`);
   }
 
   if (spotifyTracks && spotifyTracks.length > 0) {
     for (const track of spotifyTracks) {
+      const hasSpotifyPopularity = track.popularity > 0;
       const featured = dedupeNames(
         track.artists.filter((artistEntry) => artistEntry.id !== spotifyId).map((artistEntry) => artistEntry.name)
       );
@@ -379,12 +381,14 @@ async function refreshArtistCatalogInternal(
           albumImageUrl: track.album.imageUrl,
           previewUrl: track.previewUrl,
           durationMs: track.durationMs,
-          popularity: getInternalTrackPopularity(
-            track.popularity,
-            track.album.releaseDate,
-            track.previewUrl
-          ),
-          spotifyPopularity: track.popularity,
+          ...(hasSpotifyPopularity ? {
+            popularity: getInternalTrackPopularity(
+              track.popularity,
+              track.album.releaseDate,
+              track.previewUrl
+            ),
+            spotifyPopularity: track.popularity,
+          } : {}),
           trackNumber: track.trackNumber,
           discNumber: track.discNumber,
           explicit: track.explicit,
@@ -426,6 +430,10 @@ async function refreshArtistCatalogInternal(
   }
 
   await refreshArtistYouTubeSignals(artist.id, artist.name);
+
+  if (spotifyCatalogUnavailable) {
+    throw new Error("Spotify catalog unavailable; stored tracks were preserved.");
+  }
 
   return {
     trackCount,
