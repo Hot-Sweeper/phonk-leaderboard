@@ -10,6 +10,8 @@ Set these on the Railway `phonk-leaderboard` service:
 VIRAL_RESEARCH_PROVIDER=ares
 VIRAL_RESEARCH_INGEST_SECRET=<random 32-byte-or-longer secret>
 VIRAL_RESEARCH_SEED_PLAYLISTS=<comma-separated Spotify playlist URLs>
+LABEL_REFERENCE_PLAYLISTS=<comma-separated Spotify label A&R/reference playlist URLs>
+LABEL_CATALOG_PLAYLISTS=<comma-separated Spotify label catalog/showcase playlist URLs>
 ```
 
 `OPENAI_API_KEY` is not required on Railway in ARES mode.
@@ -36,4 +38,6 @@ Start-ScheduledTask -TaskName PhonkForum-ViralResearch
 
 Each Codex run is ephemeral and read-only. The server rejects malformed payloads, candidates without two recent independent source domains, evidence older than 45 days, and claims that do not establish current TikTok momentum.
 
-Seed playlists are returned to ARES through the authenticated configuration endpoint. They are discovery inputs only and never contribute directly to a viral score. Add future playlists to `VIRAL_RESEARCH_SEED_PLAYLISTS`; no runner reinstall is needed.
+Viral seed playlists are returned to ARES through the authenticated configuration endpoint. They are discovery inputs only and never contribute directly to a viral score. Add future trending playlists to `VIRAL_RESEARCH_SEED_PLAYLISTS`; no runner reinstall is needed.
+
+Keep label taste separate from viral discovery. Explicit A&R or "reference" playlists belong in `LABEL_REFERENCE_PLAYLISTS`; label discographies and showcases belong in `LABEL_CATALOG_PLAYLISTS`. The endpoint exposes both categories to trusted tooling, but the viral-research runner deliberately does not inject them into its prompt.

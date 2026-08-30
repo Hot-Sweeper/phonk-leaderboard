@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CANDIDATES = 40;
-const MAX_SEED_PLAYLISTS = 50;
+const MAX_PLAYLISTS_PER_CATEGORY = 50;
 
-function getSeedPlaylists() {
-  const values = (process.env.VIRAL_RESEARCH_SEED_PLAYLISTS ?? "")
+function getSpotifyPlaylists(environmentVariable: string) {
+  const values = (process.env[environmentVariable] ?? "")
     .split(/[\s,;]+/)
     .map((value) => value.trim())
     .filter(Boolean);
@@ -30,7 +30,7 @@ function getSeedPlaylists() {
     } catch {
       continue;
     }
-    if (playlists.length >= MAX_SEED_PLAYLISTS) break;
+    if (playlists.length >= MAX_PLAYLISTS_PER_CATEGORY) break;
   }
 
   return playlists;
@@ -87,7 +87,9 @@ export async function GET(request: Request) {
     ready: getViralResearchProvider() === "ares",
     provider: getViralResearchProvider(),
     lastAcceptedAt: snapshot?.generatedAt ?? null,
-    seedPlaylists: getSeedPlaylists(),
+    seedPlaylists: getSpotifyPlaylists("VIRAL_RESEARCH_SEED_PLAYLISTS"),
+    labelReferencePlaylists: getSpotifyPlaylists("LABEL_REFERENCE_PLAYLISTS"),
+    labelCatalogPlaylists: getSpotifyPlaylists("LABEL_CATALOG_PLAYLISTS"),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
