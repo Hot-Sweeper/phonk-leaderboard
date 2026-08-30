@@ -11,6 +11,30 @@ export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CANDIDATES = 40;
+const MAX_SEED_PLAYLISTS = 50;
+
+function getSeedPlaylists() {
+  const values = (process.env.VIRAL_RESEARCH_SEED_PLAYLISTS ?? "")
+    .split(/[\s,;]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const playlists: string[] = [];
+
+  for (const value of values) {
+    try {
+      const url = new URL(value);
+      const match = url.pathname.match(/^\/playlist\/([A-Za-z0-9]+)\/?$/);
+      if (url.protocol !== "https:" || url.hostname !== "open.spotify.com" || !match) continue;
+      const canonical = `https://open.spotify.com/playlist/${match[1]}`;
+      if (!playlists.includes(canonical)) playlists.push(canonical);
+    } catch {
+      continue;
+    }
+    if (playlists.length >= MAX_SEED_PLAYLISTS) break;
+  }
+
+  return playlists;
+}
 
 function isAuthorized(request: Request) {
   const secret = process.env.VIRAL_RESEARCH_INGEST_SECRET;
@@ -63,6 +87,7 @@ export async function GET(request: Request) {
     ready: getViralResearchProvider() === "ares",
     provider: getViralResearchProvider(),
     lastAcceptedAt: snapshot?.generatedAt ?? null,
+    seedPlaylists: getSeedPlaylists(),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 

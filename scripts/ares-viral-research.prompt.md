@@ -10,6 +10,7 @@ Hard requirements:
 - Prefer at least one direct TikTok or TikTok Creative Center source.
 - Use the source's real canonical URL and real publication timestamp. Never invent a URL, date, song, artist, or claim.
 - Do not use release recency, Spotify popularity, YouTube views, playlist inclusion, or undated posts as proof of current TikTok virality.
+- Treat any supplied Spotify playlists only as discovery leads. Inspect their tracks, then independently verify exact-song TikTok momentum elsewhere.
 - Do not copy, estimate, or combine play/view/use counts into a cross-platform score.
 - If a song cannot meet every requirement, omit it. An empty candidate array is correct when the evidence is insufficient.
 

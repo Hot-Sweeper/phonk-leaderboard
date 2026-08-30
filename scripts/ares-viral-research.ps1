@@ -31,9 +31,16 @@ if (-not (Test-Path -LiteralPath $schemaPath) -or -not (Test-Path -LiteralPath $
 
 $secret = (Get-Content -LiteralPath $SecretPath -Raw).Trim()
 if (-not $secret) { throw "The ingestion secret is empty." }
+$headers = @{ Authorization = "Bearer $secret" }
 
 $resultPath = Join-Path $WorkDirectory ("result-{0}.json" -f [guid]::NewGuid().ToString("N"))
 $prompt = Get-Content -LiteralPath $promptPath -Raw
+$configuration = Invoke-RestMethod -Uri $Endpoint -Method Get -Headers $headers -TimeoutSec 30
+$seedPlaylists = @($configuration.seedPlaylists | Where-Object { $_ })
+if ($seedPlaylists.Count -gt 0) {
+  $playlistBlock = ($seedPlaylists | ForEach-Object { "- $_" }) -join "`n"
+  $prompt += "`n`nDiscovery seed playlists supplied by the editor:`n$playlistBlock`nInspect these for candidate tracks, but never treat playlist inclusion as evidence of virality. Every accepted candidate must still satisfy all independent-source requirements above."
+}
 $arguments = @(
   "exec",
   "--ephemeral",
@@ -52,7 +59,7 @@ if ($featureList -match "standalone_web_search") {
 $arguments += "-"
 
 try {
-  Write-RunnerLog "Starting Codex viral research."
+  Write-RunnerLog "Starting Codex viral research with $($seedPlaylists.Count) seed playlists."
   $prompt | & $codex.Source @arguments | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "codex exec exited with code $LASTEXITCODE." }
   if (-not (Test-Path -LiteralPath $resultPath)) { throw "Codex did not write a result file." }
@@ -67,7 +74,6 @@ try {
     candidates = @($result.candidates)
   } | ConvertTo-Json -Depth 12 -Compress
 
-  $headers = @{ Authorization = "Bearer $secret" }
   $response = Invoke-RestMethod -Uri $Endpoint -Method Post -Headers $headers -ContentType "application/json" -Body $payload -TimeoutSec 120
   Write-RunnerLog "Accepted=$($response.accepted) Rejected=$($response.rejected) Sources=$($response.sourceCount)."
 } catch {

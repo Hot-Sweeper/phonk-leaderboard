@@ -9,6 +9,7 @@ Set these on the Railway `phonk-leaderboard` service:
 ```text
 VIRAL_RESEARCH_PROVIDER=ares
 VIRAL_RESEARCH_INGEST_SECRET=<random 32-byte-or-longer secret>
+VIRAL_RESEARCH_SEED_PLAYLISTS=<comma-separated Spotify playlist URLs>
 ```
 
 `OPENAI_API_KEY` is not required on Railway in ARES mode.
@@ -34,3 +35,5 @@ Start-ScheduledTask -TaskName PhonkForum-ViralResearch
 ```
 
 Each Codex run is ephemeral and read-only. The server rejects malformed payloads, candidates without two recent independent source domains, evidence older than 45 days, and claims that do not establish current TikTok momentum.
+
+Seed playlists are returned to ARES through the authenticated configuration endpoint. They are discovery inputs only and never contribute directly to a viral score. Add future playlists to `VIRAL_RESEARCH_SEED_PLAYLISTS`; no runner reinstall is needed.
