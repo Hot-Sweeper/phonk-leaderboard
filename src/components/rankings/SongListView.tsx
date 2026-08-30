@@ -26,7 +26,7 @@ type Contributor = { id: string; name: string; imageUrl: string | null };
 type DisplayArtist = { key: string; name: string; href: string; external: boolean };
 type LeaderboardMode = "popularity" | "spotify" | "youtube" | "hype-pop" | "day" | "week" | "month";
 type RankingModel = "standard" | "legal";
-const SONG_RANKINGS_CACHE_VERSION = "v16";
+const SONG_RANKINGS_CACHE_VERSION = "v17";
 
 type Track = {
   id: string;
@@ -45,6 +45,14 @@ type Track = {
   gain: number | null;
   audienceScore?: number;
   isEmergingHype?: boolean;
+  viralResearch?: {
+    score: number;
+    confidence: number;
+    rationale: string;
+    evidence: Array<{ url: string; title: string; publishedAt: string; claim: string }>;
+    newestEvidenceAt: string;
+    generatedAt: string | null;
+  } | null;
   rank: number;
   versions: string[];
   primaryVersion: string;
@@ -161,6 +169,7 @@ function isLegalHypeMode(mode: LeaderboardMode, rankingModel: RankingModel) {
 }
 
 function getLegalHypeSubtext(track: Track) {
+  if (track.viralResearch) return `${track.viralResearch.evidence.length} current sources`;
   if (track.isEmergingHype) return "Early breakout";
   if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Waiting for history";
   const delta = formatTrendDelta(track.trendDelta);
@@ -171,10 +180,10 @@ function getLegalHypeSubtext(track: Track) {
 function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
     if (isLegalPopularityMode(mode, rankingModel)) return "Spotify";
-    if (mode === "day") return "24H Hype";
-    if (mode === "week") return "7D Hype";
-    if (mode === "month") return "30D Hype";
-    return "Hype";
+    if (mode === "day") return "24H Viral";
+    if (mode === "week") return "7D Viral";
+    if (mode === "month") return "30D Viral";
+    return "Viral";
   }
   switch (mode) {
     case "day": return valueMode === "relative" ? "24H %" : "24H Hype";
@@ -187,6 +196,7 @@ function getMetricHeaderLabel(mode: LeaderboardMode, valueMode: "absolute" | "re
 function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
     if (isLegalPopularityMode(mode, rankingModel)) return "Chart";
+    if (track.viralResearch) return "AI verified";
     if (track.isEmergingHype) return "Breakout";
     if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building";
     return "Trending";
@@ -200,6 +210,7 @@ function getMetricText(track: Track, mode: LeaderboardMode, valueMode: "absolute
 function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
     if (isLegalPopularityMode(mode, rankingModel)) return "Spotify only";
+    if (track.viralResearch) return `${track.viralResearch.evidence.length} cited sources`;
     if (track.isEmergingHype) return "Early breakout";
     if (!track.hasTrendData) return hasNewBadge(track) ? "NEW" : "Building history";
     return "Internal momentum order";
@@ -216,6 +227,7 @@ function getMetricSubtext(track: Track, mode: LeaderboardMode, valueMode: "absol
 function getMetricTextClass(track: Track, mode: LeaderboardMode, valueMode: "absolute" | "relative", rankingModel: RankingModel) {
   if (rankingModel === "legal") {
     if (isLegalPopularityMode(mode, rankingModel)) return "text-emerald-300";
+    if (track.viralResearch) return "text-fuchsia-300";
     if (track.isEmergingHype) return "text-fuchsia-300";
     if (!track.hasTrendData) return "text-[var(--muted-foreground)]";
     return "text-cyan-300";
@@ -413,6 +425,15 @@ function PodiumTrackCard({ track, rank, isPlaying, onTogglePreview, showOriginal
          {badges.length > 0 && (
            <div className="mb-2 flex max-w-[18rem] flex-wrap items-center justify-center gap-1.5">
              {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+           </div>
+         )}
+         {track.viralResearch && (
+           <div className="mb-2 flex items-center justify-center gap-2 text-[9px] font-bold uppercase tracking-wide text-fuchsia-300/80">
+             {track.viralResearch.evidence.slice(0, 2).map((source, index) => (
+               <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="hover:text-fuchsia-200" title={source.claim}>
+                 Source {index + 1}
+               </a>
+             ))}
            </div>
          )}
          {versionLabel && <span className="text-[8px] md:text-[9px] uppercase font-bold px-1.5 py-0.5 bg-white/10 border border-white/20 rounded text-white/80 mb-3">{versionLabel}</span>}
@@ -866,7 +887,11 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
         <div className="text-center py-20">
           <Music className="w-12 h-12 text-[var(--muted-foreground)] mx-auto mb-3 opacity-40" />
           <p className="text-[var(--muted-foreground)] text-sm">
-            {debouncedSearch ? "No songs found matching your search." : "No songs tracked yet."}
+            {debouncedSearch
+              ? "No songs found matching your search."
+              : isLegalHypeMode(mode, rankingModel)
+                ? "No catalog songs have enough current TikTok evidence for this period."
+                : "No songs tracked yet."}
           </p>
         </div>
       )}
@@ -940,6 +965,15 @@ export default function SongListView({ mode, search, collapseVersions, sortOrder
                     {badges.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {badges.map((badge) => <RankingBadgeChip key={badge.kind} badge={badge} />)}
+                      </div>
+                    )}
+                    {track.viralResearch && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[9px] font-bold uppercase tracking-wide text-fuchsia-300/75">
+                        {track.viralResearch.evidence.slice(0, 2).map((source, index) => (
+                          <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" className="hover:text-fuchsia-200" title={source.claim}>
+                            Source {index + 1}
+                          </a>
+                        ))}
                       </div>
                     )}
                     <div className="lg:hidden text-[11px] text-[var(--muted-foreground)] opacity-60 truncate mt-1">

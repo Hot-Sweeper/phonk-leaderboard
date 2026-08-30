@@ -10,6 +10,7 @@ import {
 import { recordSnapshot, recordRankSnapshots, recordTrackSnapshots } from "@/lib/snapshots";
 import { dedupeArtistTracks, dedupeNames } from "@/lib/track-dedupe";
 import { getTrackAudienceScore, isRecentlyReleased } from "@/lib/legal-rankings";
+import { isViralResearchConfigured, runViralResearchUpdate } from "@/lib/viral-research-agent";
 
 type ArtistLinkForUpdate = {
   id: string;
@@ -822,6 +823,24 @@ export async function checkAndRunScheduledUpdate(): Promise<boolean> {
         update: { value: new Date().toISOString() },
         create: { key: "lastSongUpdate", value: new Date().toISOString() },
       }).catch(() => {});
+    }
+  }
+
+  // Research current TikTok virality separately from restricted platform metrics.
+  // The worker only activates when an OpenAI API key is explicitly configured.
+  const viralResearchInterval = Math.max(1, parseInt(map["viralResearchIntervalHours"] ?? "6", 10));
+  const lastViralResearch = map["lastViralResearchUpdate"];
+  const viralResearchElapsed = lastViralResearch ? Date.now() - new Date(lastViralResearch).getTime() : Infinity;
+  const viralResearchIntervalMs = viralResearchInterval * 60 * 60 * 1000;
+
+  if (isViralResearchConfigured() && viralResearchElapsed >= viralResearchIntervalMs * 0.9) {
+    console.log("[Scheduler] Viral research is due, starting...");
+    try {
+      const snapshot = await runViralResearchUpdate("cron");
+      console.log(`[Scheduler] Viral research complete: ${snapshot.candidates.length} verified candidates from ${snapshot.sourceCount} cited sources.`);
+      didRun = true;
+    } catch (err) {
+      console.error("[Scheduler] Viral research failed:", err);
     }
   }
 

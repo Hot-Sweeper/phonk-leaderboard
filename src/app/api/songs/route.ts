@@ -19,6 +19,7 @@ import {
   getTrackSignalScore,
   TRACK_BREAKOUT_FIRST_SEEN_MAX_DAYS,
 } from "@/lib/legal-rankings";
+import { getViralResearchSnapshot, resolveViralCandidateForTrack } from "@/lib/viral-research-agent";
 
 const TREND_PERIODS = {
   day: 24 * 60 * 60 * 1000,
@@ -907,7 +908,9 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v11-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const viralResearchSnapshot = mode === "hype-trend" ? await getViralResearchSnapshot() : null;
+  const viralResearchRevision = viralResearchSnapshot?.generatedAt ?? "none";
+  const rankedCacheKey = `v12-viral-research:${viralResearchRevision}:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -969,6 +972,9 @@ export async function GET(req: Request) {
                 OR: [
                   { releaseDate: { gte: hypeTrendReleaseCutoff } },
                   { spotifyPopularity: { gte: 70 } },
+                  ...(viralResearchSnapshot?.candidates ?? []).map((candidate) => ({
+                    name: { contains: getCanonicalTrackTitle(candidate.trackName), mode: "insensitive" as const },
+                  })),
                 ],
               }
             : rankingModel === "legal" && !legalPopularityLikeMode
@@ -1105,6 +1111,9 @@ export async function GET(req: Request) {
             : shouldUseEmergingFallback
             ? Math.max(emergingHypeScore, measuredHypeScore)
             : measuredHypeScore;
+          const viralCandidate = mode === "hype-trend"
+            ? resolveViralCandidateForTrack(track, viralResearchSnapshot, hypeLeaderboardPeriod)
+            : null;
 
           return {
             ...track,
@@ -1115,12 +1124,34 @@ export async function GET(req: Request) {
             trendPercent,
             hasTrendData: hasUsableTrendData,
             isEmergingHype: mode === "hype-trend" ? trendPercent >= 20 : shouldUseEmergingFallback,
+            viralResearch: viralCandidate ? {
+              score: viralCandidate.score,
+              confidence: viralCandidate.confidence,
+              rationale: viralCandidate.rationale,
+              evidence: viralCandidate.evidence,
+              newestEvidenceAt: viralCandidate.newestEvidenceAt,
+              generatedAt: viralResearchSnapshot?.generatedAt ?? null,
+            } : null,
           };
         });
 
+        // A fresh research snapshot is authoritative, including an empty one. Falling
+        // back here would put stale popularity results back under a "viral" label.
+        const hasAuthoritativeViralResearch = mode === "hype-trend" && viralResearchSnapshot !== null;
+        const scoredMetricTracks = hasAuthoritativeViralResearch
+          ? legalMetricTracks.map((track) => ({
+              ...track,
+              metricValue: track.viralResearch?.score ?? 0,
+              trendDelta: 0,
+              trendPercent: 0,
+              hasTrendData: track.viralResearch !== null,
+              isEmergingHype: false,
+            }))
+          : legalMetricTracks;
+
         rankedTracks = collapseVersions
-          ? collapseFeedTrackVersions(legalMetricTracks, chooseTrackByMetric)
-          : collapseFeedTracks(legalMetricTracks, chooseTrackByMetric);
+          ? collapseFeedTrackVersions(scoredMetricTracks, chooseTrackByMetric)
+          : collapseFeedTracks(scoredMetricTracks, chooseTrackByMetric);
 
         rankedTracks.sort((left, right) => right.track.metricValue - left.track.metricValue || right.track.trendDelta - left.track.trendDelta || right.track.popularity - left.track.popularity);
         if (mode === "hype-trend") {
@@ -1264,7 +1295,13 @@ export async function GET(req: Request) {
     });
 
     return NextResponse.json(
-      { tracks: enrichedTracks, totalCount, mode: legalHypePopularityMode ? "hype-pop" : mode === "hype-trend" ? "hype-trend" : legalPopularityMode ? "popularity" : "hype" },
+      {
+        tracks: enrichedTracks,
+        totalCount,
+        mode: legalHypePopularityMode ? "hype-pop" : mode === "hype-trend" ? "hype-trend" : legalPopularityMode ? "popularity" : "hype",
+        rankingSource: mode === "hype-trend" && viralResearchSnapshot ? "viral-research" : "api-fallback",
+        viralResearchGeneratedAt: mode === "hype-trend" ? viralResearchSnapshot?.generatedAt ?? null : null,
+      },
       {
         headers: {
           "Cache-Control": "public, max-age=30, stale-while-revalidate=120",
