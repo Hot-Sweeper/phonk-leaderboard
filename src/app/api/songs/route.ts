@@ -143,6 +143,20 @@ function hasReliableTrendBaseline(trackCreatedAt: Date | string, baselineCreated
   return baselineCreatedMs - trackCreatedMs >= MIN_BASELINE_DISTANCE_MS[mode];
 }
 
+function getPositiveExternalTrendPercent(
+  current: { spotifyPopularity: number; youtubeViews: number },
+  previous: { spotifyPopularity: number; youtubeViews: number }
+) {
+  const spotifyGrowth = current.spotifyPopularity > previous.spotifyPopularity
+    ? ((current.spotifyPopularity - previous.spotifyPopularity) / Math.max(previous.spotifyPopularity, 1)) * 100
+    : 0;
+  const youtubeGrowth = current.youtubeViews > previous.youtubeViews
+    ? ((current.youtubeViews - previous.youtubeViews) / Math.max(previous.youtubeViews, 1)) * 100
+    : 0;
+
+  return Math.round(Math.max(spotifyGrowth, youtubeGrowth) * 100) / 100;
+}
+
 function chooseTrackByMetric<T extends {
   metricValue: number;
   trendDelta: number;
@@ -893,7 +907,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const rankedCacheKey = `v10-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
+  const rankedCacheKey = `v11-raw-signals:${rankingModel}:${mode}:${hypeLeaderboardPeriod}:${collapseVersions}:${sortOrder}:${valueMode}`;
   const now = Date.now();
   const cachedRanked = rankedTracksCache.get(rankedCacheKey);
 
@@ -1054,11 +1068,11 @@ export async function GET(req: Request) {
           const trendDelta = hasUsableTrendData
             ? Math.round((currentSignalScore - previousSignalScore) * 100) / 100
             : 0;
-          const trendPercent = hasUsableTrendData
-            ? Math.round((((currentSignalScore - previousSignalScore) / previousSignalScore) * 100) * 100) / 100
+          const trendPercent = hasUsableTrendData && oldSnapshot
+            ? getPositiveExternalTrendPercent(track, oldSnapshot)
             : 0;
           const audienceScore = getTrackAudienceScore(track);
-          const hypeLeaderboardScore = mode === "hype-trend"
+          const hypeLeaderboardScore = mode === "hype-trend" && trendPercent > 0
             ? getHypeLeaderboardHypeScore({ ...track, releaseDate: scoringReleaseDate }, trendPercent, hypeLeaderboardPeriod)
             : 0;
           const emergingHypeScore = mode === "hype-trend" ? 0 : getEmergingTrackHypeScore({
